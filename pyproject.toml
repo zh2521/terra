@@ -3,23 +3,25 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [project]
-name = "cookiecutter-scverse-instance"
+name = "nichejepa"
 version = "0.0.1"
-description = "An example repo generated from the `cookiecutter-scverse` template. Feel free to look around this repo and check out the docs to find out if the template works for you!"
+description = "NicheJEPA"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "scverse community"},
+    {name = "sebastian birk"},
 ]
 maintainers = [
-    {name = "scverse community", email = "core-team@scverse.org"},
+    {name = "sebastian birk", email = "sebastian.birk@helmholtz-munich.de"},
 ]
-urls.Documentation = "https://cookiecutter-scverse-instance.readthedocs.io/"
-urls.Source = "https://github.com/scverse/cookiecutter-scverse-instance"
-urls.Home-page = "https://github.com/scverse/cookiecutter-scverse-instance"
+urls.Documentation = "https://niche-jepa.readthedocs.io/"
+urls.Source = "https://github.com/Lotfollahi-lab/niche-jepa"
+urls.Home-page = "https://github.com/Lotfollahi-lab/niche-jepa"
 dependencies = [
     "anndata",
+    "squidpy",
+    "datasets",
     # for debug logging (referenced from the issue template)
     "session-info",
 ]
@@ -49,7 +51,7 @@ test = [
 ]
 
 [tool.coverage.run]
-source = ["cookiecutter_scverse_instance"]
+source = ["niche-jepa"]
 omit = [
     "**/test_*.py",
 ]
