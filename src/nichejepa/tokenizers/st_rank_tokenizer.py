@@ -67,6 +67,59 @@ NICHE_GENE_MEDIAN_FILE = Path(__file__).parent.parent.parent.parent / "niche_gen
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
 
+def process_gene_tokens(
+    gene_tokens: np.array,
+    length: int,
+    token_dict: dict,
+    special_tokens: Optional[list],
+    special_tokens_idx: Optional[list],
+    ):
+    """
+    Add pad tokens or truncate gene token vector based on length, and add special tokens if defined.
+
+    Parameters
+    ----------
+    gene_tokens:
+       1D vector containing (ranked) gene tokens.
+    length:
+        Length to which to pad or truncate the gene token vector to.
+    token_dict:
+        Token dictionary.
+    special_tokens:
+        List of special tokens to be added to the gene token vector.
+    special_tokens_idx:
+        List with indices where special tokens are added to the gene token vector.
+
+    Returns
+    ----------
+    processed_gene_tokens:
+        1D vector containing padded or truncated (ranked) gene tokens, including special tokens if defined.       
+        
+    """
+    if special_tokens:
+        # Leave space for special tokens
+        processed_gene_tokens = gene_tokens[:(length-len(special_tokens))]
+
+        # Add special tokens
+        for special_token, special_token_idx in zip(special_tokens, special_tokens_idx):
+            print(token_dict.get(special_token))
+            processed_gene_tokens = np.insert(
+                processed_gene_tokens, special_token_idx, token_dict.get(special_token)
+                )
+    else:
+        processed_gene_tokens = gene_tokens
+
+    pad_size = int(length - processed_gene_tokens.size)
+    if pad_size < 0:
+        # Truncate
+        processed_gene_tokens = processed_gene_tokens[:length]
+    else:
+        # Add pad tokens
+        processed_gene_tokens = np.pad(
+            processed_gene_tokens, (0, pad_size), 'constant', constant_values=token_dict.get("<pad>"))
+    return processed_gene_tokens
+    
+
 def rank_gene_tokens(
     gene_scores: np.array,
     gene_tokens: np.array
@@ -93,14 +146,6 @@ def rank_gene_tokens(
     return ranked_gene_tokens
 
 
-def add_pad_tokens(arr, length, pad_with):
-    # Calculate the number of items needed to reach the desired length
-    pad_size = int(max(0, length - arr.size))
-    # Use numpy.pad to extend the array
-    padded_array = np.pad(arr, (0, pad_size), 'constant', constant_values=pad_with)
-    return padded_array
-
-
 def tokenize_cell(gene_vector, gene_tokens):
     """
     ADAPT
@@ -120,10 +165,13 @@ class STRankTokenizer:
         nproc: int = 1,
         chunk_size: int = 512,
         model_input_size: int = 2048,
-        special_token: bool = False,
         cell_gene_median_file: Path | str = CELL_GENE_MEDIAN_FILE,
         niche_gene_median_file: Path | str = NICHE_GENE_MEDIAN_FILE,
         token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
+        cell_special_tokens: Optional[list[str]] = None, # = ["<cls>"],
+        cell_special_tokens_idx: Optional[list[int]] = None, # = [0],
+        niche_special_tokens: Optional[list[str]] = None, # = ["<sep>"],
+        niche_special_tokens_idx: Optional[list[int]] = None, # = [2048],
         ):
         """
         Initialize spatial transcriptomics rank tokenizer.
@@ -139,8 +187,6 @@ class STRankTokenizer:
             Chunk size for anndata tokenizer.
         model_input_size:
             Max input size of the model to truncate input to.
-        special_token:
-            If 'True', adds CLS token before and SEP token after rank value encoding.
         cell_gene_median_file:
             Path to pickle file containing dictionary of non-zero median gene expression values of
             cells across STcorpus.
@@ -150,12 +196,23 @@ class STRankTokenizer:
         token_dictionary_file:
             Path to pickle file containing token dictionary (Tokens are Ensembl IDs + '_cell' or
             '_niche').
+        cell_special_tokens:
+            List with special tokens inserted into the gene token vector containing cell gene tokens.
+        cell_special_tokens_idx:
+            Index where special tokens are to be inserted into the cell gene token vector.
+        niche_special_tokens:
+            List with special tokens inserted into the gene token vector containing niche gene tokens.
+        niche_special_tokens_idx:
+            Index where special tokens are to be inserted into the niche gene token vector.
         """
         self.custom_attr_name_dict = custom_attr_name_dict
         self.nproc = nproc
         self.chunk_size = chunk_size
         self.model_input_size = model_input_size
-        self.special_token = special_token
+        self.cell_special_tokens = cell_special_tokens
+        self.cell_special_tokens_idx = cell_special_tokens_idx
+        self.niche_special_tokens = niche_special_tokens
+        self.niche_special_tokens_idx = niche_special_tokens_idx
 
         # Load dictionary of cell gene normalization factors
         with open(cell_gene_median_file, "rb") as f:
@@ -267,10 +324,9 @@ class STRankTokenizer:
 
         Returns 
         ----------
-        gene_tokens_cell:
-            Cell-wise tokens for the genes of the cell.
-        gene_tokens_niche:
-            Cell-wise tokens for the genes of the niche.
+        tokenized_cells:
+            Cell-wise vector of ranked and padded cell and niche gene tokens. The first half of tokens for each cell (
+            'self.model_input_size' / 2) are cell gene tokens and the second half are niche gene tokens.
         cell_metadata:
             Dictionary of cell metadata where keys are metadata columns and values are lists of cell-wise values.
         """
@@ -313,8 +369,7 @@ class STRankTokenizer:
             print(f"'{adata_file_path}' has no column 'filter_pass'; tokenizing all cells.")
             filter_pass_idx = np.array([i for i in range(adata.shape[0])])
 
-        gene_tokens_cell = []
-        gene_tokens_niche = []
+        tokenized_cells = []
 
         # Divide cells into chunks and loop through chunks
         for i in range(0, len(filter_pass_idx), self.chunk_size):
@@ -330,20 +385,24 @@ class STRankTokenizer:
             norm_counts_cell = sp.csr_matrix(norm_counts_cell)
             norm_counts_niche = sp.csr_matrix(norm_counts_niche)
 
-            # Get ranked cell gene tokens for genes with non-zero counts
-            gene_tokens_cell += [add_pad_tokens(
-                rank_gene_tokens(norm_counts_cell[i].data, coding_miRNA_tokens_cell[norm_counts_cell[i].indices]),
-                self.model_input_size / 2,
-                self.token_dict["<pad>"])
-                for i in range(norm_counts_cell.shape[0])
-                ]
-
-            # Get ranked niche gene tokens for genes with non-zero counts
-            gene_tokens_niche += [add_pad_tokens(
-                rank_gene_tokens(norm_counts_niche[i].data, coding_miRNA_tokens_niche[norm_counts_niche[i].indices]),
-                self.model_input_size / 2,
-                self.token_dict["<pad>"]
-                ) for i in range(norm_counts_niche.shape[0])
+            # Concatenate ranked and padded cell and niche gene tokens for genes with non-zero counts for each cell, and
+            # append across chunks
+            tokenized_cells += [np.concatenate((
+                process_gene_tokens(
+                    rank_gene_tokens(norm_counts_cell[i].data, coding_miRNA_tokens_cell[norm_counts_cell[i].indices]),
+                    int(self.model_input_size / 2),
+                    self.token_dict,
+                    self.cell_special_tokens,
+                    self.cell_special_tokens_idx
+                    ),
+                process_gene_tokens(
+                    rank_gene_tokens(norm_counts_niche[i].data, coding_miRNA_tokens_niche[norm_counts_niche[i].indices]),
+                    int(self.model_input_size / 2),
+                    self.token_dict,
+                    self.niche_special_tokens,
+                    self.niche_special_tokens_idx
+                    )
+                )) for i in range(norm_counts_cell.shape[0])
                 ]
 
             # Addd values to cell metadata
@@ -353,20 +412,18 @@ class STRankTokenizer:
             else:
                 cell_metadata = None
 
-        return gene_tokens_cell, gene_tokens_niche, cell_metadata
+        return tokenized_cells, cell_metadata
 
 
     def create_dataset(
         self,
-        gene_tokens_cell: np.array,
-        gene_tokens_niche: np.array,
+        tokenized_cells: np.array,
         cell_metadata: dict,
         use_generator: bool = False,
-        keep_uncropped_input_ids: bool = False,
         ) -> Dataset:
         print("Creating Hugging Face dataset...")
         # Create dict for Hugging Face dataset creation
-        dataset_dict = {"gene_tokens_cell": tokenized_cells}
+        dataset_dict = {"input_ids": tokenized_cells}
         if self.custom_attr_name_dict is not None:
             dataset_dict.update(cell_metadata)
 
@@ -382,12 +439,6 @@ class STRankTokenizer:
             output_dataset = Dataset.from_dict(dataset_dict)
 
         def format_cell_features(example):
-            # Store original uncropped input_ids in separate feature
-            if keep_uncropped_input_ids:
-                example["input_ids_uncropped"] = example["input_ids"]
-                example["length_uncropped"] = len(example["input_ids"])
-
-            # Truncate input_ids to input size
             if self.special_token:
                 # Leave space for CLS and SEP token
                 example["input_ids"] = example["input_ids"][
