@@ -1,0 +1,10 @@
+name: nichejepa
+channels:
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch=2.0.0
+  - pytorch-cuda=11.7
+  - jupyterlab
