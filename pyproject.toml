@@ -4,16 +4,16 @@ requires = ["hatchling"]
 
 [project]
 name = "nichejepa"
-version = "0.0.1"
-description = "NicheJEPA"
+version = "0.0.0"
+description = "Spatial omics foundation model"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
 authors = [
-    {name = "sebastian birk"},
+    {name = "Sebastian Birk"},
 ]
 maintainers = [
-    {name = "sebastian birk", email = "sebastian.birk@helmholtz-munich.de"},
+    {name = "Sebastian Birk", email = "sebastian.birk@helmholtz-munich.de"},
 ]
 urls.Documentation = "https://niche-jepa.readthedocs.io/"
 urls.Source = "https://github.com/Lotfollahi-lab/niche-jepa"

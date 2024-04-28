@@ -1,5 +1,5 @@
 """
-NicheJEPA tokenizer.
+neighborhoodJEPA tokenizer.
 
 Adapted from Theodoris, C. V. et al. Transfer learning enables predictions in network biology. Nature 618, 616–624
 (2023); https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/tokenizer.py (12.04.2024).
@@ -18,7 +18,7 @@ Optional cell attributes:
 Usage
 ----------
 .. code-block :: python
-    >>> from nichejepa import STRankTokenizer
+    >>> from neighborhoodjepa import STRankTokenizer
     >>> tk = STRankTokenizer({"cell_type": "cell_type"}, nproc=4)
     >>> tk.tokenize_data("input_directory", "output_directory", "output_file_prefix")
 
@@ -27,7 +27,7 @@ Description
 Input data is a directory with .h5ad files containing raw counts from ST data, including all genes detected without
 feature selection. The input file type is specified by the argument 'file_format' in the tokenize_data function. Genes
 should be labeled with Ensembl IDs (adata.var['ensembl_id']), which provide a unique identifer for conversion to tokens.
-Gene names can be converted to Ensembl IDs via the helper function nichejepa.utils.genes.get_ensembl_ids(). No cell
+Gene names can be converted to Ensembl IDs via the helper function neighborhoodjepa.utils.genes.get_ensembl_ids(). No cell
 metadata is required, but custom cell attributes may be passed onto the tokenized dataset by providing a dictionary of
 custom attributes, which is formatted as original_attr_name : desired_dataset_attr_name. For example, if the original
 '.h5ad' file has cell attributes in adata.obs["cell_type"] and one would like to retain these attributes as labels in
@@ -59,7 +59,7 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
 logger = logging.getLogger(__name__)
 
 CELL_GENE_MEAN_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_mean_dictionary.pkl"
-NICHE_GENE_MEAN_FILE = Path(__file__).parent.parent.parent.parent / "niche_gene_mean_dictionary.pkl"
+NEIGHBORHOOD_GENE_MEAN_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_mean_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
 
@@ -143,9 +143,9 @@ def rank_gene_tokens(
 
 def tokenize_cell(
     norm_counts_cell: np.array,
-    norm_counts_niche: np.array,
+    norm_counts_neighborhood: np.array,
     coding_miRNA_tokens_cell: np.array,
-    coding_miRNA_tokens_niche: np.array) -> Tuple[np.array, np.array]:
+    coding_miRNA_tokens_neighborhood: np.array) -> Tuple[np.array, np.array]:
     """
     Convert normalized gene expression counts to tokenized rank value encoding.
 
@@ -153,19 +153,19 @@ def tokenize_cell(
     ----------
     norm_counts_cell:
         Read-depth normalized and non-zero-mean-scaled gene expression counts of the cell.
-    norm_counts_niche:
-        Read-depth normalized and non-zero-mean-scaled gene expression counts of the niche.
+    norm_counts_neighborhood:
+        Read-depth normalized and non-zero-mean-scaled gene expression counts of the neighborhood.
     coding_miRNA_tokens_cell:
         Protein-coding and micro RNA gene tokens of the cell.
-    coding_miRNA_tokens_niche:
-        Protein-coding and micro RNA gene tokens of the niche.
+    coding_miRNA_tokens_neighborhood:
+        Protein-coding and micro RNA gene tokens of the neighborhood.
 
     Returns
     ----------
     gene_tokens_cell:
         Ranked gene tokens of the cell.
-    gene_tokens_niche:
-        Ranked gene tokens of the niche.
+    gene_tokens_neighborhood:
+        Ranked gene tokens of the neighborhood.
     """
     # Mask undetected genes
     nonzero_mask = np.nonzero(gene_vector)[0]
@@ -174,10 +174,10 @@ def tokenize_cell(
     gene_tokens_cell = rank_gene_tokens(
         norm_counts_cell[nonzero_mask], coding_miRNA_tokens_cell[nonzero_mask]
         )
-    gene_tokens_niche = rank_gene_tokens(
-        norm_counts_niche[nonzero_mask], coding_miRNA_tokens_niche[nonzero_mask]
+    gene_tokens_neighborhood = rank_gene_tokens(
+        norm_counts_neighborhood[nonzero_mask], coding_miRNA_tokens_neighborhood[nonzero_mask]
         )
-    return gene_tokens_cell, gene_tokens_niche
+    return gene_tokens_cell, gene_tokens_neighborhood
 
 
 class STRankTokenizer:
@@ -188,12 +188,12 @@ class STRankTokenizer:
         chunk_size: int = 512,
         model_input_size: int = 2048,
         cell_gene_mean_file: Path | str = CELL_GENE_MEAN_FILE,
-        niche_gene_mean_file: Path | str = NICHE_GENE_MEAN_FILE,
+        neighborhood_gene_mean_file: Path | str = NEIGHBORHOOD_GENE_MEAN_FILE,
         token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
         cell_special_tokens: Optional[list[str]] = None, # = ["<cls>"],
         cell_special_tokens_idx: Optional[list[int]] = None, # = [0],
-        niche_special_tokens: Optional[list[str]] = None, # = ["<sep>"],
-        niche_special_tokens_idx: Optional[list[int]] = None, # = [2048],
+        neighborhood_special_tokens: Optional[list[str]] = None, # = ["<sep>"],
+        neighborhood_special_tokens_idx: Optional[list[int]] = None, # = [2048],
         ):
         """
         Initialize spatial transcriptomics rank tokenizer.
@@ -212,20 +212,20 @@ class STRankTokenizer:
         cell_gene_mean_file:
             Path to pickle file containing dictionary of non-zero mean gene expression values of
             cells across STcorpus.
-        niche_gene_mean_file:
+        neighborhood_gene_mean_file:
             Path to pickle file containing dictionary of non-zero mean gene expression values of
-            niches across STcorpus.
+            neighborhoods across STcorpus.
         token_dictionary_file:
             Path to pickle file containing token dictionary (gene tokens are Ensembl IDs + '_cell' or
-            '_niche').
+            '_neighborhood').
         cell_special_tokens:
             List with special tokens inserted into the gene token vector containing cell gene tokens.
         cell_special_tokens_idx:
             Index where special tokens are to be inserted into the cell gene token vector.
-        niche_special_tokens:
-            List with special tokens inserted into the gene token vector containing niche gene tokens.
-        niche_special_tokens_idx:
-            Index where special tokens are to be inserted into the niche gene token vector.
+        neighborhood_special_tokens:
+            List with special tokens inserted into the gene token vector containing neighborhood gene tokens.
+        neighborhood_special_tokens_idx:
+            Index where special tokens are to be inserted into the neighborhood gene token vector.
         """
         self.custom_attr_name_dict = custom_attr_name_dict
         self.nproc = nproc
@@ -233,16 +233,16 @@ class STRankTokenizer:
         self.model_input_size = model_input_size
         self.cell_special_tokens = cell_special_tokens
         self.cell_special_tokens_idx = cell_special_tokens_idx
-        self.niche_special_tokens = niche_special_tokens
-        self.niche_special_tokens_idx = niche_special_tokens_idx
+        self.neighborhood_special_tokens = neighborhood_special_tokens
+        self.neighborhood_special_tokens_idx = neighborhood_special_tokens_idx
 
         # Load dictionary of cell gene normalization factors
         with open(cell_gene_mean_file, "rb") as f:
             self.cell_gene_mean_dict = pickle.load(f)
 
-        # Load dictionary of niche gene normalization factors
-        with open(niche_gene_mean_file, "rb") as f:
-            self.niche_gene_mean_dict = pickle.load(f)
+        # Load dictionary of neighborhood gene normalization factors
+        with open(neighborhood_gene_mean_file, "rb") as f:
+            self.neighborhood_gene_mean_dict = pickle.load(f)
 
         # Load token dictionary
         with open(token_dictionary_file, "rb") as f:
@@ -279,18 +279,18 @@ class STRankTokenizer:
         use_generator:
             If 'True', use generator for tokenization, else dict.
         """
-        gene_tokens_cell, gene_tokens_niche, cell_metadata = self.tokenize_files(
+        gene_tokens_cell, gene_tokens_neighborhood, cell_metadata = self.tokenize_files(
             Path(input_directory), file_format
             )
 
         tokenized_dataset = self.create_dataset(
             gene_tokens_cell,
-            gene_tokens_niche,
+            gene_tokens_neighborhood,
             cell_metadata,
             use_generator=use_generator
             )
 
-        output_path = (Path(output_directory) / output_file_prefix).with_suffix(".dataset")
+        output_path = str((Path(output_directory) / output_file_prefix).with_suffix(".dataset"))
         tokenized_dataset.save_to_disk(output_path)
 
     def tokenize_files(
@@ -312,13 +312,13 @@ class STRankTokenizer:
         ----------
         gene_tokens_cell:
             Cell-wise vector of ranked cell gene tokens.
-        gene_tokens_niche:
-            Cell-wise vector of ranked niche gene tokens.
+        gene_tokens_neighborhood:
+            Cell-wise vector of ranked neighborhood gene tokens.
         cell_metadata:
             Dictionary of cell metadata where keys are metadata columns and values are lists of cell-wise values.
         """
         gene_tokens_cell = []
-        gene_tokens_niche = []
+        gene_tokens_neighborhood = []
         if self.custom_attr_name_dict is not None:
             cell_attr = [attr_key for attr_key in self.custom_attr_name_dict.keys()]
             cell_metadata = {attr_key: [] for attr_key in self.custom_attr_name_dict.values()}
@@ -331,9 +331,9 @@ class STRankTokenizer:
         for file_path in data_directory.glob(f"*.{file_format}"):
             file_found = 1
             print(f"Tokenizing '{file_path}'...")
-            file_gene_tokens_cell, file_gene_tokens_niche, file_cell_metadata = tokenize_file_fn(file_path)
+            file_gene_tokens_cell, file_gene_tokens_neighborhood, file_cell_metadata = tokenize_file_fn(file_path)
             gene_tokens_cell += file_gene_tokens_cell
-            gene_tokens_niche += file_gene_tokens_niche
+            gene_tokens_neighborhood += file_gene_tokens_neighborhood
             if self.custom_attr_name_dict is not None:
                 for k in cell_attr:
                     cell_metadata[self.custom_attr_name_dict[k]] += file_cell_metadata[k]
@@ -345,7 +345,7 @@ class STRankTokenizer:
                 f"No '.{file_format}' files found in directory '{data_directory}'."
                 )
             raise
-        return gene_tokens_cell, gene_tokens_niche, cell_metadata
+        return gene_tokens_cell, gene_tokens_neighborhood, cell_metadata
 
     def tokenize_adata(
         self,
@@ -366,22 +366,22 @@ class STRankTokenizer:
         ----------
         gene_tokens_cell:
             Cell-wise vector of ranked cell gene tokens.
-        gene_tokens_niche:
-            Cell-wise vector of ranked niche gene tokens.
+        gene_tokens_neighborhood:
+            Cell-wise vector of ranked neighborhood gene tokens.
         cell_metadata:
             Dictionary of cell metadata where keys are metadata columns and values are lists of cell-wise values.
         """
         adata = ad.read_h5ad(adata_file_path)
 
-        # Compute mean raw counts across each cell's niche to get niche counts per cell
-        adata.layers["counts_niche"] = np.array(
+        # Compute mean raw counts across each cell's neighborhood to get neighborhood counts per cell
+        adata.layers["counts_neighborhood"] = np.array(
             (adata.obsp["spatial_connectivities"].T @ adata.X) /
             adata.obsp["spatial_connectivities"].sum(0).T
             )
 
         # Get cell-wise counts for read depth normalization
         adata.obs["total_counts_cell"] = adata.X.sum(1)
-        adata.obs["total_counts_niche"] = adata.layers["counts_niche"].sum(1)
+        adata.obs["total_counts_neighborhood"] = adata.layers["counts_neighborhood"].sum(1)
 
         # Store cell metadata
         if self.custom_attr_name_dict is not None:
@@ -394,12 +394,12 @@ class STRankTokenizer:
         norm_factors_cell = np.array(
             [self.cell_gene_mean_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
             )
-        norm_factors_niche = np.array(
-            [self.niche_gene_mean_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
+        norm_factors_neighborhood = np.array(
+            [self.neighborhood_gene_mean_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
             )
         coding_miRNA_ids = adata.var["ensembl_id"][coding_miRNA_idx]
         coding_miRNA_tokens_cell = np.array([self.token_dict[gene_id + "_cell"] for gene_id in coding_miRNA_ids])
-        coding_miRNA_tokens_niche = np.array([self.token_dict[gene_id + "_niche"] for gene_id in coding_miRNA_ids])
+        coding_miRNA_tokens_neighborhood = np.array([self.token_dict[gene_id + "_neighborhood"] for gene_id in coding_miRNA_ids])
 
         # Filter cells that did not pass QC
         if "filter_pass" in adata.obs.columns:
@@ -411,7 +411,7 @@ class STRankTokenizer:
             filter_pass_idx = np.array([i for i in range(adata.shape[0])])
 
         gene_tokens_cell = []
-        gene_tokens_niche = []
+        gene_tokens_neighborhood = []
 
         # Divide cells into chunks and loop through chunks
         for i in range(0, len(filter_pass_idx), self.chunk_size):
@@ -419,13 +419,14 @@ class STRankTokenizer:
 
             # Perform read depth normalization of counts and scale by non-zero mean values from corpus
             total_counts_cell = adata[chunk_idx].obs["total_counts_cell"].values[:, None]
-            total_counts_niche = adata[chunk_idx].obs["total_counts_niche"].values[:, None]
+            total_counts_neighborhood = adata[chunk_idx].obs["total_counts_neighborhood"].values[:, None]
             counts_cell = adata[chunk_idx, coding_miRNA_idx].X
-            counts_niche = adata[chunk_idx, coding_miRNA_idx].layers["counts_niche"]
+            counts_neighborhood = adata[chunk_idx, coding_miRNA_idx].layers["counts_neighborhood"]
             norm_counts_cell = counts_cell / total_counts_cell * target_sum / norm_factors_cell
-            norm_counts_niche = counts_niche / total_counts_niche * target_sum / norm_factors_niche
+            norm_counts_neighborhood = (counts_neighborhood / total_counts_neighborhood * target_sum
+                                        / norm_factors_neighborhood)
             norm_counts_cell = sp.csr_matrix(norm_counts_cell)
-            norm_counts_niche = sp.csr_matrix(norm_counts_niche)
+            norm_counts_neighborhood = sp.csr_matrix(norm_counts_neighborhood)
 
             # Rank cell gene tokens and append across chunks
             gene_tokens_cell += [
@@ -433,10 +434,11 @@ class STRankTokenizer:
                 for i in range(norm_counts_cell.shape[0])
                 ]
             
-            # Rank niche gene tokens and append across chunks
-            gene_tokens_niche += [
-                rank_gene_tokens(norm_counts_niche[i].data, coding_miRNA_tokens_niche[norm_counts_niche[i].indices])
-                for i in range(norm_counts_niche.shape[0])
+            # Rank neighborhood gene tokens and append across chunks
+            gene_tokens_neighborhood += [
+                rank_gene_tokens(norm_counts_neighborhood[i].data,
+                                 coding_miRNA_tokens_neighborhood[norm_counts_neighborhood[i].indices])
+                for i in range(norm_counts_neighborhood.shape[0])
                 ]
 
             # Addd values to cell metadata
@@ -446,13 +448,13 @@ class STRankTokenizer:
             else:
                 cell_metadata = None
 
-        return gene_tokens_cell, gene_tokens_niche, cell_metadata
+        return gene_tokens_cell, gene_tokens_neighborhood, cell_metadata
 
 
     def create_dataset(
         self,
         gene_tokens_cell: np.array,
-        gene_tokens_niche: np.array,
+        gene_tokens_neighborhood: np.array,
         cell_metadata: dict,
         use_generator: bool = False,
         keep_original_gene_tokens: bool = False
@@ -465,8 +467,8 @@ class STRankTokenizer:
         ----------
         gene_tokens_cell:
             Cell-wise vector of ranked cell gene tokens.
-        gene_tokens_niche:
-            Cell-wise vector of ranked niche gene tokens.
+        gene_tokens_neighborhood:
+            Cell-wise vector of ranked neighborhood gene tokens.
         cell_metadata:
             Dictionary of cell metadata where keys are metadata columns and values are lists of cell-wise values.
         use_generator:
@@ -483,7 +485,7 @@ class STRankTokenizer:
         print("Creating Hugging Face dataset...")
         # Create dict for Hugging Face dataset creation
         dataset_dict = {"gene_tokens_cell": gene_tokens_cell,
-                        "gene_tokens_niche": gene_tokens_niche}
+                        "gene_tokens_neighborhood": gene_tokens_neighborhood}
         if self.custom_attr_name_dict is not None:
             dataset_dict.update(cell_metadata)
 
@@ -502,8 +504,8 @@ class STRankTokenizer:
                 # Store original gene tokens in separate features
                 example["gene_tokens_cell_original"] = example["gene_tokens_cell"]
                 example["gene_tokens_cell_original_length"] = len(example["gene_tokens_cell"])
-                example["gene_tokens_niche_original"] = example["gene_tokens_niche"]
-                example["gene_tokens_niche_original_length"] = len(example["gene_tokens_niche"])
+                example["gene_tokens_neighborhood_original"] = example["gene_tokens_neighborhood"]
+                example["gene_tokens_neighborhood_original_length"] = len(example["gene_tokens_neighborhood"])
 
             example["gene_tokens_cell"] = process_gene_tokens(
                     example["gene_tokens_cell"],
@@ -513,17 +515,17 @@ class STRankTokenizer:
                     self.cell_special_tokens_idx
                     )
 
-            example["gene_tokens_niche"] = process_gene_tokens(
-                    example["gene_tokens_niche"],
+            example["gene_tokens_neighborhood"] = process_gene_tokens(
+                    example["gene_tokens_neighborhood"],
                     int(self.model_input_size / 2),
                     self.token_dict,
-                    self.niche_special_tokens,
-                    self.niche_special_tokens_idx
+                    self.neighborhood_special_tokens,
+                    self.neighborhood_special_tokens_idx
                     )
 
             example["input_ids"] = np.concatenate((
                 example["gene_tokens_cell"],
-                example["gene_tokens_niche"]
+                example["gene_tokens_neighborhood"]
                 ))
 
             return example
