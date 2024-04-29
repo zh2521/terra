@@ -21,6 +21,7 @@ urls.Home-page = "https://github.com/Lotfollahi-lab/niche-jepa"
 dependencies = [
     "anndata",
     "squidpy",
+    "scikit-misc",
     "datasets",
     # for debug logging (referenced from the issue template)
     "session-info",

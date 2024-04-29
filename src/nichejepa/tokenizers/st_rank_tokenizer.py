@@ -1,5 +1,5 @@
 """
-neighborhoodJEPA tokenizer.
+NicheJEPA tokenizer.
 
 Adapted from Theodoris, C. V. et al. Transfer learning enables predictions in network biology. Nature 618, 616–624
 (2023); https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/tokenizer.py (12.04.2024).
@@ -7,10 +7,11 @@ Adapted from Theodoris, C. V. et al. Transfer learning enables predictions in ne
 Input Data
 ----------
 Required format:
-    Raw counts spatial transcriptomics (ST) data without feature selection as '.h5ad' (anndata) files.
-    Neighborhood graph of cells is stored in adata.obsp['spatial_connectivities'].
+    Raw counts spatial transcriptomics (ST) data with all genes (no feature selection) as '.h5ad' (anndata) files.
+    Neighborhood graph of cells is stored in adata.obsp['spatial_connectivities'] or spatial coordinates are stored in
+    adata.obsm["spatial"].
 Required gene attributes:
-    Ensembl ID for each gene ('ensembl_id')
+    Ensembl ID for each gene ('ensembl_id').
 Optional cell attributes:
     Binary indicator of whether cell should be tokenized based on user-defined filtering criteria ('filter_pass').
     Any other cell metadata can be passed on to the tokenized dataset as a custom attribute dictionary.
@@ -18,26 +19,26 @@ Optional cell attributes:
 Usage
 ----------
 .. code-block :: python
-    >>> from neighborhoodjepa import STRankTokenizer
-    >>> tk = STRankTokenizer({"cell_type": "cell_type"}, nproc=4)
+    >>> from nichejepa import STRankTokenizer
+    >>> tk = STRankTokenizer({"cell_type": "cell_types"}, nproc=4)
     >>> tk.tokenize_data("input_directory", "output_directory", "output_file_prefix")
 
 Description
 ----------
-Input data is a directory with .h5ad files containing raw counts from ST data, including all genes detected without
+Input data is a directory with '.h5ad' files containing raw counts from ST data, including all genes detected without
 feature selection. The input file type is specified by the argument 'file_format' in the tokenize_data function. Genes
 should be labeled with Ensembl IDs (adata.var['ensembl_id']), which provide a unique identifer for conversion to tokens.
-Gene names can be converted to Ensembl IDs via the helper function neighborhoodjepa.utils.genes.get_ensembl_ids(). No cell
+Gene names can be converted to Ensembl IDs via the helper function nichejepa.utils.genes.get_ensembl_ids(). No cell
 metadata is required, but custom cell attributes may be passed onto the tokenized dataset by providing a dictionary of
-custom attributes, which is formatted as original_attr_name : desired_dataset_attr_name. For example, if the original
+custom attributes, which is formatted as {original_attr_name: desired_dataset_attr_name}. For example, if the original
 '.h5ad' file has cell attributes in adata.obs["cell_type"] and one would like to retain these attributes as labels in
-the tokenized dataset with the new names "cell_type", the following custom attribute dictionary should be provided:
-{"cell_type": "cell_type"}. Additionally, if the original '.h5ad' file contains a cell attribute called
+the tokenized dataset with the new names "cell_types", the following custom attribute dictionary should be provided:
+{"cell_type": "cell_types"}. Additionally, if the original '.h5ad' file contains a cell attribute called
 adata.obs["filter_pass"], this will be used as a binary indicator of whether to include these cells in the tokenized
 data. All cells with "1" in this attribute will be tokenized, whereas the others will be excluded. One may use
 this column to indicate QC filtering or other criteria for selection for inclusion in the final tokenized dataset. If
-one's data is in other formats besides .h5ad, one can use the relevant tools (such as Anndata tools) to convert the file
-to '.h5ad' format prior to initializing the STRankTokenizer.
+one's data is in other formats besides '.h5ad', one can use the relevant tools (such as Anndata tools) to convert the
+file to '.h5ad' format prior to initializing the STRankTokenizer.
 """
 
 from __future__ import annotations
@@ -50,16 +51,21 @@ from typing import Literal, Tuple
 
 import anndata as ad
 import numpy as np
+import scanpy as sc
 import scipy.sparse as sp
+import squidpy as sq
 from datasets import Dataset
+from skmisc.loess import loess
 
 
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
 
 logger = logging.getLogger(__name__)
 
-CELL_GENE_MEAN_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_mean_dictionary.pkl"
-NEIGHBORHOOD_GENE_MEAN_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_mean_dictionary.pkl"
+CELL_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_means_dictionary.pkl"
+CELL_GENE_REG_STDS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_reg_stds_dictionary.pkl"
+NEIGHBORHOOD_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_means_dictionary.pkl"
+NEIGHBORHOOD_GENE_REG_STDS_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_reg_stds_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
 
@@ -111,7 +117,8 @@ def process_gene_tokens(
     else:
         # Add pad tokens
         processed_gene_tokens = np.pad(
-            processed_gene_tokens, (0, pad_size), 'constant', constant_values=token_dict.get("<pad>"))
+            processed_gene_tokens, (0, pad_size), 'constant', constant_values=token_dict.get("<pad>")
+            )
     return processed_gene_tokens
     
 
@@ -125,7 +132,8 @@ def rank_gene_tokens(
     Parameters
     ----------
     gene_scores:
-        1D vector containing gene scores (normalized gene expression scaled by corpus non-zero means).
+        1D vector containing gene scores (read depth normalized gene expression scaled by means and regularizing
+        standard deviations).
     gene_tokens:
         1D vector containing gene tokens.
 
@@ -147,14 +155,14 @@ def tokenize_cell(
     coding_miRNA_tokens_cell: np.array,
     coding_miRNA_tokens_neighborhood: np.array) -> Tuple[np.array, np.array]:
     """
-    Convert normalized gene expression counts to tokenized rank value encoding.
+    Convert read depth normalized and scaled gene expression counts to tokenized rank value encoding.
 
     Parameters
     ----------
     norm_counts_cell:
-        Read-depth normalized and non-zero-mean-scaled gene expression counts of the cell.
+        Read-depth normalized and scaled gene expression counts of the cell.
     norm_counts_neighborhood:
-        Read-depth normalized and non-zero-mean-scaled gene expression counts of the neighborhood.
+        Read-depth normalized and scaled gene expression counts of the neighborhood.
     coding_miRNA_tokens_cell:
         Protein-coding and micro RNA gene tokens of the cell.
     coding_miRNA_tokens_neighborhood:
@@ -187,8 +195,10 @@ class STRankTokenizer:
         nproc: int = 1,
         chunk_size: int = 512,
         model_input_size: int = 2048,
-        cell_gene_mean_file: Path | str = CELL_GENE_MEAN_FILE,
-        neighborhood_gene_mean_file: Path | str = NEIGHBORHOOD_GENE_MEAN_FILE,
+        cell_gene_means_file: Path | str = CELL_GENE_MEANS_FILE,
+        cell_gene_reg_stds_file: Path | str = CELL_GENE_REG_STDS_FILE,
+        neighborhood_gene_means_file: Path | str = NEIGHBORHOOD_GENE_MEANS_FILE,
+        neighborhood_gene_reg_stds_file: Path | str = NEIGHBORHOOD_GENE_REG_STDS_FILE,
         token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
         cell_special_tokens: Optional[list[str]] = None, # = ["<cls>"],
         cell_special_tokens_idx: Optional[list[int]] = None, # = [0],
@@ -209,15 +219,22 @@ class STRankTokenizer:
             Chunk size for adata tokenizer.
         model_input_size:
             Max input size of the model to truncate input to.
-        cell_gene_mean_file:
-            Path to pickle file containing dictionary of non-zero mean gene expression values of
-            cells across STcorpus.
-        neighborhood_gene_mean_file:
-            Path to pickle file containing dictionary of non-zero mean gene expression values of
-            neighborhoods across STcorpus.
+        cell_gene_means_file:
+            Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
+        cell_gene_reg_stds_file:
+            Path to pickle file containing dictionary of regularizing standard deviations of gene expression of cells
+            across STcorpus (for each gene). Regularizing standard deviations are expected standard deviations based
+            on means and are used for normalization to stabilize variances and only keep 'unexpected' variation.
+        neighborhood_gene_means_file:
+            Path to pickle file containing dictionary of mean gene expression of neighborhoods across STcorpus (for each
+            gene).
+        neighborhood_gene_reg_stds_file:
+            Path to pickle file containing dictionary of regularizing standard deviations of gene expression of
+            neighborhoods across STcorpus (for each gene). Regularizing standard deviations are expected standard
+            deviations based on means and are used for normalization to stabilize variances and only keep 'unexpected'
+            variation.
         token_dictionary_file:
-            Path to pickle file containing token dictionary (gene tokens are Ensembl IDs + '_cell' or
-            '_neighborhood').
+            Path to pickle file containing token dictionary (gene tokens are Ensembl IDs + '_cell' or '_neighborhood').
         cell_special_tokens:
             List with special tokens inserted into the gene token vector containing cell gene tokens.
         cell_special_tokens_idx:
@@ -236,13 +253,17 @@ class STRankTokenizer:
         self.neighborhood_special_tokens = neighborhood_special_tokens
         self.neighborhood_special_tokens_idx = neighborhood_special_tokens_idx
 
-        # Load dictionary of cell gene normalization factors
-        with open(cell_gene_mean_file, "rb") as f:
-            self.cell_gene_mean_dict = pickle.load(f)
+        # Load dictionaries of cell gene means and reg stds
+        with open(cell_gene_means_file, "rb") as f:
+            self.cell_gene_means_dict = pickle.load(f)
+        with open(cell_gene_reg_stds_file, "rb") as f:
+            self.cell_gene_reg_stds_dict = pickle.load(f)
 
-        # Load dictionary of neighborhood gene normalization factors
-        with open(neighborhood_gene_mean_file, "rb") as f:
-            self.neighborhood_gene_mean_dict = pickle.load(f)
+        # Load dictionaries of neighborhood gene means and reg stds
+        with open(neighborhood_gene_means_file, "rb") as f:
+            self.neighborhood_gene_means_dict = pickle.load(f)
+        with open(neighborhood_gene_reg_stds_file, "rb") as f:
+            self.neighborhood_gene_reg_stds_dict = pickle.load(f)
 
         # Load token dictionary
         with open(token_dictionary_file, "rb") as f:
@@ -373,15 +394,26 @@ class STRankTokenizer:
         """
         adata = ad.read_h5ad(adata_file_path)
 
-        # Compute mean raw counts across each cell's neighborhood to get neighborhood counts per cell
-        adata.layers["counts_neighborhood"] = np.array(
-            (adata.obsp["spatial_connectivities"].T @ adata.X) /
-            adata.obsp["spatial_connectivities"].sum(0).T
-            )
+        if "spatial_connectivities" not in adata.obsp.keys():
+            # Compute spatial neighborhood graph based on Visium spot diameter of 55 microns
+            sq.gr.spatial_neighbors(adata,
+                                    coord_type="generic",
+                                    spatial_key="spatial",
+                                    radius=55
+                                    )
 
-        # Get cell-wise counts for read depth normalization
-        adata.obs["total_counts_cell"] = adata.X.sum(1)
-        adata.obs["total_counts_neighborhood"] = adata.layers["counts_neighborhood"].sum(1)
+        if "counts_neighborhood" not in adata.layers.keys():
+            # Compute sum of raw counts across each cell's neighborhood to get neighborhood counts per cell
+            adata.layers["counts_neighborhood"] = np.array(
+                adata.obsp["spatial_connectivities"].T @ adata.X
+                )
+
+        # Normalize counts and neighborhood counts by read depth
+        adata.X = adata.X / adata.X.sum(1).reshape(-1, 1) * target_sum
+        adata.layers["counts_neighborhood"] = (
+            adata.layers["counts_neighborhood"] /
+            adata.layers["counts_neighborhood"].sum(1).reshape(-1, 1) * target_sum
+            )
 
         # Store cell metadata
         if self.custom_attr_name_dict is not None:
@@ -391,15 +423,24 @@ class STRankTokenizer:
         coding_miRNA_idx = np.where(
             [self.coding_miRNA_dict.get(gene_id, False) for gene_id in adata.var["ensembl_id"]]
             )[0]
-        norm_factors_cell = np.array(
-            [self.cell_gene_mean_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
-            )
-        norm_factors_neighborhood = np.array(
-            [self.neighborhood_gene_mean_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
-            )
         coding_miRNA_ids = adata.var["ensembl_id"][coding_miRNA_idx]
         coding_miRNA_tokens_cell = np.array([self.token_dict[gene_id + "_cell"] for gene_id in coding_miRNA_ids])
-        coding_miRNA_tokens_neighborhood = np.array([self.token_dict[gene_id + "_neighborhood"] for gene_id in coding_miRNA_ids])
+        coding_miRNA_tokens_neighborhood = np.array(
+            [self.token_dict[gene_id + "_neighborhood"] for gene_id in coding_miRNA_ids])
+
+        # Retrieve cell and neighborhood gene means and reg stds
+        cell_gene_means = np.array(
+            [self.cell_gene_means_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
+            )
+        cell_gene_reg_stds = np.array(
+            [self.cell_gene_reg_stds_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
+            )
+        neighborhood_gene_means = np.array(
+            [self.neighborhood_gene_means_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
+            )
+        neighborhood_gene_reg_stds = np.array(
+            [self.neighborhood_gene_reg_stds_dict[gene_id] for gene_id in adata.var["ensembl_id"][coding_miRNA_idx]]
+            )
 
         # Filter cells that did not pass QC
         if "filter_pass" in adata.obs.columns:
@@ -417,16 +458,14 @@ class STRankTokenizer:
         for i in range(0, len(filter_pass_idx), self.chunk_size):
             chunk_idx = filter_pass_idx[i : i + self.chunk_size]
 
-            # Perform read depth normalization of counts and scale by non-zero mean values from corpus
-            total_counts_cell = adata[chunk_idx].obs["total_counts_cell"].values[:, None]
-            total_counts_neighborhood = adata[chunk_idx].obs["total_counts_neighborhood"].values[:, None]
-            counts_cell = adata[chunk_idx, coding_miRNA_idx].X
-            counts_neighborhood = adata[chunk_idx, coding_miRNA_idx].layers["counts_neighborhood"]
-            norm_counts_cell = counts_cell / total_counts_cell * target_sum / norm_factors_cell
-            norm_counts_neighborhood = (counts_neighborhood / total_counts_neighborhood * target_sum
-                                        / norm_factors_neighborhood)
-            norm_counts_cell = sp.csr_matrix(norm_counts_cell)
-            norm_counts_neighborhood = sp.csr_matrix(norm_counts_neighborhood)
+            # Normalize counts and neighborhood counts by normalization factor from corpus
+            norm_counts_cell = sp.csr_matrix(
+                (adata[chunk_idx, coding_miRNA_idx].X - cell_gene_means) / cell_gene_reg_stds
+                )
+            norm_counts_neighborhood = sp.csr_matrix(
+                (adata[chunk_idx, coding_miRNA_idx].layers["counts_neighborhood"] - neighborhood_gene_means) /
+                neighborhood_gene_reg_stds
+                )
 
             # Rank cell gene tokens and append across chunks
             gene_tokens_cell += [
