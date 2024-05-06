@@ -65,9 +65,12 @@ logger = logging.getLogger(__name__)
 
 CELL_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_means_dictionary.pkl"
 CELL_GENE_REG_STDS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_reg_stds_dictionary.pkl"
+CELL_GENE_NZMEDIANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmedians_dictionary.pkl"
 NEIGHBORHOOD_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_means_dictionary.pkl"
 NEIGHBORHOOD_GENE_REG_STDS_FILE = Path(
     __file__).parent.parent.parent.parent / "neighborhood_gene_reg_stds_dictionary.pkl"
+NEIGHBORHOOD_GENE_NZMEDIANS_FILE = Path(
+    __file__).parent.parent.parent.parent / "neighborhood_gene_nzmedians_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
 
@@ -195,12 +198,15 @@ class STRankTokenizer:
         norm_method: Literal["analytic_pearson_residuals",
                              "seurat_v3",
                              "mean",
+                             "nzmedian",
                              "shifted_log"]="analytic_pearson_residuals",
         norm_factor: Optional[Literal["read_depth", "cell_area"]]=None,
         cell_gene_means_file: Path | str = CELL_GENE_MEANS_FILE,
         cell_gene_reg_stds_file: Path | str = CELL_GENE_REG_STDS_FILE,
+        cell_gene_nzmedians_file: Path | str = CELL_GENE_NZMEDIANS_FILE, 
         neighborhood_gene_means_file: Path | str = NEIGHBORHOOD_GENE_MEANS_FILE,
         neighborhood_gene_reg_stds_file: Path | str = NEIGHBORHOOD_GENE_REG_STDS_FILE,
+        neighborhood_gene_nzmedians_file: Path | str = NEIGHBORHOOD_GENE_NZMEDIANS_FILE, 
         token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
         cell_special_tokens: Optional[list[str]] = ["<cls_cell>"],
         cell_special_tokens_idx: Optional[list[int]] = [0],
@@ -237,25 +243,38 @@ class STRankTokenizer:
             implementation is based on
             https://github.com/scverse/scanpy/blob/4642cf8e2e51b257371792cb4fcb9611c0a81123/scanpy/preprocessing/_highly_variable_genes.py#L26
             (29.04.2024).
-            'mean': Normalization by 'norm_factor' followed by normalization by corpus gene mean.
+            'mean': Normalization by 'norm_factor' followed by normalization by corpus gene means.
+            'nzmedian': Normalization by 'norm_factor' followed by normalization by corpus gene non-zero medians.
             'shifted_log': Normalization by 'norm_factor' followed by shifted log transformation.
         norm_factor:
             Norm factor for cellular normalization to adjust for cell size differences. Has to match norm factor used
             for computation of means and regularized stds. Is not used if 'norm_method' is 'analytic_pearson_residuals'. 
         cell_gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
+            Only relevant if 'norm_method' in ['seurat_v3', 'mean'].
         cell_gene_reg_stds_file:
             Path to pickle file containing dictionary of regularizing standard deviations of gene expression of cells
             across STcorpus (for each gene). Regularizing standard deviations are expected standard deviations based
             on means and are used for normalization to stabilize variances and only keep 'unexpected' variation.
+            Only relevant if 'norm_method' in ['seurat_v3'].
+        cell_gene_nzmedians_file:
+            Path to pickle file containing dictionary of non-zero median gene expression of cells across STcorpus (for
+            each gene).
+            Only relevant if 'norm_method' in ['nzmean'].
         neighborhood_gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of neighborhoods across STcorpus (for each
             gene).
+            Only relevant if 'norm_method' in ['seurat_v3', 'mean'].
         neighborhood_gene_reg_stds_file:
             Path to pickle file containing dictionary of regularizing standard deviations of gene expression of
             neighborhoods across STcorpus (for each gene). Regularizing standard deviations are expected standard
             deviations based on means and are used for normalization to stabilize variances and only keep 'unexpected'
             variation.
+            Only relevant if 'norm_method' in ['seurat_v3'].
+        neighborhood_gene_nzmedians_file:
+            Path to pickle file containing dictionary of non-zero median gene expression of neighborhoods across
+            STcorpus (for each gene).
+            Only relevant if 'norm_method' in ['nzmean'].
         token_dictionary_file:
             Path to pickle file containing token dictionary (gene tokens are Ensembl IDs + '_cell' or '_neighborhood').
         cell_special_tokens:
@@ -278,16 +297,7 @@ class STRankTokenizer:
         self.neighborhood_special_tokens = neighborhood_special_tokens
         self.neighborhood_special_tokens_idx = neighborhood_special_tokens_idx
 
-        if self.norm_method == "mean":
-            # Load dictionaries of cell gene means
-            with open(cell_gene_means_file, "rb") as f:
-                self.cell_gene_means_dict = pickle.load(f)
-
-            # Load dictionaries of neighborhood gene means
-            with open(neighborhood_gene_means_file, "rb") as f:
-                self.neighborhood_gene_means_dict = pickle.load(f)
-
-        elif self.norm_method == "seurat_v3":
+        if self.norm_method == "seurat_v3":
             # Load dictionaries of cell gene means and reg stds
             with open(cell_gene_means_file, "rb") as f:
                 self.cell_gene_means_dict = pickle.load(f)
@@ -299,6 +309,24 @@ class STRankTokenizer:
                 self.neighborhood_gene_means_dict = pickle.load(f)
             with open(neighborhood_gene_reg_stds_file, "rb") as f:
                 self.neighborhood_gene_reg_stds_dict = pickle.load(f)
+
+        elif self.norm_method == "mean":
+            # Load dictionaries of cell gene means
+            with open(cell_gene_means_file, "rb") as f:
+                self.cell_gene_means_dict = pickle.load(f)
+
+            # Load dictionaries of neighborhood gene means
+            with open(neighborhood_gene_means_file, "rb") as f:
+                self.neighborhood_gene_means_dict = pickle.load(f)
+
+        elif self.norm_method == "nzmedian":
+            # Load dictionaries of cell gene non-zero medians
+            with open(cell_gene_nzmedians_file, "rb") as f:
+                self.cell_gene_nzmedians_dict = pickle.load(f)
+
+            # Load dictionaries of neighborhood gene non-zero medians
+            with open(neighborhood_gene_nzmedians_file, "rb") as f:
+                self.neighborhood_gene_nzmedians_dict = pickle.load(f)
 
         # Load token dictionary
         with open(token_dictionary_file, "rb") as f:
@@ -472,7 +500,7 @@ class STRankTokenizer:
                 mu_counts_neighborhood + mu_counts_neighborhood**2 / theta)
             adata.layers["X_neighborhood"] = np.clip(
                 residuals_counts_neighborhood, a_min=-np.sqrt(adata.shape[0]), a_max=np.sqrt(adata.shape[0]))
-        elif self.norm_method in ["seurat_v3", "mean", "shifted_log"]:
+        elif self.norm_method in ["seurat_v3", "mean", "nzmedian", "shifted_log"]:
             if self.norm_factor == "read_depth":
                 # Normalize cell counts
                 target_sum = 10_000
@@ -484,13 +512,17 @@ class STRankTokenizer:
                     adata.layers["X_neighborhood"].sum(1).reshape(-1, 1) * target_sum)
             elif self.norm_factor == "cell_area":
                 # Normalize cell counts
-                adata.X = adata.X / adata.obs["area"]
+                adata.X = adata.X / adata.obs["area"].values.reshape(-1, 1) * np.mean(adata.obs["area"])
 
                 # Compute neighborhood area
-                adata.obs["neighborhood_area"] = np.array(adata.obsp["spatial_connectivities"].T @ adata.obs["area"])  
+                adata.obs["neighborhood_area"] = np.array(adata.obsp["spatial_connectivities"].T @
+                                                          adata.obs["area"].values.reshape(-1, 1))  
 
                 # Normalize neighborhood counts
-                adata.layers["X_neighborhood"] = adata.layers["X_neighborhood"] / adata.obs["neighborhood_area"]
+                adata.layers["X_neighborhood"] = (adata.layers["X_neighborhood"] /
+                                                  adata.obs["neighborhood_area"].values.reshape(-1, 1) *
+                                                  np.mean(adata.obs["neighborhood_area"])
+                                                  )
             if self.norm_method == "seurat_v3":
                 # Retrieve cell and neighborhood gene means and reg stds
                 cell_gene_means = np.array([self.cell_gene_means_dict[gene_id] for gene_id in adata.var["ensembl_id"]])
@@ -519,9 +551,19 @@ class STRankTokenizer:
                 # Normalize cell and neighborhood counts
                 adata.X = adata.X / cell_gene_means
                 adata.layers["X_neighborhood"] = adata.layers["X_neighborhood"] / neighborhood_gene_means
+            elif self.norm_method == "nzmedian":
+                # Retrieve cell and neighborhood gene non-zero medians
+                cell_gene_nzmedians = np.array([self.cell_gene_nzmedians_dict[gene_id] for gene_id in adata.var["ensembl_id"]])
+                neighborhood_gene_nzmedians = np.array(
+                    [self.neighborhood_gene_nzmedians_dict[gene_id] for gene_id in adata.var["ensembl_id"]]
+                    )
+
+                # Normalize cell and neighborhood counts
+                adata.X = adata.X / cell_gene_nzmedians
+                adata.layers["X_neighborhood"] = adata.layers["X_neighborhood"] / neighborhood_gene_nzmedians
             elif self.norm_method == "shifted_log":
                 sc.pp.log1p(adata)
-                adata.layers["X_neighborhood"] = sc.pp.log1p(adata, layer="X_neighborhood", copy=True)
+                sc.pp.log1p(adata, layer="X_neighborhood")
         else:
             raise ValueError(f"'norm_method' {self.norm_method} is not valid.")
 
