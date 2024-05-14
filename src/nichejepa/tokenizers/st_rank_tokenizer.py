@@ -466,14 +466,14 @@ class STRankTokenizer:
         sq.gr.spatial_neighbors(adata,
                                 coord_type="generic",
                                 spatial_key="spatial",
-                                radius=55,
+                                radius=27.5,
                                 )
         
         # Add self loops to spatial neighborhood graph
         adata.obsp["spatial_connectivities"].setdiag(1)
             
         # Compute sum of counts across each cell's neighborhood to get neighborhood counts per cell
-        adata.layers["X_neighborhood"] = np.array(adata.obsp["spatial_connectivities"].T @ adata.X)
+        adata.layers["X_neighborhood"] = adata.obsp["spatial_connectivities"].T @ adata.X
             
         # Normalize counts before ranking of genes
         if self.norm_method == "analytic_pearson_residuals":
