@@ -1,18 +1,35 @@
-"""
-Normalisation methods to apply to a sparse matrix
-"""
 from __future__ import annotations
-
 import anndata
-import scipy
 import numpy as np
-from pathlib import Path
 import pickle
+from pathlib import Path
 import scanpy as sc
+import scipy
 
 
 def analytic_pearson_residuals(x: scipy.sparse.csr_matrix, theta=100) -> scipy.sparse.csr_matrix:
-    """Normalise using analytic pearson residuals as described in _____"""
+    """
+    Normalise using analytic pearson residuals
+
+    Implements normalisation as described in "Lause, J., Berens, P. & Kobak, D. Analytic Pearson
+    residuals for normalisation of single-cell RNA-seq UMI data. Genome Biol. 22, 258 (2021)". Residuals are
+    based on a negative binomial offset model with overdispersion shared across genes. Residuals are
+    clipped to 'sqrt(n_obs)'. Negative residuals for a cell and gene indicate that fewer counts are observed than
+    expected, compared to the gene’s average expression and read depth. Positive residuals indicate more
+    counts than expected.
+
+    Parameters
+    ----------
+    x : scipy.sparse.csr_matrix
+        A sparse matrix where each row represents an observation and each column represents a feature
+    theta : float
+        The overdispersion parameter
+
+    Returns
+    ----------
+    scipy.sparse.csr_matrix
+        A sparse matrix containing the normalised features
+    """
 
     sum_counts_cells = np.sum(x, axis=1).reshape(-1, 1)
     sum_counts_genes = np.sum(x, axis=0).reshape(1, -1)
@@ -25,8 +42,22 @@ def analytic_pearson_residuals(x: scipy.sparse.csr_matrix, theta=100) -> scipy.s
     return y
 
 
-def read_depth(x: scipy.sparse.csr_matrix, target_size=10_000) -> scipy.sparse.csr_matrix:
-    """Normalise by read depth"""
+def read_depth(x: scipy.sparse.csr_matrix, target_size: int = 10_000) -> scipy.sparse.csr_matrix:
+    """
+    Normalise by read depth
+
+    Parameters
+    ----------
+    x : scipy.sparse.csr_matrix
+        A sparse matrix where each row represents an observation and each column represents a feature
+    target_size : int
+        The target read depth per observation (i.e. the sum of features across an observation)
+
+    Returns
+    ----------
+    scipy.sparse.csr_matrix
+        A sparse matrix containing the normalised features
+    """
 
     y = x / x.sum(axis=1).reshape(-1, 1) * target_size
 
@@ -34,7 +65,20 @@ def read_depth(x: scipy.sparse.csr_matrix, target_size=10_000) -> scipy.sparse.c
 
 
 def cell_area(adata: anndata.AnnData) -> anndata.AnnData:
-    """Normalise by area"""
+    """
+    Normalise by cell area
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing cell area measurements in `adata.obs["area"]`, and
+        aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+
+    Returns
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing the normalised features
+    """
 
     # Normalize cell counts
     adata.X = adata.X / adata.obs["area"].values.reshape(-1, 1) * np.mean(adata.obs["area"])
@@ -59,7 +103,34 @@ def seurat_v3(
     neighborhood_gene_means_file: Path | str,
     neighborhood_gene_reg_stds_file: Path | str
 ) -> anndata.AnnData:
-    """Normalise by seurat v3"""
+    """
+    Normalise using seurat v3
+
+    Implements normalization as described in "Stuart, T. et al. Comprehensive Integration of Single-Cell Data. Cell
+    177, 1888–1902.e21 (2019)". This function should be applied following normalization by cell area, mean or non-zero
+    median. Subtraction of means and division by expected standard deviations derived from learned global mean-variance
+    relationships.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+    cell_gene_means_file : Path | str
+        Path to pickle file containing dictionary of mean gene expression values.
+    cell_gene_reg_stds_file : Path | str
+        Path to pickle file containing dictionary of regularizing standard deviation values.
+    neighborhood_gene_means_file : Path | str
+        Path to pickle file containing dictionary of mean gene expression values calculated for neighbourhoods.
+    neighborhood_gene_reg_stds_file : Path | str
+        Path to pickle file containing dictionary of regularizing standard deviation values calculated for
+        neighbourhoods.
+
+
+    Returns
+    ----------
+    anndata.AnnData
+        An AnnData object containing the normalised features
+    """
 
     # Load dictionaries of cell gene means and reg stds
     with open(cell_gene_means_file, "rb") as f:
@@ -99,7 +170,23 @@ def mean(
     cell_gene_means_file: Path | str,
     neighborhood_gene_means_file: Path | str
 ) -> anndata.AnnData:
-    """Normalise by mean"""
+    """
+    Normalise by mean expression
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+    cell_gene_means_file : Path | str
+        Path to pickle file containing dictionary of mean gene expression values.
+    neighborhood_gene_means_file : Path | str
+        Path to pickle file containing dictionary of mean gene expression values calculated for neighbourhoods.
+
+    Returns
+    ----------
+    anndata.AnnData
+        An AnnData object containing the normalised features
+    """
 
     # Load dictionaries of cell gene means
     with open(cell_gene_means_file, "rb") as f:
@@ -127,7 +214,24 @@ def non_zero_median(
     cell_gene_nzmedians_file: Path | str,
     neighborhood_gene_nzmedians_file: Path | str,
 ) -> anndata.AnnData:
-    """Normalise by non-zero median"""
+    """
+    Normalise by non-zero median expression
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+    cell_gene_nzmedians_file : Path | str
+        Path to pickle file containing dictionary of non-zero median gene expression values.
+    neighborhood_gene_nzmedians_file : Path | str
+        Path to pickle file containing dictionary of non-zero median gene expression values calculated for
+        neighbourhoods.
+
+    Returns
+    ----------
+    anndata.AnnData
+        An AnnData object containing the normalised features
+    """
 
     # Load dictionaries of cell gene non-zero medians
     with open(cell_gene_nzmedians_file, "rb") as f:
@@ -151,7 +255,21 @@ def non_zero_median(
 
 
 def shifted_log(adata: anndata.AnnData) -> anndata.AnnData:
-    """Normalise by log1p"""
+    """
+    Normalise by shifted log
+
+    Implements normalisation using `sc.pp.log1p`.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        An AnnData object containing aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+
+    Returns
+    ----------
+    anndata.AnnData
+        An AnnData object containing the normalised features
+    """
     sc.pp.log1p(adata)
     sc.pp.log1p(adata, layer="X_neighborhood")
     return adata
