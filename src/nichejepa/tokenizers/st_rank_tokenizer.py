@@ -500,7 +500,8 @@ class STRankTokenizer:
             )
 
         if self.norm_method == "shifted_log":
-            adata = nichejepa.normalise.shifted_log(adata)
+            adata.X = nichejepa.normalise.shifted_log(adata.X)
+            adata.layers["X_neighborhood"] = nichejepa.normalise.shifted_log(adata.layers["X_neighborhood"])
 
         # Initialize cell metadata
         if self.custom_attr_name_dict is not None:

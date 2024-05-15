@@ -254,7 +254,7 @@ def non_zero_median(
     return adata
 
 
-def shifted_log(adata: anndata.AnnData) -> anndata.AnnData:
+def shifted_log(x: scipy.sparse.csr_matrix) -> scipy.sparse.csr_matrix:
     """
     Normalise by shifted log
 
@@ -262,14 +262,14 @@ def shifted_log(adata: anndata.AnnData) -> anndata.AnnData:
 
     Parameters
     ----------
-    adata : anndata.AnnData
-        An AnnData object containing aggregated neighbourhood counts in `adata.layers["X_neighborhood"]`.
+    x : scipy.sparse.csr_matrix
+        A sparse matrix where each row represents an observation and each column represents a feature
 
     Returns
     ----------
     anndata.AnnData
         An AnnData object containing the normalised features
     """
-    sc.pp.log1p(adata)
-    sc.pp.log1p(adata, layer="X_neighborhood")
-    return adata
+
+    y = sc.pp.log1p(x)
+    return y
