@@ -19,8 +19,8 @@ Optional cell attributes:
 Usage
 ----------
 .. code-block :: python
-    >>> from nichejepa import STRankTokenizer
-    >>> tk = STRankTokenizer(custom_attr_name_dict={"cell_type": "cell_types"}, nproc=4)
+    >>> from nichejepa import CellNeighborhoodRankTokenizer
+    >>> tk = CellNeighborhoodRankTokenizer(custom_attr_name_dict={"cell_type": "cell_types"}, nproc=4)
     >>> tk.tokenize_data("input_directory", "output_directory", "output_file_prefix")
 
 Description
@@ -38,7 +38,7 @@ adata.obs["filter_pass"], this will be used as a binary indicator of whether to 
 All cells with "1" in this attribute will be tokenized, whereas the others will be excluded. One may use this column to
 indicate QC filtering or other criteria for selection for inclusion in the final tokenized dataset. If one's data is in
 other formats besides '.h5ad', one can use the relevant tools (such as Anndata tools) to convert the file to '.h5ad'
-format prior to initializing the STRankTokenizer.
+format prior to initializing the CellNeighborhoodRankTokenizer.
 """
 
 from __future__ import annotations
@@ -51,15 +51,19 @@ from typing import Literal, Optional, Tuple
 
 import anndata as ad
 import numpy as np
-import scanpy as sc
 import scipy.sparse as sp
-import squidpy as sq
 from datasets import Dataset
 from skmisc.loess import loess
 
-import nichejepa.preprocess
-import nichejepa.aggregate
-import nichejepa.normalise
+from .aggregate import aggregate_by_radius
+from .normalize import (read_depth,
+                        cell_area,
+                        analytic_pearson_residuals,
+                        seurat_v3,
+                        mean,
+                        non_zero_median,
+                        shifted_log)
+from .preprocess import filter_poor_quality_cells
 
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
 
@@ -69,11 +73,14 @@ logger = logging.getLogger(__name__)
 CELL_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_means_dictionary.pkl"
 CELL_GENE_REG_STDS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_reg_stds_dictionary.pkl"
 CELL_GENE_NZMEDIANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmedians_dictionary.pkl"
+CELL_GENE_LOGMEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_logmeans_dictionary.pkl"
 NEIGHBORHOOD_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_means_dictionary.pkl"
 NEIGHBORHOOD_GENE_REG_STDS_FILE = Path(
     __file__).parent.parent.parent.parent / "neighborhood_gene_reg_stds_dictionary.pkl"
 NEIGHBORHOOD_GENE_NZMEDIANS_FILE = Path(
     __file__).parent.parent.parent.parent / "neighborhood_gene_nzmedians_dictionary.pkl"
+NEIGHBORHOOD_GENE_LOGMEANS_FILE = Path(
+    __file__).parent.parent.parent.parent / "neighborhood_gene_logmeans_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
 
@@ -191,7 +198,7 @@ def tokenize_cell(
     return gene_tokens_cell, gene_tokens_neighborhood
 
 
-class STRankTokenizer:
+class CellNeighborhoodRankTokenizer:
     def __init__(
         self,
         custom_attr_name_dict: Optional[dict] = None,
@@ -299,37 +306,6 @@ class STRankTokenizer:
         self.cell_special_tokens_idx = cell_special_tokens_idx
         self.neighborhood_special_tokens = neighborhood_special_tokens
         self.neighborhood_special_tokens_idx = neighborhood_special_tokens_idx
-
-        if self.norm_method == "seurat_v3":
-            # Load dictionaries of cell gene means and reg stds
-            with open(cell_gene_means_file, "rb") as f:
-                self.cell_gene_means_dict = pickle.load(f)
-            with open(cell_gene_reg_stds_file, "rb") as f:
-                self.cell_gene_reg_stds_dict = pickle.load(f)
-
-            # Load dictionaries of neighborhood gene means and reg stds
-            with open(neighborhood_gene_means_file, "rb") as f:
-                self.neighborhood_gene_means_dict = pickle.load(f)
-            with open(neighborhood_gene_reg_stds_file, "rb") as f:
-                self.neighborhood_gene_reg_stds_dict = pickle.load(f)
-
-        elif self.norm_method == "mean":
-            # Load dictionaries of cell gene means
-            with open(cell_gene_means_file, "rb") as f:
-                self.cell_gene_means_dict = pickle.load(f)
-
-            # Load dictionaries of neighborhood gene means
-            with open(neighborhood_gene_means_file, "rb") as f:
-                self.neighborhood_gene_means_dict = pickle.load(f)
-
-        elif self.norm_method == "nzmedian":
-            # Load dictionaries of cell gene non-zero medians
-            with open(cell_gene_nzmedians_file, "rb") as f:
-                self.cell_gene_nzmedians_dict = pickle.load(f)
-
-            # Load dictionaries of neighborhood gene non-zero medians
-            with open(neighborhood_gene_nzmedians_file, "rb") as f:
-                self.neighborhood_gene_nzmedians_dict = pickle.load(f)
 
         # Load token dictionary
         with open(token_dictionary_file, "rb") as f:
@@ -457,51 +433,78 @@ class STRankTokenizer:
         """
         adata = ad.read_h5ad(adata_file_path)
 
-        # filter to remove poor quality cells
-        adata = nichejepa.preprocess.filter_poor_quality_cells(adata)
+        # Filter to remove poor quality cells
+        adata = filter_poor_quality_cells(adata)
 
-        # aggregate neighbourhood cells
-        adata = nichejepa.aggregate.aggregate_by_radius(adata)
+        # Aggregate neighborhood cell gene expression
+        adata = aggregate_by_radius(adata)
 
-        # normalise cell and neighbourhood counts
+        # Normalize cell and neighborhood counts
         if self.norm_method == "analytic_pearson_residuals":
-            adata.X = nichejepa.normalise.analytic_pearson_residuals(adata.X)
-            adata.layers["X_neighborhood"] = nichejepa.normalise.analytic_pearson_residuals(
-                adata.layers["X_neighborhood"])
+            adata.X = analytic_pearson_residuals(adata.X)
+            adata.layers["X_neighborhood"] = analytic_pearson_residuals(adata.layers["X_neighborhood"])
 
-        if self.norm_factor == "read_depth":
-            adata.X = nichejepa.normalise.read_depth(adata.X)
-            adata.layers["X_neighborhood"] = nichejepa.normalise.read_depth(adata.layers["X_neighborhood"])
+        elif self.norm_factor == "read_depth":
+            adata.X = read_depth(adata.X)
+            adata.layers["X_neighborhood"] = read_depth(adata.layers["X_neighborhood"])
 
-        if self.norm_factor == "cell_area":
-            adata = nichejepa.normalise.cell_area(adata)
+        elif self.norm_factor == "cell_area":
+            adata.X = cell_area(adata.X,
+                                cell_areas=adata.obs["cell_area"])
+            adata.obs["neighborhood_cell_area"] = np.array(
+                adata.obsp["spatial_connectivities"].T @ adata.obs["cell_area"].values.reshape(-1, 1))
+            adata.X = cell_area(adata.layers["X_neighborhood"],
+                                cell_areas=adata.obs["neighborhood_cell_area"])
 
         if self.norm_method == "seurat_v3":
-            adata = nichejepa.normalise.seurat_v3(
-                adata,
-                cell_gene_means_file=CELL_GENE_MEANS_FILE,
-                cell_gene_reg_stds_file=CELL_GENE_REG_STDS_FILE,
-                neighborhood_gene_means_file=NEIGHBORHOOD_GENE_MEANS_FILE,
-                neighborhood_gene_reg_stds_file=NEIGHBORHOOD_GENE_REG_STDS_FILE
+            adata.X = seurat_v3(
+                adata.X,
+                gene_means_file=CELL_GENE_MEANS_FILE,
+                gene_reg_stds_file=CELL_GENE_REG_STDS_FILE,
+                probed_genes=adata.var["ensembl_id"]
+            )
+            adata.layers["X_neighborhood"] = seurat_v3(
+                adata.layers["X_neighborhood"],
+                gene_means_file=NEIGHBORHOOD_GENE_MEANS_FILE,
+                gene_reg_stds_file=NEIGHBORHOOD_GENE_REG_STDS_FILE,
+                probed_genes=adata.var["ensembl_id"]
             )
 
         if self.norm_method == "mean":
-            adata = nichejepa.normalise.mean(
-                adata,
-                cell_gene_means_file=CELL_GENE_MEANS_FILE,
-                neighborhood_gene_means_file=NEIGHBORHOOD_GENE_MEANS_FILE
+            adata.X = mean(
+                adata.X,
+                gene_means_file=CELL_GENE_MEANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
+            )
+            adata.layers["X_neighborhood"] = mean(
+                adata.layers["X_neighborhood"],
+                gene_means_file=NEIGHBORHOOD_GENE_MEANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
             )
 
         if self.norm_method == "nzmedian":
-            adata = nichejepa.normalise.non_zero_median(
-                adata,
-                cell_gene_nzmedians_file=CELL_GENE_NZMEDIANS_FILE,
-                neighborhood_gene_nzmedians_file=NEIGHBORHOOD_GENE_NZMEDIANS_FILE
+            adata.X = non_zero_median(
+                adata.X,
+                gene_nzmedians_file=CELL_GENE_NZMEDIANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
+            )
+            adata.layers["X_neighborhood"] = non_zero_median(
+                adata.layers["X_neighborhood"],
+                gene_nzmedians_file=NEIGHBORHOOD_GENE_NZMEDIANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
             )
 
         if self.norm_method == "shifted_log":
-            adata.X = nichejepa.normalise.shifted_log(adata.X)
-            adata.layers["X_neighborhood"] = nichejepa.normalise.shifted_log(adata.layers["X_neighborhood"])
+            adata.X = shifted_log(
+                adata.X,
+                gene_logmeans_file=CELL_GENE_LOGMEANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
+                )
+            adata.layers["X_neighborhood"] = shifted_log(
+                adata.layers["X_neighborhood"],
+                gene_logmeans_file=NEIGHBORHOOD_GENE_LOGMEANS_FILE,
+                probed_genes=adata.var["ensembl_id"]
+                )
 
         # Initialize cell metadata
         if self.custom_attr_name_dict is not None:
