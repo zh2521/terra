@@ -62,6 +62,7 @@ from .normalize import (read_depth,
                         seurat_v3,
                         mean,
                         non_zero_median,
+                        shifted_log_mean,
                         shifted_log)
 from .preprocess import filter_poor_quality_cells
 from .tokenize import process_gene_tokens, rank_gene_tokens
@@ -334,10 +335,13 @@ class CellGraphRankTokenizer:
             adata.X = non_zero_median(adata.X,
                                       gene_nzmedians_file=self.gene_nzmedians_file,
                                       probed_genes=adata.var["ensembl_id"])
+        if self.norm_method == "shifted_log_mean":
+            adata.X = shifted_log_mean(adata.X,
+                                       gene_logmeans_file=self.gene_logmeans_file,
+                                       probed_genes=adata.var["ensembl_id"])
+
         if self.norm_method == "shifted_log":
-            adata.X = shifted_log(adata.X,
-                                  gene_logmeans_file=self.gene_logmeans_file,
-                                  probed_genes=adata.var["ensembl_id"])
+            adata.X = shifted_log(adata.X)
 
         # Initialize cell metadata
         if self.custom_attr_name_dict is not None:
