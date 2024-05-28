@@ -22,6 +22,9 @@ def cell_area(x: scipy.sparse.csr_matrix,
         A sparse matrix containing the normalized features.
     """
 
-    y = x / cell_areas.values.reshape(-1, 1) * np.mean(cell_areas)
+    if x.shape[0] != len(cell_areas):
+        raise ValueError('Length of `cell_areas` does not match the number of observations in `x`.')
+
+    y = x / cell_areas.reshape(-1, 1) #* np.mean(cell_areas)
 
     return y
