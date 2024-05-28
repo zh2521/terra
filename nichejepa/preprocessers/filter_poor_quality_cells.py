@@ -24,4 +24,3 @@ def filter_poor_quality_cells(adata: anndata.AnnData) -> anndata.AnnData:
         return adata[filter_pass_idx]
 
     return adata
-

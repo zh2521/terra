@@ -55,16 +55,16 @@ import numpy as np
 import scipy.sparse as sp
 from datasets import Dataset
 
-from .aggregate import aggregate_by_radius
-from .normalize import (read_depth,
-                        cell_area,
-                        analytic_pearson_residuals,
-                        seurat_v3,
-                        mean,
-                        non_zero_median,
-                        shifted_log_mean,
-                        shifted_log)
-from .preprocess import filter_poor_quality_cells
+from ..aggregators.aggregate_by_radius import aggregate_by_radius
+from ..normalizers.shifted_log_mean import shifted_log_mean
+from ..normalizers.shifted_log import shifted_log
+from ..normalizers.non_zero_median import non_zero_median
+from ..normalizers.mean import mean
+from ..normalizers.seurat import seurat_v3
+from ..normalizers.cell_area import cell_area
+from ..normalizers.read_depth import read_depth
+from ..normalizers.analytic_pearson_residuals import analytic_pearson_residuals
+from ..preprocessers.filter_poor_quality_cells import filter_poor_quality_cells
 from .tokenize import process_gene_tokens, rank_gene_tokens
 
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
@@ -146,7 +146,7 @@ class CellNeighborhoodRankTokenizer:
             'shifted_log': Normalization by 'norm_factor' followed by shifted log transformation.
         norm_factor:
             Norm factor for cellular normalization to adjust for cell size differences. Has to match norm factor used
-            for computation of means and regularized stds. Is not used if 'norm_method' is 'analytic_pearson_residuals'. 
+            for computation of means and regularized stds. Is not used if 'norm_method' is 'analytic_pearson_residuals'.
         cell_gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
             Only relevant if 'norm_method' in ['seurat_v3', 'mean'].
@@ -261,7 +261,7 @@ class CellNeighborhoodRankTokenizer:
         file_format:
             Format of the files to be tokenized.
 
-        Returns 
+        Returns
         ----------
         gene_tokens_cell:
             Cell-wise vector of ranked cell gene tokens.
@@ -281,7 +281,7 @@ class CellNeighborhoodRankTokenizer:
 
         tokenize_file_fn = self.tokenize_adata
 
-        # Loop through data directory to tokenize '.h5ad' files    
+        # Loop through data directory to tokenize '.h5ad' files
         for file_path in data_directory.glob(f"*.{file_format}"):
             file_found = 1
             print(f"Tokenizing '{file_path}'...")
@@ -310,7 +310,7 @@ class CellNeighborhoodRankTokenizer:
         adata_file_path:
             Path to anndata file containing cells to be tokenized.
 
-        Returns 
+        Returns
         ----------
         gene_tokens_cell:
             Cell-wise vector of ranked cell gene tokens.
@@ -379,7 +379,7 @@ class CellNeighborhoodRankTokenizer:
             adata.layers["X_neighborhood"] = shifted_log_mean(adata.layers["X_neighborhood"],
                                                               gene_logmeans_file=self.neighborhood_gene_logmeans_file,
                                                               probed_genes=adata.var["ensembl_id"])
-            
+
         if self.norm_method == "shifted_log":
             adata.X = shifted_log(adata.X)
             adata.layers["X_neighborhood"] = shifted_log(adata.layers["X_neighborhood"])
@@ -412,7 +412,7 @@ class CellNeighborhoodRankTokenizer:
                 rank_gene_tokens(norm_counts_cell[j].data, coding_miRNA_tokens_cell[norm_counts_cell[j].indices])
                 for j in range(norm_counts_cell.shape[0])
                 ]
-            
+
             # Rank neighborhood gene tokens and append across chunks
             gene_tokens_neighborhood += [
                 rank_gene_tokens(norm_counts_neighborhood[j].data,
@@ -453,10 +453,10 @@ class CellNeighborhoodRankTokenizer:
             If 'True', keep original gene tokens in Hugging Face dataset (before padding/truncation and addition of
             special tokens).
 
-        Returns 
+        Returns
         ----------
         dataset:
-            Hugging Face dataset containing the tokenized cells.        
+            Hugging Face dataset containing the tokenized cells.
         """
 
         print("Creating Hugging Face dataset...")
@@ -503,5 +503,5 @@ class CellNeighborhoodRankTokenizer:
 
         formatted_dataset = dataset.map(
             format_gene_tokens, num_proc=self.nproc)
-        
+
         return formatted_dataset

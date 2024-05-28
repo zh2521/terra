@@ -56,15 +56,15 @@ import scipy.sparse as sp
 import squidpy as sq
 from datasets import Dataset
 
-from .normalize import (read_depth,
-                        cell_area,
-                        analytic_pearson_residuals,
-                        seurat_v3,
-                        mean,
-                        non_zero_median,
-                        shifted_log_mean,
-                        shifted_log)
-from .preprocess import filter_poor_quality_cells
+from ..normalizers.shifted_log_mean import shifted_log_mean
+from ..normalizers.shifted_log import shifted_log
+from ..normalizers.non_zero_median import non_zero_median
+from ..normalizers.mean import mean
+from ..normalizers.seurat import seurat_v3
+from ..normalizers.cell_area import cell_area
+from ..normalizers.read_depth import read_depth
+from ..normalizers.analytic_pearson_residuals import analytic_pearson_residuals
+from ..preprocessers.filter_poor_quality_cells import filter_poor_quality_cells
 from .tokenize import process_gene_tokens, rank_gene_tokens
 
 
@@ -86,7 +86,7 @@ class CellGraphRankTokenizer:
                  nproc: int = 1,
                  chunk_size: int = 512,
                  model_input_size: int = 2048,
-                 tokens_per_cell: int = 64, 
+                 tokens_per_cell: int = 64,
                  norm_method: Literal["analytic_pearson_residuals",
                                       "seurat_v3",
                                       "mean",
@@ -96,7 +96,7 @@ class CellGraphRankTokenizer:
                  gene_means_file: Path | str = GENE_MEANS_FILE,
                  gene_reg_stds_file: Path | str = GENE_REG_STDS_FILE,
                  gene_nzmedians_file: Path | str = GENE_NZMEDIANS_FILE,
-                 gene_logmeans_file: Path | str = GENE_LOGMEANS_FILE, 
+                 gene_logmeans_file: Path | str = GENE_LOGMEANS_FILE,
                  token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
                  special_tokens: Optional[list[str]] = ["<cls>"],
                  special_tokens_idx: Optional[list[int]] = [0]):
@@ -135,7 +135,7 @@ class CellGraphRankTokenizer:
             'shifted_log': Normalization by 'norm_factor' followed by shifted log transformation.
         norm_factor:
             Norm factor for cellular normalization to adjust for cell size differences. Has to match norm factor used
-            for computation of means and regularized stds. Is not used if 'norm_method' is 'analytic_pearson_residuals'. 
+            for computation of means and regularized stds. Is not used if 'norm_method' is 'analytic_pearson_residuals'.
         gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
             Only relevant if 'norm_method' in ['seurat_v3', 'mean'].
@@ -151,7 +151,7 @@ class CellGraphRankTokenizer:
         gene_logmeans_file:
             Path to pickle file containing dictionary of log mean gene expression of cells across STcorpus (for each
             gene).
-            Only relevant if 'norm_method' in ['log_shifted'].      
+            Only relevant if 'norm_method' in ['log_shifted'].
         token_dictionary_file:
             Path to pickle file containing token dictionary (gene tokens are Ensembl IDs).
         special_tokens:
@@ -232,7 +232,7 @@ class CellGraphRankTokenizer:
         file_format:
             Format of the files to be tokenized.
 
-        Returns 
+        Returns
         ----------
         gene_tokens:
             Cell-wise vector of ranked gene tokens.
@@ -255,7 +255,7 @@ class CellGraphRankTokenizer:
 
         tokenize_file_fn = self.tokenize_adata
 
-        # Loop through data directory to tokenize '.h5ad' files    
+        # Loop through data directory to tokenize '.h5ad' files
         for file_path in data_directory.glob(f"*.{file_format}"):
             file_found = 1
             print(f"Tokenizing '{file_path}'...")
@@ -285,7 +285,7 @@ class CellGraphRankTokenizer:
         adata_file_path:
             Path to anndata file containing cells to be tokenized.
 
-        Returns 
+        Returns
         ----------
         gene_tokens:
             Cell-wise vector of ranked cell gene tokens.
@@ -309,7 +309,7 @@ class CellGraphRankTokenizer:
                                 coord_type="generic",
                                 spatial_key="spatial",
                                 radius=27.5)
-        
+
         print("Normalizing counts.")
         # Normalize counts before gene ranking
         if self.norm_method == "analytic_pearson_residuals":
@@ -319,7 +319,7 @@ class CellGraphRankTokenizer:
         elif self.norm_factor == "cell_area":
             adata.X = cell_area(adata.X,
                                 cell_areas=adata.obs["cell_area"])
-            
+
         if self.norm_method == "seurat_v3":
             adata.X = seurat_v3(adata.X,
                                 gene_means_file=self.gene_means_file,
@@ -330,7 +330,7 @@ class CellGraphRankTokenizer:
             adata.X = mean(adata.X,
                            gene_means_file=self.gene_means_file,
                            probed_genes=adata.var["ensembl_id"])
-        
+
         if self.norm_method == "nzmedian":
             adata.X = non_zero_median(adata.X,
                                       gene_nzmedians_file=self.gene_nzmedians_file,
@@ -428,10 +428,10 @@ class CellGraphRankTokenizer:
             If 'True', keep original gene tokens in Hugging Face dataset (before padding/truncation and addition of
             special tokens).
 
-        Returns 
+        Returns
         ----------
         dataset:
-            Hugging Face dataset containing the tokenized cells.        
+            Hugging Face dataset containing the tokenized cells.
         """
 
         print("Creating Hugging Face dataset...")
@@ -470,6 +470,5 @@ class CellGraphRankTokenizer:
 
         formatted_dataset = dataset.map(
             format_gene_tokens, num_proc=self.nproc)
-        
+
         return formatted_dataset
-    
