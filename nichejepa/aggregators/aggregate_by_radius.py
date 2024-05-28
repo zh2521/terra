@@ -1,24 +1,39 @@
 import anndata
 import squidpy as sq
+import scipy
+import numpy as np
+import anndata as ad
 
 
-def aggregate_by_radius(adata: anndata.AnnData, radius: float = 27.5) -> anndata.AnnData:
+def aggregate_by_radius(
+    x: scipy.sparse.csr_matrix,
+    coordinates: np.ndarray,
+    radius: float,
+) -> scipy.sparse.csr_matrix:
     """
     Aggregate neighborhood gene expression by radius.
 
     Parameters
     ----------
-    adata  anndata.AnnData
-        AnnData object with spatial coordinates available in `adata.obsm["spatial"]`.
+    x: scipy.sparse.csr_matrix
+        Features for each cell.
+    coordinates: np.ndarray
+        An array of lists, arrays or tuples containing the x and y coordinates of each cell in um.
     radius: float
-        Radius within which neighboring cells will be aggregated, in um. Defaults to 27.5 um, which corresponds to the
-        10x Visium spot size of 55 um.
+        Radius within which neighboring cells will be aggregated, in um. Use 27.5 um for a
+        radius equivalent to the 10x Visium spot size.
 
     Returns
     ----------
-    adata: anndata.AnnData
-        AnnData object with aggregated counts available in `adata.layers["X_neighborhood"]`.
+    scipy.sparse.csr_matrix
+        A feature matrix with aggregated counts.
     """
+
+    if x.shape[0] != coordinates.shape[0]:
+        raise ValueError("x and coordinates should be the same length")
+
+    adata = ad.AnnData(x.toarray())
+    adata.obsm["spatial"] = coordinates
 
     sq.gr.spatial_neighbors(adata,
                             coord_type="generic",
@@ -26,6 +41,7 @@ def aggregate_by_radius(adata: anndata.AnnData, radius: float = 27.5) -> anndata
                             radius=radius,
                             set_diag=True)
 
-    adata.layers["X_neighborhood"] = adata.obsp["spatial_connectivities"].T @ adata.X
+    y = adata.obsp["spatial_connectivities"].T @ adata.X
+    y = scipy.sparse.csr_matrix(y)
 
-    return adata
+    return y
