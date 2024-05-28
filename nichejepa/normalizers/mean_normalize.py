@@ -7,9 +7,7 @@ import numpy as np
 import scipy
 
 
-def mean(x: scipy.sparse.csr_matrix,
-         gene_means_file: Path | str,
-         probed_genes: np.ndarray) -> scipy.sparse.csr_matrix:
+def mean_normalize(x: scipy.sparse.csr_matrix) -> scipy.sparse.csr_matrix:
     """
     Normalize gene counts per gene by mean expression.
 
@@ -30,14 +28,8 @@ def mean(x: scipy.sparse.csr_matrix,
         A sparse matrix containing the normalized features.
     """
 
-    # Load dictionary of gene means
-    with open(gene_means_file, "rb") as f:
-        gene_means_dict = pickle.load(f)
+    gene_means = [np.mean(x[:, i]) for i in range(x.shape[1])]
 
-    # Retrieve gene means for probed genes
-    gene_means = np.array([gene_means_dict[gene_id] for gene_id in probed_genes])
-
-    # Normalize counts
     y = x / gene_means
 
     return y

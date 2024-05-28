@@ -59,7 +59,7 @@ from datasets import Dataset
 from ..normalizers.shifted_log_mean import shifted_log_mean
 from ..normalizers.shifted_log import shifted_log
 from ..normalizers.non_zero_median import non_zero_median
-from ..normalizers.mean import mean
+from ..normalizers.mean_normalize import mean_normalize
 from ..normalizers.seurat import seurat_v3
 from ..normalizers.cell_area import cell_area
 from ..normalizers.read_depth import read_depth
@@ -327,9 +327,9 @@ class CellGraphRankTokenizer:
                                 probed_genes=adata.var["ensembl_id"])
 
         if self.norm_method == "mean":
-            adata.X = mean(adata.X,
-                           gene_means_file=self.gene_means_file,
-                           probed_genes=adata.var["ensembl_id"])
+            adata.X = mean_normalize(adata.X,
+                                     gene_means_file=self.gene_means_file,
+                                     probed_genes=adata.var["ensembl_id"])
 
         if self.norm_method == "nzmedian":
             adata.X = non_zero_median(adata.X,
