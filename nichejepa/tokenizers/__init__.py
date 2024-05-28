@@ -9,7 +9,7 @@ from ..normalizers.seurat import seurat_v3
 from ..normalizers.cell_area import cell_area
 from ..normalizers.read_depth import read_depth
 from ..normalizers.analytic_pearson_residuals import analytic_pearson_residuals
-from ..preprocessers.filter_poor_quality_cells import filter_poor_quality_cells
+from ..preprocessors.filter_poor_quality_cells import filter_poor_quality_cells
 from .tokenize import process_gene_tokens, rank_gene_tokens
 
 __all__ = ["CellGraphRankTokenizer",

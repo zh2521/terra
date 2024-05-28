@@ -1,6 +1,5 @@
-import pytest
-import scipy
 import numpy as np
+import scipy
 
 from nichejepa.aggregators import aggregate_by_radius
 
