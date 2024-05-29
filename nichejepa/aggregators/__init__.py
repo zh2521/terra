@@ -1,1 +1,1 @@
-from .aggregate_by_radius import *
+from .aggregate_by_sum_of_neighbours import *

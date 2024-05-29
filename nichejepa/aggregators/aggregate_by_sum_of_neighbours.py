@@ -5,7 +5,7 @@ import numpy as np
 import anndata as ad
 
 
-def aggregate_by_radius(
+def aggregate_by_sum_of_neighbours(
     x: scipy.sparse.csr_matrix,
     coordinates: np.ndarray,
     radius: float,

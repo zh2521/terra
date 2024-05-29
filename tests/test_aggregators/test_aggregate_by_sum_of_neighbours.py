@@ -1,10 +1,10 @@
 import numpy as np
 import scipy
 
-from nichejepa.aggregators import aggregate_by_radius
+from nichejepa.aggregators import aggregate_by_sum_of_neighbours
 
 
-def test_aggregate_by_radius():
+def test_aggregate_by_sum_of_neighbours():
     """Check aggregate_by_radius works with a simple example"""
 
     x = np.array([
@@ -34,7 +34,7 @@ def test_aggregate_by_radius():
         [8, 0, 3,  4, 12, 4],
     ])
 
-    aggregation = aggregate_by_radius(
+    aggregation = aggregate_by_sum_of_neighbours(
         x=x,
         coordinates=coordinates,
         radius=radius,
