@@ -34,7 +34,7 @@ def test_seurat_v3():
     x_normalized_std = np.array(x_normalized.std(axis=0)).flatten()
 
     # seurat_v3 centers and scales the features, so the resulting features
-    # should have a mean of zero and a standard deviation of one
+    # should have a mean close to zero and a standard deviation close to one
 
     np.testing.assert_equal(np.round(x_normalized_mean, decimals=1), expected_mean)
     np.testing.assert_equal(np.round(x_normalized_std, decimals=1), expected_std)
