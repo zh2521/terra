@@ -10,17 +10,17 @@ def test_seurat_v3():
     """Test seurat_v3 works with a simple example"""
 
     x = np.column_stack((
-        np.array([round(gauss(0, math.sqrt(0))) for i in range(1000)]),
-        np.array([round(gauss(5000, math.sqrt(50))) for i in range(1000)]),
-        np.array([round(gauss(10000, math.sqrt(100))) for i in range(1000)]),
-        np.array([round(gauss(40000, math.sqrt(400))) for i in range(1000)]),
-        np.array([round(gauss(1000000, math.sqrt(1000))) for i in range(1000)]),
-        np.array([round(gauss(5000000, math.sqrt(5000))) for i in range(1000)]),
-        np.array([round(gauss(5000, math.sqrt(50))) for i in range(1000)]),
-        np.array([round(gauss(10000, math.sqrt(100))) for i in range(1000)]),
-        np.array([round(gauss(40000, math.sqrt(400))) for i in range(1000)]),
-        np.array([round(gauss(1000000, math.sqrt(1000))) for i in range(1000)]),
-        np.array([round(gauss(5000000, math.sqrt(5000))) for i in range(1000)]),
+        np.random.normal(0, math.sqrt(0), 1000),
+        np.random.normal(5000, math.sqrt(50), 1000),
+        np.random.normal(10000, math.sqrt(100), 1000),
+        np.random.normal(40000, math.sqrt(400), 1000),
+        np.random.normal(1000000, math.sqrt(1000), 1000),
+        np.random.normal(5000000, math.sqrt(5000), 1000),
+        np.random.normal(5000, math.sqrt(50), 1000),
+        np.random.normal(10000, math.sqrt(100), 1000),
+        np.random.normal(40000, math.sqrt(400), 1000),
+        np.random.normal(1000000, math.sqrt(1000), 1000),
+        np.random.normal(5000000, math.sqrt(5000), 1000),
     ))
     x = scipy.sparse.csr_matrix(x)
 
