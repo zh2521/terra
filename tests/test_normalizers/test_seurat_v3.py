@@ -16,6 +16,7 @@ def test_seurat_v3():
         np.random.normal(40000, math.sqrt(400), 1000),
         np.random.normal(1000000, math.sqrt(1000), 1000),
         np.random.normal(5000000, math.sqrt(5000), 1000),
+        np.random.normal(0, math.sqrt(0), 1000),
         np.random.normal(5000, math.sqrt(50), 1000),
         np.random.normal(10000, math.sqrt(100), 1000),
         np.random.normal(40000, math.sqrt(400), 1000),
@@ -23,6 +24,9 @@ def test_seurat_v3():
         np.random.normal(5000000, math.sqrt(5000), 1000),
     ))
     x = scipy.sparse.csr_matrix(x)
+
+    expected_std = np.array([0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1])
+    expected_mean = np.zeros(12)
 
     x_normalized = seurat_v3(x)
 
@@ -32,6 +36,5 @@ def test_seurat_v3():
     # seurat_v3 centers and scales the features, so the resulting features
     # should have a mean of zero and a standard deviation of one
 
-    np.testing.assert_equal(np.round(x_normalized_mean).astype(int), [0 for i in range(11)])
-    np.testing.assert_equal(np.round(x_normalized_std).astype(int), [0] + [1 for i in range(10)])
-
+    np.testing.assert_equal(np.round(x_normalized_mean).astype(int), expected_mean)
+    np.testing.assert_equal(np.round(x_normalized_std).astype(int), expected_std)
