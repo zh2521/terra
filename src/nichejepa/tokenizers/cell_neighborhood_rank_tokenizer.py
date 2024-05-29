@@ -55,11 +55,11 @@ import numpy as np
 import scipy.sparse as sp
 from datasets import Dataset
 
-from ..aggregators.aggregate_by_radius import aggregate_by_radius
+from ..aggregators.aggregate_by_sum_of_neighbours import aggregate_by_sum_of_neighbours
 from ..normalizers.shifted_log_mean import shifted_log_mean
 from ..normalizers.shifted_log import shifted_log
 from ..normalizers.non_zero_median import non_zero_median
-from ..normalizers.mean_normalize import mean_normalize
+from ..normalizers.mean_normalize_by_gene import mean_normalize_by_gene
 from ..normalizers.seurat import seurat_v3
 from ..normalizers.cell_area import cell_area
 from ..normalizers.read_depth import read_depth
@@ -328,57 +328,42 @@ class CellNeighborhoodRankTokenizer:
 
         print("Computing spatial neighborhood graph and aggregating counts.")
         # Aggregate neighborhood cell gene expression
-        adata = aggregate_by_radius(adata)
+        adata.layers["X_neighborhood"] = aggregate_by_sum_of_neighbours(adata.X, adata.obsm["spatial"], radius=27.5)
 
-        print("Normalizing counts.")
-        # Normalize cell and neighborhood counts before gene ranking
+        print("Normalizing counts by `norm_factor`.")
+
+        if self.norm_factor == "read_depth":
+            adata.X = read_depth(adata.X)
+            adata.layers["X_neighborhood"] = read_depth(adata.layers["X_neighborhood"])
+
+        if self.norm_factor == "cell_area":
+            adata.X = cell_area(adata.X, cell_areas=adata.obs["cell_area"])
+            adata.obs["neighborhood_cell_area"] = np.array(
+                adata.obsp["spatial_connectivities"].T @ adata.obs["cell_area"].values.reshape(-1, 1)
+            )
+            adata.X = cell_area(adata.layers["X_neighborhood"], cell_areas=adata.obs["neighborhood_cell_area"])
+
+        print("Normalizing counts by `norm_method`.")
+
         if self.norm_method == "analytic_pearson_residuals":
             adata.X = analytic_pearson_residuals(adata.X)
             adata.layers["X_neighborhood"] = analytic_pearson_residuals(adata.layers["X_neighborhood"])
-        elif self.norm_factor == "read_depth":
-            adata.X = read_depth(adata.X)
-            adata.layers["X_neighborhood"] = read_depth(adata.layers["X_neighborhood"])
-        elif self.norm_factor == "cell_area":
-            adata.X = cell_area(adata.X,
-                                cell_areas=adata.obs["cell_area"])
-            adata.obs["neighborhood_cell_area"] = np.array(
-                adata.obsp["spatial_connectivities"].T @ adata.obs["cell_area"].values.reshape(-1, 1))
-            adata.X = cell_area(adata.layers["X_neighborhood"],
-                                cell_areas=adata.obs["neighborhood_cell_area"])
 
         if self.norm_method == "seurat_v3":
-            adata.X = seurat_v3(adata.X,
-                                gene_means_file=self.cell_gene_means_file,
-                                gene_reg_stds_file=self.cell_gene_reg_stds_file,
-                                probed_genes=adata.var["ensembl_id"])
-            adata.layers["X_neighborhood"] = seurat_v3(adata.layers["X_neighborhood"],
-                                                       gene_means_file=self.neighborhood_gene_means_file,
-                                                       gene_reg_stds_file=self.neighborhood_gene_reg_stds_file,
-                                                       probed_genes=adata.var["ensembl_id"])
+            adata.X = seurat_v3(adata.X)
+            adata.layers["X_neighborhood"] = seurat_v3(adata.layers["X_neighborhood"])
 
         if self.norm_method == "mean":
-            adata.X = mean_normalize(adata.X,
-                                     gene_means_file=self.cell_gene_means_file,
-                                     probed_genes=adata.var["ensembl_id"])
-            adata.layers["X_neighborhood"] = mean_normalize(adata.layers["X_neighborhood"],
-                                                            gene_means_file=self.neighborhood_gene_means_file,
-                                                            probed_genes=adata.var["ensembl_id"])
+            adata.X = mean_normalize_by_gene(adata.X)
+            adata.layers["X_neighborhood"] = mean_normalize(adata.layers["X_neighborhood"])
 
         if self.norm_method == "nzmedian":
-            adata.X = non_zero_median(adata.X,
-                                      gene_nzmedians_file=self.cell_gene_nzmedians_file,
-                                      probed_genes=adata.var["ensembl_id"])
-            adata.layers["X_neighborhood"] = non_zero_median(adata.layers["X_neighborhood"],
-                                                             gene_nzmedians_file=self.neighborhood_gene_nzmedians_file,
-                                                             probed_genes=adata.var["ensembl_id"])
+            adata.X = non_zero_median(adata.X)
+            adata.layers["X_neighborhood"] = non_zero_median(adata.layers["X_neighborhood"])
 
         if self.norm_method == "shifted_log_mean":
-            adata.X = shifted_log_mean(adata.X,
-                                       gene_logmeans_file=self.cell_gene_logmeans_file,
-                                       probed_genes=adata.var["ensembl_id"])
-            adata.layers["X_neighborhood"] = shifted_log_mean(adata.layers["X_neighborhood"],
-                                                              gene_logmeans_file=self.neighborhood_gene_logmeans_file,
-                                                              probed_genes=adata.var["ensembl_id"])
+            adata.X = shifted_log_mean(adata.X)
+            adata.layers["X_neighborhood"] = shifted_log_mean(adata.layers["X_neighborhood"])
 
         if self.norm_method == "shifted_log":
             adata.X = shifted_log(adata.X)
