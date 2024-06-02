@@ -29,19 +29,6 @@ python main.py \
 ```
 *Note: This example is just used for illustrative purposes, as the ViT-H/14 config should be run on 16 A100 80G GPUs for an effective batch-size of 2048, in order to reproduce our results.*
 
-### Multi-GPU training
-In the multi-GPU setting, the implementation starts from [main_distributed.py](main_distributed.py), which, in addition to parsing the config file, also allows for specifying details about distributed training. For distributed training, we use the popular open-source [submitit](https://github.com/facebookincubator/submitit) tool and provide examples for a SLURM cluster.
-
-For example, to pre-train on 16 A100 80G GPUs using the pre-training experiment configs specificed inside [configs/in1k_vith14_ep300.yaml](configs/in1k_vith14_ep300.yaml), type the command:
-```
-python main_distributed.py \
-  --fname configs/in1k_vith14_ep300.yaml \
-  --folder $path_to_save_submitit_logs \
-  --partition $slurm_partition \
-  --nodes 2 --tasks-per-node 8 \
-  --time 1000
-```
-
 ### Requirements
 * Python 3.8 (or newer)
 * PyTorch 2.0
