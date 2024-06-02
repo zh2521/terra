@@ -48,5 +48,3 @@ python main_distributed.py \
 * torchvision
 * Other dependencies: pyyaml, numpy, opencv, submitit
 
-
-}
