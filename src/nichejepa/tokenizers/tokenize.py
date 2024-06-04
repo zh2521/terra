@@ -55,7 +55,7 @@ def process_gene_tokens(gene_tokens: list,
 
 def rank_gene_tokens(gene_scores: np.ndarray,
                      gene_tokens: np.ndarray,
-                     n_tokens: int) -> np.ndarray:
+                     n_tokens: Optional[int] = None) -> np.ndarray:
     """
     Rank gene tokens based on matching gene scores (highest gene score -> rank 1 gene).
 

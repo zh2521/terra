@@ -302,8 +302,8 @@ class CellNeighborhoodRankTokenizer:
 
         print("Computing spatial neighborhood graph and aggregating counts.")
         # Aggregate neighborhood cell gene expression
-        adata.layers["X_neighborhood"] = aggregate_neighbors(adata,
-                                                             radius=27.5)
+        adata = aggregate_neighbors(adata,
+                                    radius=27.5)
 
         print("Normalizing gene expression counts.")
         # Normalize counts before gene ranking
