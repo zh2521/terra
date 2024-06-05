@@ -25,6 +25,7 @@ dependencies = [
     "datasets",
     # for debug logging (referenced from the issue template)
     "session-info",
+    "wandb"
 ]
 
 [project.optional-dependencies]

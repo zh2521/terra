@@ -1,9 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
+"""
+Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
+"""
 
 import os
 
@@ -21,41 +20,32 @@ import copy
 import logging
 import sys
 import yaml
-import pdb
 
 import numpy as np
-
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
+import wandb
+from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 
-from .masks.multigene import MaskCollator as MBMaskCollator
-
+from .masks.multigene import MaskCollator
 from .masks.utils import apply_masks
-from .utils.distributed import (
-    init_distributed,
-    AllReduce
-)
-from .utils.logging import (
-    CSVLogger,
-    gpu_timer,
-    grad_logger,
-    AverageMeter)
+from .utils.distributed import (init_distributed,
+                                AllReduce)
+from .utils.logging import (CSVLogger,
+                            gpu_timer,
+                            grad_logger,
+                            AverageMeter)
 from .utils.tensors import repeat_interleave_batch
 from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset 
-
-from src.helper import (
-    load_checkpoint,
-    init_model_gene,
-    init_model,
-    init_opt)
-from datasets import load_from_disk
-import wandb
+from .helper import (load_checkpoint,
+                     init_model,
+                     init_opt)
 
 # --
 log_timings = True
-log_freq = 50
+log_freq = 10
 checkpoint_freq = 50
 # --
 
@@ -96,7 +86,6 @@ def main(args, resume_preempt=False):
     # --
 
     # -- MASK
-    aspect_ratio = args['mask']['aspect_ratio']  # aspect ratio of target blocks
     # --
 
     # -- OPTIMIZATION
@@ -147,9 +136,8 @@ def main(args, resume_preempt=False):
                            ('%.5f', 'mask-B'),
                            ('%d', 'time (ms)'))
 
-    num_workers=0
     # -- init model
-    encoder, predictor = init_model_gene(
+    encoder, predictor = init_model(
         device=device,
         pred_depth=pred_depth,
         pred_emb_dim=pred_emb_dim,
@@ -157,20 +145,21 @@ def main(args, resume_preempt=False):
     target_encoder = copy.deepcopy(encoder)
 
     # -- make data transforms
-    mask_collator = MBMaskCollator(
-        ratio=0.7
-        )
+    mask_collator = MaskCollator(seq_len=10,
+                                 n_targets=2,
+                                 n_contexts=1)
+    
     # -- init data-loaders/samplers
-    data_path = 
+    data_path = '../datasets/st_data/gold/cell_neighborhood_tokenizer/nanostring_cosmx_human_brain/nanostring_cosmx_human_brain_read_depth_shifted_log_2048.dataset' # TODO: change
     dataset = load_from_disk(data_path, keep_in_memory=True)
     dataset = dataset.train_test_split(test_size=0.10,
                                        seed=42) # TODO: parameterize
     
     _, unsupervised_loader, unsupervised_sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
-            data = dataset["train"],
-            vocab_size = 963, 
-            seq_len = 580,
+            data=dataset["train"],
+            vocab_size=6031, 
+            seq_len=20,
             collator=mask_collator,
             pin_mem=pin_mem,
             training=True,
@@ -252,7 +241,6 @@ def main(args, resume_preempt=False):
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred) in enumerate(unsupervised_loader):
-            #pdb.set_trace()
             def load_genes():
                 # -- unsupervised imgs
                 genes = udata.to(device, non_blocking=True)
@@ -270,18 +258,17 @@ def main(args, resume_preempt=False):
 
                 def forward_target():
                     with torch.no_grad():
-                        masks = masks_enc[0] | masks_pred[0]
-                        h = target_encoder(genes,masks.unsqueeze(1).repeat(1, masks.size(1), 1).unsqueeze(1))
+                        h = target_encoder(genes)
                         h = F.layer_norm(h, (h.size(-1),))  # normalize over feature-dim
-                        expanded_mask = masks_pred[0].unsqueeze(-1).expand(-1, -1,h.shape[-1])
-                        h = h * expanded_mask
+                        B = len(h)
+                        # -- create targets (masked regions of h)
+                        h = apply_masks(h, masks_pred)
+                        h = repeat_interleave_batch(h, B, repeat=len(masks_enc))
                         return h
 
                 def forward_context():
-                    z = encoder(genes, masks_enc[0].unsqueeze(1).repeat(1, masks_enc[0].size(1), 1).unsqueeze(1))
+                    z = encoder(genes, masks_enc)
                     z = predictor(z, masks_enc, masks_pred)
-                    expanded_mask = masks_pred[0].unsqueeze(-1).expand(-1, -1,h.shape[-1])
-                    z = z * expanded_mask
                     return z
 
                 def loss_fn(z, h):
@@ -344,7 +331,7 @@ def main(args, resume_preempt=False):
                                        grad_stats.max))
                     if (itr % log_freq == 0) or np.isnan(loss) or np.isinf(loss):
                         wandb.init(
-                            project="NicheJepa",
+                            project="nichejepa",
                             config={
                                 'loss' : loss,
                                 'grad_stats': grad_stats

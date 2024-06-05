@@ -1,35 +1,31 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
+"""
+Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+https://github.com/facebookresearch/ijepa/blob/main/src/helper.py (05.06.2024).
+"""
 
 import logging
 import sys
 
 import torch
 
-import src.nichejepa.models.gene_transformer as gt
+import models.gene_transformer as gt
 
-from src.utils.schedulers import (
-    WarmupCosineSchedule,
-    CosineWDSchedule)
-from src.utils.tensors import trunc_normal_
+from .utils.schedulers import (WarmupCosineSchedule,
+                               CosineWDSchedule)
+from .utils.tensors import trunc_normal_
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-def load_checkpoint(
-    device,
-    r_path,
-    encoder,
-    predictor,
-    target_encoder,
-    opt,
-    scaler,
-):
+def load_checkpoint(device,
+                    r_path,
+                    encoder,
+                    predictor,
+                    target_encoder,
+                    opt,
+                    scaler):
     try:
         checkpoint = torch.load(r_path, map_location=torch.device('cpu'))
         epoch = checkpoint['epoch']

@@ -1,9 +1,8 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-#
+"""
+Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+https://github.com/facebookresearch/ijepa/blob/main/main_distributed.py (05.06.2024).
+"""
 
 import argparse
 import logging
@@ -14,7 +13,7 @@ import yaml
 
 import submitit
 
-from src.train import main as app_main
+from src.nichejepa.train import main as app_main
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
