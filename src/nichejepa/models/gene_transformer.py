@@ -253,9 +253,9 @@ class GeneTransformerPredictor(nn.Module):
 class GeneTransformerEncoder(nn.Module):
     def __init__(
         self,
-        vocab_size=963,
+        vocab_size=6029,
         embed_dim=768,
-        seq_len = 580,
+        seq_len=10,
         predictor_embed_dim=384,
         depth=12,
         predictor_depth=12,
@@ -323,6 +323,7 @@ class GeneTransformerEncoder(nn.Module):
                 masks = [masks]
 
         # -- get gene embeddings from sequence of gene tokens
+        print(torch.max(x))
         x = self.gene_embed(x)
         B, N, D = x.shape
         
@@ -346,6 +347,8 @@ class GeneTransformerEncoder(nn.Module):
     def interpolate_pos_encoding(self, x, pos_embed):
         npatch = x.shape[1] - 1
         N = pos_embed.shape[1] - 1
+        print(npatch)
+        print(N)
         if npatch == N:
             return pos_embed
         class_emb = pos_embed[:, 0]

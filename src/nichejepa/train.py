@@ -140,6 +140,7 @@ def main(args, resume_preempt=False):
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
         device=device,
+        seq_len=seq_len,
         pred_depth=pred_depth,
         pred_emb_dim=pred_emb_dim,
         model_name=model_name)
@@ -159,7 +160,7 @@ def main(args, resume_preempt=False):
     _, unsupervised_loader, unsupervised_sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
             data=dataset["train"],
-            vocab_size=6031, 
+            vocab_size=6029, 
             seq_len=seq_len,
             collator=mask_collator,
             pin_mem=pin_mem,

@@ -2,13 +2,13 @@ data:
   batch_size: 448
   num_workers: 1
   pin_mem: true
+  seq_len: 10
 logging:
   folder: logs/cnd_gtb10_ep300/
   write_tag: jepa
 mask:
   n_contexts: 1
   n_targets: 2
-  seq_len: 10
 meta:
   copy_data: false
   load_checkpoint: false

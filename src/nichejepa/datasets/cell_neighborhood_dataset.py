@@ -15,11 +15,9 @@ logger = getLogger()
 def make_cell_neighborhood_dataset(
         batch_size,
         data,
-        vocab_size = 6034,
+        vocab_size=6029,
         mask_index=1,
-        off1 =11,
-        off2 = 1035,
-        seq_len= 20,
+        seq_len=10,
         collator=None,
         pin_mem=True,
         num_workers=8,

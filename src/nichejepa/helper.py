@@ -63,7 +63,7 @@ def load_checkpoint(device,
 
 
 def init_model(device,
-               seq_len=20,
+               seq_len,
                model_name="gt_base",
                pred_depth=6,
                pred_emb_dim=384):
