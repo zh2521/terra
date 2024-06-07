@@ -17,7 +17,7 @@ logger = getLogger()
 
 class MaskCollator():
     def __init__(self,
-                 seq_len=10,
+                 seq_len,
                  n_targets=2,
                  target_mask_size=2,
                  context_mask_size=10,
