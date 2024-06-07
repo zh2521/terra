@@ -231,11 +231,14 @@ def main(args, resume_preempt=False):
             if (epoch + 1) % checkpoint_freq == 0:
                 torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
 
+    # Initialize wandb project
+    wandb.init(project="nichejepa")
+
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
         logger.info(f"Epoch {epoch + 1}")
 
-        # -- update distributed-data-loader epoch
+        # Update distributed dataloader epoch
         unsupervised_sampler.set_epoch(epoch)
 
         loss_meter = AverageMeter()
@@ -257,10 +260,9 @@ def main(args, resume_preempt=False):
             def train_step():
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
-                # --
 
                 def forward_target():
-                    with torch.no_grad():
+                    with torch.no_grad(): # no backward pass for target encoder
                         # Encode all cell neighborhood tokens
                         h = target_encoder(cell_neighborhood_tokens) # output (B, seq_len, emb_size)
                         # Normalize over feature dim
@@ -283,13 +285,13 @@ def main(args, resume_preempt=False):
                     loss = AllReduce.apply(loss)
                     return loss
 
-                # Step 1. Forward
+                # Step 1: forward pass
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
                     h = forward_target()
                     z = forward_context()
                     loss = loss_fn(z, h)
 
-                #  Step 2. Backward & step
+                # Step 2: backward pass and step
                 if use_bfloat16:
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
@@ -300,7 +302,7 @@ def main(args, resume_preempt=False):
                 grad_stats = grad_logger(encoder.named_parameters())
                 optimizer.zero_grad()
 
-                # Step 3. momentum update of target encoder
+                # Step 3: momentum update of target encoder
                 with torch.no_grad():
                     m = next(momentum_scheduler)
                     for param_q, param_k in zip(encoder.parameters(), target_encoder.parameters()):
@@ -337,13 +339,18 @@ def main(args, resume_preempt=False):
                                        grad_stats.min,
                                        grad_stats.max))
                     if (itr % log_freq == 0) or np.isnan(loss) or np.isinf(loss):
-                        wandb.init(
-                            project="nichejepa",
-                            config={
-                                'loss' : loss,
-                                'grad_stats': grad_stats
-                                }
-                                )
+                        
+                        # Log metrics to wandb
+                        wandb.log({'epoch': epoch + 1,
+                                   'iteration': itr,
+                                   'loss': loss,
+                                   'mask_context': maskA_meter.avg,
+                                   'mask_target': maskB_meter.avg,
+                                   'weight_decay': _new_wd,
+                                   'learning_rate': _new_lr,
+                                   'memory_usage': torch.cuda.max_memory_allocated() / 1024.**2,
+                                   'time_per_iter': time_meter.avg})
+
             log_stats()
 
             assert not np.isnan(loss), 'loss is nan'

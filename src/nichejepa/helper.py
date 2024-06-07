@@ -96,53 +96,58 @@ def init_model(device,
     logger.info(encoder)
     return encoder, predictor
 
-def init_opt(
-    encoder,
-    predictor,
-    iterations_per_epoch,
-    start_lr,
-    ref_lr,
-    warmup,
-    num_epochs,
-    wd=1e-6,
-    final_wd=1e-6,
-    final_lr=0.0,
-    use_bfloat16=False,
-    ipe_scale=1.25
-):
-    param_groups = [
-        {
-            'params': (p for n, p in encoder.named_parameters()
-                       if ('bias' not in n) and (len(p.shape) != 1))
-        }, {
-            'params': (p for n, p in predictor.named_parameters()
-                       if ('bias' not in n) and (len(p.shape) != 1))
-        }, {
-            'params': (p for n, p in encoder.named_parameters()
-                       if ('bias' in n) or (len(p.shape) == 1)),
-            'WD_exclude': True,
-            'weight_decay': 0
-        }, {
-            'params': (p for n, p in predictor.named_parameters()
-                       if ('bias' in n) or (len(p.shape) == 1)),
-            'WD_exclude': True,
-            'weight_decay': 0
-        }
-    ]
+def init_opt(encoder,
+             predictor,
+             iterations_per_epoch,
+             start_lr,
+             ref_lr,
+             warmup,
+             num_epochs,
+             wd=1e-6,
+             final_wd=1e-6,
+             final_lr=0.0,
+             use_bfloat16=False,
+             ipe_scale=1.25):
+    """
+    Initialize optimizer, lr scheduler, wd scheduler, and amp scaler.
+    """
 
-    logger.info('Using AdamW')
+    param_groups = [{'params': (p for n, p in encoder.named_parameters()
+                                if ('bias' not in n) and (len(p.shape) != 1))},
+                    {'params': (p for n, p in predictor.named_parameters()
+                                if ('bias' not in n) and (len(p.shape) != 1))},
+                    {'params': (p for n, p in encoder.named_parameters()
+                                if ('bias' in n) or (len(p.shape) == 1)),
+                     'WD_exclude': True,
+                     'weight_decay': 0},
+                    {'params': (p for n, p in predictor.named_parameters()
+                                if ('bias' in n) or (len(p.shape) == 1)),
+                     'WD_exclude': True,
+                     'weight_decay': 0}]
+
+    # Initialize optimizer with decoupled weight decay
+    logger.info("Initializing optimizer: AdamW")
     optimizer = torch.optim.AdamW(param_groups)
-    scheduler = WarmupCosineSchedule(
-        optimizer,
-        warmup_steps=int(warmup*iterations_per_epoch),
-        start_lr=start_lr,
-        ref_lr=ref_lr,
-        final_lr=final_lr,
-        T_max=int(ipe_scale*num_epochs*iterations_per_epoch))
-    wd_scheduler = CosineWDSchedule(
-        optimizer,
-        ref_wd=wd,
-        final_wd=final_wd,
-        T_max=int(ipe_scale*num_epochs*iterations_per_epoch))
+
+    # Initialize learning rate scheduler
+    logger.info("Initializing learning rate scheduler: WarmupCosineSchedule")
+    scheduler = WarmupCosineSchedule(optimizer,
+                                     warmup_steps=int(warmup*iterations_per_epoch),
+                                     start_lr=start_lr,
+                                     ref_lr=ref_lr,
+                                     final_lr=final_lr,
+                                     T_max=int(ipe_scale*num_epochs*iterations_per_epoch))
+    
+    # Initialize weight decay scheduler
+    logger.info("Initializing weight decay scheduler: CosineWDSchedule")
+    wd_scheduler = CosineWDSchedule(optimizer,
+                                    ref_wd=wd,
+                                    final_wd=final_wd,
+                                    T_max=int(ipe_scale*num_epochs*iterations_per_epoch))
+    
+    # Initialize gradient scaler for automatic mixed precision training to increase the loss magnitude, ensuring
+    # gradients are large enough to be represented in FP16
+    logger.info("Initializing automatic mixed precision training scaler: GradScaler")
     scaler = torch.cuda.amp.GradScaler() if use_bfloat16 else None
+    
     return optimizer, scaler, scheduler, wd_scheduler
