@@ -103,10 +103,12 @@ class CellNeighborhoodRankTokenizer:
                  neighborhood_gene_nzmedians_file: Path | str = NEIGHBORHOOD_GENE_NZMEDIANS_FILE,
                  neighborhood_gene_logmeans_file: Path | str = NEIGHBORHOOD_GENE_LOGMEANS_FILE,
                  token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
-                 cell_special_tokens: Optional[list[str]] = ["<cls_cell>"],
-                 cell_special_tokens_idx: Optional[list[int]] = [0],
-                 neighborhood_special_tokens: Optional[list[str]] = ["<cls_neighborhood>"],
-                 neighborhood_special_tokens_idx: Optional[list[int]] = [0]):
+                 separate_cell_and_neighborhood_tokens: bool=False,
+                 cell_special_tokens: Optional[list[str]] = None, # ["<cls_cell>"],
+                 cell_special_tokens_idx: Optional[list[int]] = None, # [0],
+                 neighborhood_special_tokens: Optional[list[str]] = None, # ["<cls_neighborhood>"],
+                 neighborhood_special_tokens_idx: Optional[list[int]] = None #[0]
+                ):
         """
         Initialize spatial transcriptomics rank tokenizer.
 
@@ -173,6 +175,7 @@ class CellNeighborhoodRankTokenizer:
         self.neighborhood_gene_means_file = neighborhood_gene_means_file
         self.neighborhood_gene_nzmedians_file = neighborhood_gene_nzmedians_file
         self.neighborhood_gene_logmeans_file = neighborhood_gene_logmeans_file
+        self.separate_cell_and_neighborhood_tokens = separate_cell_and_neighborhood_tokens
         self.cell_special_tokens = cell_special_tokens
         self.cell_special_tokens_idx = cell_special_tokens_idx
         self.neighborhood_special_tokens = neighborhood_special_tokens
@@ -184,7 +187,10 @@ class CellNeighborhoodRankTokenizer:
 
         # Get vocabulary and gene Ensembl IDs (protein-coding and miRNA genes)
         self.vocab = list(self.token_dict.keys())
-        self.coding_miRNA_ids = [key.split("_")[0] for key in list(self.vocab) if "_cell" in key]
+        if self.separate_cell_and_neighborhood_tokens:
+            self.coding_miRNA_ids = [key.split("_")[0] for key in list(self.vocab) if "_cell" in key]
+        else:
+            self.coding_miRNA_ids = [key for key in list(self.vocab) if "ENS" in key]
         self.coding_miRNA_dict = dict(zip(self.coding_miRNA_ids, [True] * len(self.vocab)))
 
     def tokenize_data(self,
@@ -362,9 +368,13 @@ class CellNeighborhoodRankTokenizer:
             [self.coding_miRNA_dict.get(gene_id, False) for gene_id in adata.var["ensembl_id"]]
             )[0]
         coding_miRNA_ids = adata.var["ensembl_id"][coding_miRNA_idx]
-        coding_miRNA_tokens_cell = np.array([self.token_dict[gene_id + "_cell"] for gene_id in coding_miRNA_ids])
-        coding_miRNA_tokens_neighborhood = np.array(
-            [self.token_dict[gene_id + "_neighborhood"] for gene_id in coding_miRNA_ids])
+        if self.separate_cell_and_neighborhood_tokens:
+            coding_miRNA_tokens_cell = np.array([self.token_dict[gene_id + "_cell"] for gene_id in coding_miRNA_ids])
+            coding_miRNA_tokens_neighborhood = np.array(
+                [self.token_dict[gene_id + "_neighborhood"] for gene_id in coding_miRNA_ids])
+        else:
+            coding_miRNA_tokens_cell = np.array([self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
+            coding_miRNA_tokens_neighborhood = np.array([self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
 
         gene_tokens_cell = []
         gene_tokens_neighborhood = []

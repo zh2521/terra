@@ -96,8 +96,9 @@ class CellGraphRankTokenizer:
                  gene_nzmedians_file: Path | str = GENE_NZMEDIANS_FILE,
                  gene_logmeans_file: Path | str = GENE_LOGMEANS_FILE,
                  token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
-                 special_tokens: Optional[list[str]] = ["<cls>"],
-                 special_tokens_idx: Optional[list[int]] = [0]):
+                 special_tokens: Optional[list[str]] = None, # ["<cls>"],
+                 special_tokens_idx: Optional[list[int]] = None #[0]
+                ):
         """
         Initialize spatial transcriptomics rank tokenizer.
 
