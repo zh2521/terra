@@ -1,8 +1,8 @@
 data:
-  batch_size: 448
+  batch_size: 2000
   seq_len: 512
-  vocab_size: 6035
-  num_workers: 1
+  vocab_size: 6033
+  num_workers: 0
   pin_mem: true
 logging:
   folder: logs/cnd_gtb10_ep300/
@@ -10,12 +10,17 @@ logging:
 mask:
   n_targets: 4
   n_contexts: 1
+  target_mask_size: 10
+  context_mask_size: 80
+
 meta:
   copy_data: false
   load_checkpoint: false
   model_name: gt_base
-  pred_depth: 3
+  pred_depth: 2
   pred_emb_dim: 384
+  enc_depth : 3
+  enc_emb_dim : 384
   read_checkpoint: null
   use_bfloat16: false
 optimization:

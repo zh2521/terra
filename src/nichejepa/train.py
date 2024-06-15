@@ -46,7 +46,7 @@ from .helper import (load_checkpoint,
 # --
 log_timings = True
 log_freq = 10
-checkpoint_freq = 50
+checkpoint_freq = 3
 # --
 
 _GLOBAL_SEED = 0
@@ -71,6 +71,9 @@ def main(args, resume_preempt=False):
     r_file = args['meta']['read_checkpoint']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    enc_depth = args['meta']['enc_depth']
+    enc_emb_dim= args['meta']['enc_emb_dim']
+
     if not torch.cuda.is_available():
         device = torch.device('cpu')
     else:
@@ -88,6 +91,9 @@ def main(args, resume_preempt=False):
     # -- MASK
     n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
+    target_mask_size = args['mask']['target_mask_size']
+    context_mask_size = args['mask']['context_mask_size']
+
     # --
 
     # -- OPTIMIZATION
@@ -142,6 +148,9 @@ def main(args, resume_preempt=False):
     encoder, predictor = init_model(
         device=device,
         seq_len=seq_len,
+        enc_emb_dim=enc_emb_dim,
+        enc_depth=enc_depth,
+        vocab_size =vocab_size,
         pred_depth=pred_depth,
         pred_emb_dim=pred_emb_dim,
         model_name=model_name)
@@ -149,6 +158,8 @@ def main(args, resume_preempt=False):
 
     # Initialize mask collator
     mask_collator = MaskCollator(seq_len=seq_len,
+                                 target_mask_size = target_mask_size,
+                                 context_mask_size = context_mask_size,
                                  n_targets=n_targets,
                                  n_contexts=n_contexts)
     
@@ -186,12 +197,25 @@ def main(args, resume_preempt=False):
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
+    # -- wandb init
+    wandb.init(project="nichejepa",
+       config={
+                    'num_epochs': num_epochs,
+                    'ema' : str(ema[0])+'__'+str(ema[1]),
+                    'lr':lr,
+                    'pred_depth':pred_depth,
+                    'pred_feature_size':pred_emb_dim,
+                    'encoder_feature_size':enc_emb_dim,
+                    'encoder_depth':enc_depth,
+                    'save_path':save_path,
+                    'batch_size': batch_size,
+                 }
+            )
     encoder = DistributedDataParallel(encoder, static_graph=True)
     predictor = DistributedDataParallel(predictor, static_graph=True)
     target_encoder = DistributedDataParallel(target_encoder)
     for p in target_encoder.parameters():
         p.requires_grad = False
-
     # -- momentum schedule
     momentum_scheduler = (ema[0] + i*(ema[1]-ema[0])/(ipe*num_epochs*ipe_scale)
                           for i in range(int(ipe*num_epochs*ipe_scale)+1))
@@ -232,7 +256,6 @@ def main(args, resume_preempt=False):
                 torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
 
     # Initialize wandb project
-    wandb.init(project="nichejepa")
 
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
