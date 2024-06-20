@@ -175,7 +175,7 @@ def main(args, resume_preempt=False):
         def process_loader(loader, dataset_type):
             for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
                 def load_cell_neighborhoods():
-                    # -- unsupervised imgs
+                    # -- unsupervised loader
                     cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
                     seg_label = udata[1].to(device, non_blocking=True)
                     niche_label = udata[2]
