@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 import scipy.sparse as sp
 from skmisc.loess import loess
 
@@ -30,8 +31,12 @@ def normalize_by_seurat(x: sp.csr_matrix) -> sp.csr_matrix:
         A sparse matrix containing the normalized features.
     """
 
-    if type(x) != np.ndarray:
+    if (type(x) == scipy.sparse._csr.csr_matrix or 
+    type(x) == scipy.sparse._csc.csc_matrix):
         x = x.toarray()
+    elif type(x) == np.matrix:
+        x = np.array(x)
+    print(type(x))
     gene_means = np.mean(x, axis=0)
     gene_vars = np.var(x, axis=0)
 
