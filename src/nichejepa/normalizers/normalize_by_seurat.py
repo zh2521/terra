@@ -36,7 +36,6 @@ def normalize_by_seurat(x: sp.csr_matrix) -> sp.csr_matrix:
         x = x.toarray()
     elif type(x) == np.matrix:
         x = np.array(x)
-    print(type(x))
     gene_means = np.mean(x, axis=0)
     gene_vars = np.var(x, axis=0)
 
