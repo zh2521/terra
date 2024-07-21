@@ -158,19 +158,25 @@ class GeneTransformerPredictor(nn.Module):
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
         init_std=0.02,
+        pos_learnable=1,
         **kwargs
     ):
         super().__init__()
         self.predictor_embed = nn.Linear(embed_dim, predictor_embed_dim, bias=True)
         self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
+
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
+        if pos_learnable==1:
+           self.predictor_pos_embed = nn.Parameter(torch.zeros(1, seq_len, predictor_embed_dim),requires_grad=True)
         # --
-        self.predictor_pos_embed = nn.Parameter(torch.zeros(1, seq_len, predictor_embed_dim),
+        else: 
+           self.predictor_pos_embed = nn.Parameter(torch.zeros(1, seq_len, predictor_embed_dim),
                                                 requires_grad=False)
-        predictor_pos_embed = get_1d_sincos_pos_embed(self.predictor_pos_embed.shape[-1],
+           predictor_pos_embed = get_1d_sincos_pos_embed(self.predictor_pos_embed.shape[-1],
                                                       int(seq_len),
                                                       cls_token=False)
-        self.predictor_pos_embed.data.copy_(torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
+           self.predictor_pos_embed.data.copy_(torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
+        
         # --
         self.predictor_blocks = nn.ModuleList([
             Block(
@@ -268,23 +274,33 @@ class GeneTransformerEncoder(nn.Module):
         drop_path_rate=0.0,
         norm_layer=nn.LayerNorm,
         init_std=0.02,
+        pos_learnable=1,
+        has_cls = True,
         **kwargs
     ):
         super().__init__()
         self.num_features = self.embed_dim = embed_dim
         self.num_heads = num_heads
+        self.has_cls = has_cls
         # --
-        self.gene_embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        if self.has_cls:
+           self.gene_embed = nn.Embedding(vocab_size+2, embed_dim, padding_idx=0)
+        else:
+           self.gene_embed = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
         self.seg_embed = nn.Embedding(3, embed_dim, padding_idx=0)
 
         #add here the lenght
         self.seq_len = seq_len
         # --
-        self.pos_embed = nn.Parameter(torch.zeros(1, seq_len, embed_dim), requires_grad=False)
-        pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1],
+        if pos_learnable==1:
+            self.pos_embed = nn.Parameter(torch.zeros(1, seq_len, embed_dim), requires_grad=True)
+        else:
+            self.pos_embed = nn.Parameter(torch.zeros(1, seq_len, embed_dim), requires_grad=False)
+            pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1],
                                             int(self.seq_len),
                                             cls_token=False)
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+            self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+
         # --
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
@@ -319,7 +335,10 @@ class GeneTransformerEncoder(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, x, seg_label, masks=None):
+    def forward(self, x, seg_label, masks=None, just_emb=False, multi_layer=False):
+        if just_emb:
+            return self.gene_embed(x)
+        
         if masks is not None:
             if not isinstance(masks, list):
                 masks = [masks]
@@ -331,11 +350,21 @@ class GeneTransformerEncoder(nn.Module):
         # -- add positional embedding to x
         pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
         x = x + pos_embed + self.seg_embed(seg_label)
-
+        
+        if multi_layer:
+            out_list=[]
+            for i, blk in enumerate(self.blocks):
+                x = blk(x)
+                if self.norm is not None:
+                    x0 = self.norm(x)
+                else:
+                    x0 = x
+                out_list.append(x0)
+            return out_list        
         # -- mask x
         if masks is not None:
             x = apply_masks(x, masks)
-
+        
         # -- fwd prop
         for i, blk in enumerate(self.blocks):
             x = blk(x)
@@ -360,8 +389,6 @@ class GeneTransformerEncoder(nn.Module):
         )
         pos_embed = pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return torch.cat((class_emb.unsqueeze(0), pos_embed), dim=1)
-
-
 def gt_predictor(**kwargs):
     model = GeneTransformerPredictor(
         mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),

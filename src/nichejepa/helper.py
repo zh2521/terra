@@ -69,20 +69,26 @@ def init_model(device,
                enc_depth=12, 
                model_name="gt_base",
                pred_depth=6,
+               pos_learnable = 1,
                vocab_size =6033,
-               pred_emb_dim=384):
+               pred_emb_dim=384,
+               has_cls = True):
     encoder = gt.__dict__[model_name](
         seq_len=seq_len,
         embed_dim=enc_emb_dim,
+        pos_learnable = pos_learnable,
         depth = enc_depth,
-        vocab_size=vocab_size
+        vocab_size=vocab_size,
+        has_cls=True
         )
     predictor = gt.__dict__["gt_predictor"](
         seq_len=seq_len,
         embed_dim=encoder.embed_dim,
+        pos_learnable = pos_learnable,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
-        num_heads=encoder.num_heads)
+        num_heads=encoder.num_heads,
+        has_cls=True)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):

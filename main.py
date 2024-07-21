@@ -48,7 +48,7 @@ def process_main(rank, args, world_size, devices):
         pp = pprint.PrettyPrinter(indent=4)
         pp.pprint(params)
     params['seed'] = args.seed
-    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size))
+    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size),port=40301)
     logger.info(f'Running... (rank: {rank}/{world_size})')
     app_main(args=params)
 
@@ -58,10 +58,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     num_gpus = len(args.devices)
-    #mp.set_start_method('spawn') # TODO: uncomment
+    mp.set_start_method('spawn') # TODO: uncomment
 
     for rank in range(num_gpus):
-        '''
+        ''' 
         mp.Process(
             target=process_main,
             args=(rank, args.fname, num_gpus, args.devices)

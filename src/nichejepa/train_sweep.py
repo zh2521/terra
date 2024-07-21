@@ -42,11 +42,20 @@ from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset
 from .helper import (load_checkpoint,
                      init_model,
                      init_opt)
+from tqdm import tqdm
+import pandas as pd
+from .logistic_reg import logistic_
+import multiprocessing as mp
+from sklearn.model_selection import train_test_split
+
+# Initialize shared list for collecting data
+#manager = mp.Manager()
+#data = manager.list()
 
 # --
 log_timings = True
 log_freq = 10
-checkpoint_freq = 1
+checkpoint_freq = 10
 # --
 
 _GLOBAL_SEED = 0
@@ -58,21 +67,21 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-def main(args, resume_preempt=False):
+def main(args, resume_preempt=False,data=None):
 
     # ----------------------------------------------------------------------- #
     #  PASSED IN PARAMS FROM CONFIG FILE
     # ----------------------------------------------------------------------- #
-
+    config = wandb.config
     # -- META
     use_bfloat16 = args['meta']['use_bfloat16']
     model_name = args['meta']['model_name']
     load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
-    pred_depth = args['meta']['pred_depth']
-    pred_emb_dim = args['meta']['pred_emb_dim']
-    enc_depth = args['meta']['enc_depth']
-    enc_emb_dim= args['meta']['enc_emb_dim']
+    pred_depth = int(config.pred_enc_depth %  10)
+    pred_emb_dim = config.enc_emb_dim
+    enc_depth = int( config.pred_enc_depth // 10)
+    enc_emb_dim= config.enc_emb_dim
 
     if not torch.cuda.is_available():
         device = torch.device('cpu')
@@ -83,25 +92,49 @@ def main(args, resume_preempt=False):
     # -- DATA
     batch_size = args['data']['batch_size']
     seq_len = args['data']['seq_len']
+    seq_len_cell = args['data']['seq_len_cell']
+    seq_len_neighborhood = args['data']['seq_len_neighborhood']
+    just_cell = args['data']['just_cell']
+    just_neighborhood = args['data']['just_neighborhood']
+    has_cls = args['data']['has_cls']
+    top_k = config.top_k
+
+    if just_cell and just_neighborhood:
+         seq_len = seq_len_neighborhood + seq_len_cell
+         if args['data']['has_cls']:
+             seq_len+=2
+    elif just_cell:
+        seq_len = seq_len_cell
+        if args['data']['has_cls']:
+            seq_len+=1
+    elif just_neighborhood:
+        seq_len = seq_len_neighborhood
+        if args['data']['has_cls']:
+            seq_len+=1
+    else:
+        assert "both seq_len_niche and seq_len_cell can't be zero"
     vocab_size = args['data']['vocab_size']
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
     # --
 
     # -- MASK
-    n_targets = args['mask']['n_targets']
+    n_targets = config.n_targets
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
-    context_mask_size = args['mask']['context_mask_size']
+    context_mask_size = config.context_mask_size
+    top_niche = args['mask']['top_niche']
+    top_cell_type = args['mask']['top_cell_type']
 
     # --
 
     # -- OPTIMIZATION
-    ema = args['optimization']['ema']
+    ema =[0,1]
+    ema[0] = config.ema
     ipe_scale = args['optimization']['ipe_scale']  # scheduler scale factor (def: 1.0)
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
-    num_epochs = args['optimization']['epochs']
+    num_epochs = config.epochs
     warmup = args['optimization']['warmup']
     start_lr = args['optimization']['start_lr']
     lr = args['optimization']['lr']
@@ -154,8 +187,10 @@ def main(args, resume_preempt=False):
         enc_depth=enc_depth,
         vocab_size =vocab_size,
         pred_depth=pred_depth,
+        pos_learnable=config.learnable,
         pred_emb_dim=pred_emb_dim,
-        model_name=model_name)
+        model_name=model_name,
+        has_cls=args['data']['has_cls'])
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -163,18 +198,30 @@ def main(args, resume_preempt=False):
                                  target_mask_size = target_mask_size,
                                  context_mask_size = context_mask_size,
                                  n_targets=n_targets,
-                                 n_contexts=n_contexts)
+                                 n_contexts=n_contexts,
+                                 has_cls=args['data']['has_cls'])
     
     # Initialize dataloader and -sampler
     data_path=args['data']['data_path']
     dataset = load_from_disk(args['data']['data_path'], keep_in_memory=True)
-    dataset = dataset.train_test_split(test_size=args['data']['split'],
-                                       seed=0)
+    labels = dataset['cell_types']
+    #train_indices, test_indices = train_test_split(range(len(dataset)), 
+    #                                               test_size=args['data']['split'], 
+    #                                               stratify=labels,
+    #                                               random_state=1)
+    train_indices, test_indices = train_test_split(range(len(dataset)),
+                                                   test_size=args['data']['split'],
+                                                   random_state=1)
+
+    train_dataset = dataset.select(train_indices)
+    test_dataset = dataset.select(test_indices)
+    #dataset = dataset.train_test_split(test_size=args['data']['split'],
+    #                                   seed=0)
     
-    _, unsupervised_loader, unsupervised_sampler = make_cell_neighborhood_dataset(
+    _, train_loader, test__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
-            data=dataset["train"],
-            vocab_size=vocab_size, 
+            data=train_dataset,
+            vocab_size=vocab_size,
             seq_len=seq_len,
             collator=mask_collator,
             pin_mem=pin_mem,
@@ -182,8 +229,32 @@ def main(args, resume_preempt=False):
             num_workers=num_workers,
             world_size=world_size,
             rank=rank,
-            drop_last=True)
-    ipe = len(unsupervised_loader)
+            drop_last=False,
+            just_cell=just_cell,
+            just_neighborhood=just_neighborhood,
+            seq_len_cell = seq_len_cell,
+            seq_len_neighborhood = seq_len_neighborhood,
+            has_cls =args['data']['has_cls'])
+
+    _, test_loader, train__sampler = make_cell_neighborhood_dataset(
+            batch_size=batch_size,
+            data=test_dataset,
+            vocab_size=vocab_size,
+            seq_len=seq_len,
+            collator=mask_collator,
+            pin_mem=pin_mem,
+            training=False,
+            num_workers=num_workers,
+            world_size=world_size,
+            rank=rank,
+            drop_last=False,
+            just_cell=just_cell,
+            just_neighborhood=just_neighborhood,
+            seq_len_cell = seq_len_cell,
+            seq_len_neighborhood = seq_len_neighborhood,
+            has_cls =args['data']['has_cls'])
+
+    ipe = len(train_loader)
 
     # -- init optimizer and scheduler
     optimizer, scaler, scheduler, wd_scheduler = init_opt(
@@ -199,26 +270,7 @@ def main(args, resume_preempt=False):
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
-    # -- wandb init
-    wandb.init(project="nichejepa-benchmark",
-       config={
-                    'num_epochs': num_epochs,
-                    'ema' : str(ema[0])+'__'+str(ema[1]),
-                    'lr':lr,
-                    'pred_depth':pred_depth,
-                    'pred_feature_size':pred_emb_dim,
-                    'encoder_feature_size':enc_emb_dim,
-                    'encoder_depth':enc_depth,
-                    'save_path':save_path,
-                    'batch_size': batch_size,
-                    'target_mask_size':  target_mask_size,
-                    'context_mask_size' : context_mask_size,
-                    'n_targets' : n_targets,
-                    'n_contexts' : n_contexts,
-                    'dataset' : args['data']['data_path'],
-                    'seed' : args['seed']
-                 }
-            )
+    
     encoder = DistributedDataParallel(encoder, static_graph=True)
     predictor = DistributedDataParallel(predictor, static_graph=True)
     target_encoder = DistributedDataParallel(target_encoder)
@@ -270,14 +322,14 @@ def main(args, resume_preempt=False):
         logger.info(f"Epoch {epoch + 1}")
 
         # Update distributed dataloader epoch
-        unsupervised_sampler.set_epoch(epoch)
+        train__sampler.set_epoch(epoch)
 
         loss_meter = AverageMeter()
         maskA_meter = AverageMeter()
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred) in enumerate(unsupervised_loader):
+        for itr, (udata, masks_enc, masks_pred) in enumerate(train_loader):
             def load_cell_neighborhoods():
                 # -- unsupervised imgs
                 cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
@@ -371,28 +423,103 @@ def main(args, resume_preempt=False):
                                        grad_stats.last_layer,
                                        grad_stats.min,
                                        grad_stats.max))
-                    if (itr % log_freq == 0) or np.isnan(loss) or np.isinf(loss):
-                        
-                        # Log metrics to wandb
-                        wandb.log({'epoch': epoch + 1,
-                                   'iteration': itr,
-                                   'loss': loss,
-                                   'loss_avg':loss_meter.avg,
-                                   'mask_context': maskA_meter.avg,
-                                   'mask_target': maskB_meter.avg,
-                                   'weight_decay': _new_wd,
-                                   'learning_rate': _new_lr,
-                                   'memory_usage': torch.cuda.max_memory_allocated() / 1024.**2,
-                                   'time_per_iter': time_meter.avg})
-
             log_stats()
-
             assert not np.isnan(loss), 'loss is nan'
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch+1)
+        #save_checkpoint(epoch+1)
+    if data==None:
+        data=[]
+    #encoder.eval()
+    def process_loader(loader, dataset_type):
+        for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
+                def load_cell_neighborhoods():
+                    # -- unsupervised loader
+                    cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
+                    seg_label = udata[1].to(device, non_blocking=True)
+                    if len(udata)==4:
+                       niche_label = udata[2]
+                       cell_type = udata[3]  # Assuming udata[3] is cell_type
+                    elif len(udata)==3:
+                       if just_cell:
+                          niche_label = None
+                          cell_type = udata[2]                       
+                       else:
+                           cell_type = None
+                           niche_label = udata[2]
+                    masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
+                    masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
+                    return (cell_neighborhood_tokens, seg_label, niche_label, cell_type, masks_1, masks_2)
+                cell_neighborhood_tokens, seg_label, niche_label, cell_type, masks_enc, masks_pred = load_cell_neighborhoods()
 
+                def eval_step():
+                    def forward_context(top_index, label_name, label_value):
+                        # Encode all cell neighborhood tokens
+                        if num_epochs==0:
+                          z_list = [encoder(cell_neighborhood_tokens,seg_label,just_emb=True,multi_layer=True)]
+                        else:
+                          z_list = encoder(cell_neighborhood_tokens, seg_label,multi_layer=True)
+                        average_features_list = []
+                        for z in z_list:
+                          masks = (cell_neighborhood_tokens != 0).int()
+                          if just_cell and just_neighborhood:
+                            if label_name == "niche_type":
+                                masks[:, 0:seq_len_cell] = 0
+                                masks[:, seq_len_cell+500:] = 0
+                            elif label_name == "cell_type":
+                                masks[:, seq_len_cell:] = 0
+                          if has_cls:
+                            masks[:, :] = 0
+                            if label_name == "cell_type":
+                                masks[:, 0] = 1
+                            if label_name == "niche_type":
+                                masks[:, -1] = 1
+                          masks[:, top_k:] = 0
+                          #rank = torch.zeros_like(cell_neighborhood_tokens, dtype=torch.float)
+                          #for i in range(cell_neighborhood_tokens.size(0)):
+                          # non_zero_indices = torch.nonzero(cell_neighborhood_tokens[i, :] != 0, as_tuple=True)[0]
+                          # rank[i, non_zero_indices] = torch.arange(1, len(non_zero_indices) + 1, dtype=torch.float, device=cell_neighborhood_tokens.device)
+                          #rank = torch.arange(1, cell_neighborhood_tokens.shape[1] + 1 , device=cell_neighborhood_tokens.device, dtype=torch.float).unsqueeze(0).expand_as(cell_neighborhood_tokens)    
+                          #masks[:,500:]=0
+                          expanded_mask = masks.unsqueeze(-1).expand_as(z)
+                          #rank_max = rank.max(dim=1, keepdim=True)[0]
+                          #rank_sum = rank.sum(dim=1, keepdim=True)
+                          #weights = (rank_max - rank + 1) / rank_sum
+                          #weights = weights.unsqueeze(-1).expand_as(z)
+                          #expanded_mask = expanded_mask*weights
+                          #expanded_mask[:,500:,:]=0
+                          masked_features = z * expanded_mask
+                          summed_features = masked_features.sum(dim=1)
+                          #average_features = summed_features
+                          count_valid_positions = expanded_mask.sum(dim=1)
+                          average_features = summed_features / count_valid_positions.clamp(min=1)
+                          average_features[count_valid_positions == 0] = 0
+                          average_features_list.append(average_features.cpu().numpy())
+                        average_features = np.concatenate(average_features_list, axis=1)
+                        label_cpu = label_value
+                        for i in range(len(average_features)):
+                            sample_features = average_features[i]
+                            sample_label = label_cpu[i]
+                            data_dict = {
+                                'split': dataset_type,
+                                'label_name': label_name,
+                                'seed': seed,
+                                label_name: sample_label
+                            }
+                            for j, feature in enumerate(sample_features):
+                                data_dict[f'feature_{j}'] = feature
+                            data.append(data_dict)
 
+                    with torch.no_grad():
+                        if just_neighborhood:
+                           forward_context(seq_len, "niche_type", niche_label)
+                        if just_cell:
+                           forward_context(seq_len_cell, "cell_type", cell_type)
+
+                eval_step()
+
+    process_loader(train_loader, 'train')
+    process_loader(test_loader, 'test')
 if __name__ == "__main__":
     main()

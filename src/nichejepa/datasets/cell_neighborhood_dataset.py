@@ -28,13 +28,22 @@ def make_cell_neighborhood_dataset(
         training=True, 
         copy_data=False,
         drop_last=True,
-        subset_file=None
-         ):
+        subset_file=None,
+        just_cell = True,
+        just_neighborhood = False,
+        seq_len_cell=0,
+        seq_len_neighborhood=0,
+        has_cls = True):
        
       dataset = CellNeighborhoodDataset(data,
                                         vocab_size,
                                         mask_index,
-                                        seq_len=seq_len)
+                                        seq_len=seq_len,
+                                        just_cell=just_cell,
+                                        just_neighborhood=just_neighborhood,
+                                        seq_len_cell = seq_len_cell,
+                                        seq_len_neighborhood = seq_len_neighborhood,
+                                        has_cls = has_cls)
       
       dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
                                                                      num_replicas=world_size,
@@ -57,7 +66,12 @@ class CellNeighborhoodDataset(Dataset):
                  data,
                  vocab_size,
                  mask_index,
-                 seq_len):
+                 seq_len,
+                 just_cell=True,
+                 just_neighborhood=False,
+                 seq_len_cell=0,
+                 seq_len_neighborhood=0,
+                 has_cls = True):
         """
         CellNeighborhoodDataset.
         """
@@ -66,12 +80,51 @@ class CellNeighborhoodDataset(Dataset):
         self.vocab_size = vocab_size
         self.mask_index = mask_index
         self.seq_len = seq_len
-
+        self.seq_len_cell = seq_len_cell
+        self.seq_len_neighborhood = seq_len_neighborhood
+        self.just_cell = just_cell
+        self.just_neighborhood = just_neighborhood
+        self.has_cls = has_cls
     def __len__(self):
         
         return self.len
     def __getitem__(self, item):
-        #return torch.tensor(self.dataset[item]["input_ids"][0:int(self.seq_len)]), torch.ones(self.seq_len).int(), self.dataset[item]['cell_types']
-        return torch.tensor(self.dataset[item]["input_ids"][0:self.seq_len]), torch.cat((torch.ones(self.seq_len // 2), torch.ones(self.seq_len - self.seq_len // 2) * 2)).int(), self.dataset[item]['niche_types'],self.dataset[item]['cell_types']
+      gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]
+      gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
 
+      if self.just_cell and self.just_neighborhood:
+        tokens = (gene_tokens_cell + gene_tokens_neighborhood)
+        niche_types = self.dataset[item]['niche_types']
+        cell_types = self.dataset[item]['cell_types']
+        
+        if self.has_cls:
+            tokens = [self.vocab_size] + tokens + [self.vocab_size + 1]
+            labels = torch.cat((torch.ones(self.seq_len_cell + 1), torch.ones(self.seq_len_neighborhood + 1) * 2)).int()
+        else:
+            labels = torch.cat((torch.ones(self.seq_len_cell), torch.ones(self.seq_len_neighborhood) * 2)).int()
+        return torch.tensor(tokens), labels, niche_types, cell_types
+
+      if self.just_cell:
+        tokens = gene_tokens_cell
+        cell_types = self.dataset[item]['cell_types']
+        
+        if self.has_cls:
+            tokens = [self.vocab_size] + tokens
+            labels = torch.ones(self.seq_len_cell + 1).int()
+        else:
+            labels = torch.ones(self.seq_len_cell).int()
+        return torch.tensor(tokens), labels, cell_types
+
+      if self.just_neighborhood:
+        tokens = gene_tokens_neighborhood
+        niche_types = self.dataset[item]['niche_types']
+        
+        if self.has_cls:
+            tokens += [self.vocab_size + 1]
+            labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
+        else: 
+            labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
+        return torch.tensor(tokens), labels, niche_types
+
+        
 

@@ -21,12 +21,14 @@ class MaskCollator():
                  n_targets=2,
                  target_mask_size=2,
                  context_mask_size=10,
-                 n_contexts=1):
+                 n_contexts=1,
+                 has_cls = False):
         self.seq_len = seq_len
         self.n_targets = n_targets
         self.target_mask_size = target_mask_size
         self.context_mask_size = context_mask_size
         self.n_contexts = n_contexts
+        self.has_cls = has_cls
         self._itr_counter = Value('i', -1)  # collator is shared across worker processes
 
     def step(self):
@@ -55,12 +57,20 @@ class MaskCollator():
         if valid_token_masks is not None:
             for k in range(len(valid_token_masks)):
                 mask *= valid_token_masks[k]
-
+        # cls will be added to the start and end of sequence
+        if self.has_cls:
+            mask[0] = 0
+            mask[-1] = 0
         mask = torch.nonzero(mask.flatten())
         mask = mask.squeeze()
+        
         # --
         mask_complement = torch.ones(self.seq_len, dtype=torch.int32)
         mask_complement[start:start+mask_size] = 0
+        # cls will be added to the start and end of sequence
+        if self.has_cls:
+            mask_complement[0] = 1
+            mask_complement[-1] = 1
         # --
         return mask, mask_complement
 
@@ -111,9 +121,14 @@ class MaskCollator():
             collated_masks_target.append(masks_target)
             collated_masks_context.append(masks_context)
 
-        collated_masks_target = [[cm[:keep_tokens_target] for cm in cm_list] for cm_list in collated_masks_target]
+        if self.has_cls:
+           collated_masks_target = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_target],torch.tensor([self.seq_len-1]))) for cm in cm_list] for cm_list in collated_masks_target]
+        else:
+           collated_masks_target = [[cm[:keep_tokens_target] for cm in cm_list] for cm_list in collated_masks_target]
         collated_masks_target = torch.utils.data.default_collate(collated_masks_target)
-        collated_masks_context = [[cm[:keep_tokens_context] for cm in cm_list] for cm_list in collated_masks_context]
+        if self.has_cls:
+           collated_masks_context = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_context],torch.tensor([self.seq_len-1]))) for cm in cm_list] for cm_list in collated_masks_context]
+        else:
+           collated_masks_context = [[cm[:keep_tokens_context] for cm in cm_list] for cm_list in collated_masks_context]
         collated_masks_context = torch.utils.data.default_collate(collated_masks_context)
-
         return collated_batch, collated_masks_context, collated_masks_target

@@ -32,7 +32,8 @@ def main(args, resume_preempt=False):
     top_niche = args['mask']['top_niche']
     top_cell_type = args['mask']['top_cell_type']
 
-    for seed in tqdm(range(10)):
+    for seed in tqdm(range(args['data']['Total_seed'])):
+    #for seed in tqdm([6]):
         # ----------------------------------------------------------------------- #
         #  PASSED IN PARAMS FROM CONFIG FILE
         # ----------------------------------------------------------------------- #
@@ -126,7 +127,7 @@ def main(args, resume_preempt=False):
         # Initialize dataloader and -sampler
         data_path = args['data']['data_path']
         dataset = load_from_disk(data_path, keep_in_memory=True)
-        dataset = dataset.train_test_split(test_size=args['data']['split'], seed=seed)
+        dataset = dataset.train_test_split(test_size=args['data']['split'], seed=0)
 
         _, train_loader, test__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
@@ -178,8 +179,12 @@ def main(args, resume_preempt=False):
                     # -- unsupervised loader
                     cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
                     seg_label = udata[1].to(device, non_blocking=True)
-                    niche_label = udata[2]
-                    cell_type = udata[3]  # Assuming udata[3] is cell_type
+                    if len(udata)==4:
+                       niche_label = udata[2]
+                       cell_type = udata[3]  # Assuming udata[3] is cell_type
+                    elif len(udata)==3:
+                       niche_label = None
+                       cell_type = udata[2]  # Assuming udata[3] is cell_type                          
                     masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                     masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
                     return (cell_neighborhood_tokens, seg_label, niche_label, cell_type, masks_1, masks_2)
@@ -189,11 +194,13 @@ def main(args, resume_preempt=False):
                 def eval_step():
                     def forward_context(top_index, label_name, label_value):
                         # Encode all cell neighborhood tokens
-                        z = encoder(cell_neighborhood_tokens, seg_label)  # output (B, seq_len, emb_size)
+                        z = encoder(cell_neighborhood_tokens, seg_label)
                         masks = (cell_neighborhood_tokens != 0).int()
+                        #masks = (cell_neighborhood_tokens == 15).int()  # make it from config file
                         if label_name=='niche_label':
                               masks[:, 0:256] = 0
                         masks[:, top_index:] = 0
+                        #masks[:,:]=1
                         expanded_mask = masks.unsqueeze(-1).expand_as(z)
                         masked_features = z * expanded_mask
                         summed_features = masked_features.sum(dim=1)
@@ -202,21 +209,31 @@ def main(args, resume_preempt=False):
                         average_features[count_valid_positions == 0] = 0
                         average_features = average_features.cpu().numpy()
                         label_cpu = label_value
+                        singel_gene =False # make it from config file
                         for i in range(len(average_features)):
                             sample_features = average_features[i]
+                            non_zero_positions = -1
+                            if singel_gene:
+                               non_zero_positions = (cell_neighborhood_tokens[i] == 15).nonzero(as_tuple=True)[0].tolist()
+                               if len(non_zero_positions)!=0:
+                                  non_zero_positions=non_zero_positions[0]
+                               else:
+                                  non_zero_positions = -1
                             sample_label = label_cpu[i]
                             data_dict = {
                                 'split': dataset_type,
                                 'label_name': label_name,
                                 'seed': seed,
-                                label_name: sample_label
+                                label_name: sample_label,
+                                'non_zero_positions': non_zero_positions
                             }
                             for j, feature in enumerate(sample_features):
                                 data_dict[f'feature_{j}'] = feature
                             data.append(data_dict)
 
                     with torch.no_grad():
-                        forward_context(top_niche, "niche_label", niche_label)
+                        if top_niche!= -1:
+                           forward_context(top_niche, "niche_label", niche_label)
                         forward_context(top_cell_type, "cell_type", cell_type)
 
                 eval_step()
