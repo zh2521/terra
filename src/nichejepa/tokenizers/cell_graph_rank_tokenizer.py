@@ -294,7 +294,7 @@ class CellGraphRankTokenizer:
             adata.X = normalize_by_read_depth(adata.X)
         elif self.norm_factor == "cell_area":
             adata.X = normalize_by_cell_area(adata.X,
-                                             cell_areas=adata.obs["cell_area"])
+                                             cell_areas=adata.obs["cell_area"].values)
 
         if self.norm_method == "seurat_v3":
             adata.X = normalize_by_seurat(adata.X)

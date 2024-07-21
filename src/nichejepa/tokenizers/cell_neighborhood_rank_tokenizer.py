@@ -321,12 +321,12 @@ class CellNeighborhoodRankTokenizer:
             adata.layers["X_neighborhood"] = normalize_by_read_depth(adata.layers["X_neighborhood"])
         elif self.norm_factor == "cell_area":
             adata.X = normalize_by_cell_area(adata.X,
-                                             cell_areas=adata.obs["cell_area"])
+                                             cell_areas=adata.obs["cell_area"].values)
             adata.obs["neighborhood_cell_area"] = np.array(
                 adata.obsp["spatial_connectivities"].T @ adata.obs["cell_area"].values.reshape(-1, 1)
             )
             adata.X = normalize_by_cell_area(adata.layers["X_neighborhood"],
-                                             cell_areas=adata.obs["neighborhood_cell_area"])
+                                             cell_areas=adata.obs["neighborhood_cell_area"].values)
             
         if self.norm_method == "seurat_v3":
             adata.X = normalize_by_seurat(adata.X)
