@@ -16,6 +16,7 @@ from src.nichejepa.train_sweep import main as app_main
 import wandb
 from src.nichejepa.logistic_reg import logistic_
 import pandas as pd
+from src.nichejepa.nmi_ari import compute_nmi_ari
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -32,6 +33,10 @@ parser.add_argument(
     '--do_sweep', action='store_true',
     help='flag to enable or disable sweeping'
 )
+parser.add_argument(
+    '--test', action='store_true',
+    help='flag to enable or disable sweeping'
+    )
 parser.add_argument(
     '--task', type=str, required=True,
     help='name of the task to perform'
@@ -59,7 +64,7 @@ def process_main(rank, args, world_size, devices,data):
         pp = pprint.PrettyPrinter(indent=4)
         pp.pprint(params)
     params['seed'] = args.seed
-    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size),port=40302)
+    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size),port=40313)
     logger.info(f'Running... (rank: {rank}/{world_size})')
     app_main(args=params,data=data)
 
@@ -70,20 +75,23 @@ def sweep_func(args):
     processes = []
     if not args.do_sweep:
        config = {
-       'pred_enc_depth': 31,
+       'pred_enc_depth': 21,
        "learnable": 1,
-       "ema": 0.9,
-       "context_mask_size": 500,
-       'n_targets': 8,
-       'epochs' : 1,
-       'enc_emb_dim':704,
+       "ema": 0.6715179701040991,
+       "context_mask_size": 1070,
+       'n_targets': 1,
+       'epochs' : 0,
+       'top_k' : 127,
+       'enc_emb_dim':768,
       }
        wandb.init(project="nichejepa-sweep",config=config)
-       data =[]
-       process_main(0, args, num_gpus, args.devices,data)
     else:
        wandb.init(project="nichejepa-sweep")
-       for rank in range(num_gpus):
+    if args.test:
+        data=[]
+        process_main(0, args, num_gpus, args.devices,data)
+    else:
+      for rank in range(num_gpus):
 
          p = mp.Process(
             target=process_main,
@@ -91,21 +99,23 @@ def sweep_func(args):
          )
          p.start()
          processes.append(p)
-       for p in processes:
+      for p in processes:
           p.join()
     final_df = pd.DataFrame(list(data))
     print(final_df.shape)
     print(final_df)
+    final_df.to_csv("final_df.csv", index=False)
     if args.task == 'cell_type':
        print(final_df['cell_type'].value_counts())
     elif args.task == 'niche_type':
         print(final_df['niche_type'].value_counts())
+    df_nmi_ari = compute_nmi_ari(final_df,wandb.config.enc_emb_dim)
     test_f1_cell, test_f1_niche = logistic_(final_df,num_features=wandb.config.enc_emb_dim)
     if args.task == 'cell_type':    
-       wandb.log({"f1_test": test_f1_cell})
+        wandb.log({"f1_test": test_f1_cell, 'nmi_score':df_nmi_ari.loc[0,'nmi_score'], 'ari_score':df_nmi_ari.loc[0,'ari_score'], 'df_nmi_ari':df_nmi_ari})
     elif args.task == 'niche_type': 
-       wandb.log({"f1_test": test_f1_niche})
-
+       wandb.log({"f1_test": test_f1_niche, 'nmi_score':df_nmi_ari.loc[0,'nmi_score'], 'ari_score':df_nmi_ari.loc[0,'ari_score'], 'df_nmi_ari':df_nmi_ari})
+    print(df_nmi_ari)
 if __name__ == '__main__':
     __spec__ = None
     #mp.set_start_method('spawn') # TODO: uncomment
@@ -113,14 +123,14 @@ if __name__ == '__main__':
     sweep_config = {
     'method': 'random',  # 'grid' or 'bayes' are other options
     'metric': {
-        'name': 'f1_test',
+        'name': 'ari_score',
         'goal': 'maximize'
     },
     'parameters': {
         #'pred_enc_depth': {'values': [41,42,43,44,51,52,53,54,55,61,62,63,64,65,66]},
         'pred_enc_depth': {'values': [11,21,22,31,32,33,41,42,43,44,51,52,53,54,55]},
         #'pred_emb_dim': {'values': [192,384,768]},
-        #'epochs': {'values': [11]},
+        #'epochs': {'values': [0]},
         'learnable': {'values': [1]},
         'ema': {
             'distribution': 'uniform',
@@ -150,8 +160,8 @@ if __name__ == '__main__':
         },
         'top_k': {
             'distribution': 'int_uniform',
-            'min': 10,
-            'max': 1000
+            'min': 1,
+            'max': 500
             }
     }}
     if args.do_sweep:

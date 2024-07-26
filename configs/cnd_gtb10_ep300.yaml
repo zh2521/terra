@@ -1,5 +1,5 @@
 data:
-  batch_size: 15
+  batch_size: 30
   #data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/scGPT.dataset
   data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/nichecompass.dataset 
   num_workers: 12
@@ -14,6 +14,8 @@ data:
   seq_len_cell: 361
   seq_len_neighborhood: 1091
   has_cls: False
+  weighted_average: True
+  get_topk: False
 logging:
   folder: logs/nichecompass.dataset_ema0.8_target20_context134_epoch10_encoder2_target1_emb384_numtarget4_numcon1_learn_split0.6_benchmark_seed
   write_tag: jepa
@@ -21,7 +23,7 @@ mask:
   context_mask_size: 200
   n_contexts: 1
   n_targets: 4
-  target_mask_size: 40
+  target_mask_size: 14
   top_niche: -1
   top_cell_type: 361
 

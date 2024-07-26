@@ -20,7 +20,7 @@ import copy
 import logging
 import sys
 import yaml
-
+import pickle
 import numpy as np
 import torch
 import torch.multiprocessing as mp
@@ -47,6 +47,8 @@ import pandas as pd
 from .logistic_reg import logistic_
 import multiprocessing as mp
 from sklearn.model_selection import train_test_split
+from src.nichejepa.logistic_reg import logistic_
+from src.nichejepa.nmi_ari import compute_nmi_ari
 
 # Initialize shared list for collecting data
 #manager = mp.Manager()
@@ -91,13 +93,23 @@ def main(args, resume_preempt=False,data=None):
 
     # -- DATA
     batch_size = args['data']['batch_size']
+    weighted_average = args['data']['weighted_average']
+    if config.pred_enc_depth < 41:
+        batch_size=30 
+    elif config.pred_enc_depth <51:
+        batch_size=20
+    else:
+        batch_size=10
     seq_len = args['data']['seq_len']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     just_cell = args['data']['just_cell']
     just_neighborhood = args['data']['just_neighborhood']
     has_cls = args['data']['has_cls']
-    top_k = config.top_k
+    get_topk = args['data']['get_topk']
+    top_k = 0
+    if get_topk:
+       top_k = config.top_k
 
     if just_cell and just_neighborhood:
          seq_len = seq_len_neighborhood + seq_len_cell
@@ -432,7 +444,7 @@ def main(args, resume_preempt=False,data=None):
     if data==None:
         data=[]
     #encoder.eval()
-    def process_loader(loader, dataset_type):
+    def process_loader(loader, dataset_type,top_k=0):
         for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
                 def load_cell_neighborhoods():
                     # -- unsupervised loader
@@ -466,7 +478,8 @@ def main(args, resume_preempt=False,data=None):
                           if just_cell and just_neighborhood:
                             if label_name == "niche_type":
                                 masks[:, 0:seq_len_cell] = 0
-                                masks[:, seq_len_cell+500:] = 0
+                                if get_topk:
+                                   masks[:, seq_len_cell+top_k:] = 0
                             elif label_name == "cell_type":
                                 masks[:, seq_len_cell:] = 0
                           if has_cls:
@@ -475,26 +488,27 @@ def main(args, resume_preempt=False,data=None):
                                 masks[:, 0] = 1
                             if label_name == "niche_type":
                                 masks[:, -1] = 1
-                          masks[:, top_k:] = 0
-                          #rank = torch.zeros_like(cell_neighborhood_tokens, dtype=torch.float)
-                          #for i in range(cell_neighborhood_tokens.size(0)):
-                          # non_zero_indices = torch.nonzero(cell_neighborhood_tokens[i, :] != 0, as_tuple=True)[0]
-                          # rank[i, non_zero_indices] = torch.arange(1, len(non_zero_indices) + 1, dtype=torch.float, device=cell_neighborhood_tokens.device)
-                          #rank = torch.arange(1, cell_neighborhood_tokens.shape[1] + 1 , device=cell_neighborhood_tokens.device, dtype=torch.float).unsqueeze(0).expand_as(cell_neighborhood_tokens)    
-                          #masks[:,500:]=0
+                          if get_topk:
+                              masks[:, top_k:] = 0
                           expanded_mask = masks.unsqueeze(-1).expand_as(z)
-                          #rank_max = rank.max(dim=1, keepdim=True)[0]
-                          #rank_sum = rank.sum(dim=1, keepdim=True)
-                          #weights = (rank_max - rank + 1) / rank_sum
-                          #weights = weights.unsqueeze(-1).expand_as(z)
-                          #expanded_mask = expanded_mask*weights
-                          #expanded_mask[:,500:,:]=0
+                          if weighted_average:
+                             rank = torch.zeros_like(cell_neighborhood_tokens, dtype=torch.float)
+                             for i in range(cell_neighborhood_tokens.size(0)):
+                                 non_zero_indices = torch.nonzero(cell_neighborhood_tokens[i, :] != 0, as_tuple=True)[0]
+                                 rank[i, non_zero_indices] = torch.arange(1, len(non_zero_indices) + 1, dtype=torch.float, device=cell_neighborhood_tokens.device)
+                             rank_max = rank.max(dim=1, keepdim=True)[0]
+                             rank_sum = rank.sum(dim=1, keepdim=True)
+                             weights = (rank_max - rank + 1) / rank_sum
+                             weights = weights.unsqueeze(-1).expand_as(z)
+                             expanded_mask = expanded_mask*weights
                           masked_features = z * expanded_mask
                           summed_features = masked_features.sum(dim=1)
-                          #average_features = summed_features
-                          count_valid_positions = expanded_mask.sum(dim=1)
-                          average_features = summed_features / count_valid_positions.clamp(min=1)
-                          average_features[count_valid_positions == 0] = 0
+                          if weighted_average:
+                             average_features = summed_features
+                          else:
+                             count_valid_positions = expanded_mask.sum(dim=1)
+                             average_features = summed_features / count_valid_positions.clamp(min=1)
+                             average_features[count_valid_positions == 0] = 0
                           average_features_list.append(average_features.cpu().numpy())
                         average_features = np.concatenate(average_features_list, axis=1)
                         label_cpu = label_value
@@ -518,8 +532,35 @@ def main(args, resume_preempt=False,data=None):
                            forward_context(seq_len_cell, "cell_type", cell_type)
 
                 eval_step()
-
     process_loader(train_loader, 'train')
     process_loader(test_loader, 'test')
+    '''
+    results_for_different_k = []
+    nmi_for_different_k = []
+    ari_for_different_k = []
+    for k in tqdm(range(1,1090)):
+       process_loader(train_loader, 'train',top_k=k)
+       process_loader(test_loader, 'test',top_k=k)
+       final_df = pd.DataFrame(list(data))
+       print(final_df)
+       nmi_ari_out = compute_nmi_ari(final_df,config.enc_emb_dim)
+       #test_f1_cell, test_f1_niche = logistic_(final_df,num_features=config.enc_emb_dim)
+       #print(test_f1_niche)
+       #results_for_different_k.append(test_f1_niche)
+       print(nmi_ari_out)
+       nmi_for_different_k.append(nmi_ari_out.loc[0,'nmi_score'])
+       ari_for_different_k.append(nmi_ari_out.loc[0,'ari_score'])
+       print(len(data))
+       data=[]
+    #print(results_for_different_k)
+    #with open('results_for_different_k.pkl', 'wb') as file:
+    #       pickle.dump(results_for_different_k, file)
+    print(nmi_for_different_k)
+    print(ari_for_different_k)
+    with open('nmi_for_different_k.pkl', 'wb') as file:
+            pickle.dump(nmi_for_different_k, file)
+    with open('ari_for_different_k.pkl', 'wb') as file:
+            pickle.dump(ari_for_different_k, file)
+    '''
 if __name__ == "__main__":
     main()

@@ -451,9 +451,9 @@ class CellNeighborhoodRankTokenizer:
                 for i in range(len(gene_tokens_cell)):
                     yield {k: dataset_dict[k][i] for k in dataset_dict.keys()}
 
-            dataset = Dataset.from_generator(dict_generator, num_proc=self.nproc)
+            dataset = Dataset.from_generator(dict_generator, num_proc=self.nproc,keep_in_memory=True)
         else:
-            dataset = Dataset.from_dict(dataset_dict)
+            dataset = Dataset.from_dict(dataset_dicti,keep_in_memory=True)
 
         def format_gene_tokens(example):
             if keep_original_gene_tokens:
@@ -475,8 +475,13 @@ class CellNeighborhoodRankTokenizer:
                                                                       self.neighborhood_special_tokens,
                                                                       self.neighborhood_special_tokens_idx)
 
-            example["input_ids"] = np.concatenate((example["gene_tokens_cell"],
-                                                   example["gene_tokens_neighborhood"]))
+            example["gene_tokens_cell"] = example["gene_tokens_cell"].astype(np.int64)
+            example["gene_tokens_neighborhood"] = example["gene_tokens_neighborhood"].astype(np.int64)
+
+            example["input_ids"] = np.concatenate((example["gene_tokens_cell"], example["gene_tokens_neighborhood"]))
+
+            #example["input_ids"] = np.concatenate((example["gene_tokens_cell"],
+            #                                       example["gene_tokens_neighborhood"]))
 
             return example
 
