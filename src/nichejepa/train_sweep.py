@@ -49,12 +49,8 @@ import multiprocessing as mp
 from sklearn.model_selection import train_test_split
 from src.nichejepa.logistic_reg import logistic_
 from src.nichejepa.nmi_ari import compute_nmi_ari
+from .eval_sweep import process_loader
 
-# Initialize shared list for collecting data
-#manager = mp.Manager()
-#data = manager.list()
-
-# --
 log_timings = True
 log_freq = 10
 checkpoint_freq = 50
@@ -239,7 +235,7 @@ def main(args, resume_preempt=False,data=None,rank=0):
     #                                               random_state=1)
     train_indices, test_indices = train_test_split(range(len(dataset)),
                                                    test_size=args['data']['split'],
-                                                   random_state=2)
+                                                   random_state=4)
 
     train_dataset = dataset.select(train_indices)
     test_dataset = dataset.select(test_indices)
@@ -457,154 +453,13 @@ def main(args, resume_preempt=False,data=None,rank=0):
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
         save_checkpoint(epoch+1)
-    if data==None:
-        data=[]
-    encoder.eval()
     target_encoder.eval()
-    def process_loader(loader, dataset_type,top_k=0,gene_id=0):
-        for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
-                def load_cell_neighborhoods():
-                    # -- unsupervised loader
-                    cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
-                    seg_label = udata[1].to(device, non_blocking=True)
-                    if len(udata)==4:
-                       niche_label = udata[2]
-                       cell_type = udata[3]  # Assuming udata[3] is cell_type
-                    elif len(udata)==3:
-                       if just_cell:
-                          niche_label = None
-                          cell_type = udata[2]                       
-                       else:
-                           cell_type = None
-                           niche_label = udata[2]
-                    masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
-                    masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
-                    return (cell_neighborhood_tokens, seg_label, niche_label, cell_type, masks_1, masks_2)
-                cell_neighborhood_tokens, seg_label, niche_label, cell_type, masks_enc, masks_pred = load_cell_neighborhoods()
-
-                def eval_step():
-                    def forward_context(top_index, label_name, label_value, layer_index=0, just_pos=False):
-                        # Encode all cell neighborhood tokens
-                        if num_epochs == 0:
-                           z_list = target_encoder(cell_neighborhood_tokens,seg_label,just_pos=just_pos,just_emb=True)
-                        else:
-                           z_list = target_encoder(cell_neighborhood_tokens, seg_label,just_pos=just_pos,multi_layer=True)
-                        average_features_list = []
-                        for z in z_list[top_layer-1:]:
-                          if get_specefic_gene:
-                               masks = (cell_neighborhood_tokens == gene_id).int()
-                          else:
-                                masks = (cell_neighborhood_tokens != 0).int()
-                          if just_cell and just_neighborhood:
-                            if label_name == "niche_type":
-                                masks[:, 0:seq_len_cell] = 0
-                                if get_topk:
-                                   masks[:, seq_len_cell+top_k:] = 0
-                            elif label_name == "cell_type":
-                                masks[:, seq_len_cell:] = 0
-                          if has_cls:
-                            masks[:, :] = 0
-                            if label_name == "cell_type":
-                                masks[:, 0] = 1
-                            if label_name == "niche_type":
-                                masks[:, -1] = 1
-                          if get_topk:
-                              masks[:, top_k:] = 0
-                          expanded_mask = masks.unsqueeze(-1).expand_as(z)
-                          if weighted_average:
-                             rank = torch.zeros_like(cell_neighborhood_tokens, dtype=torch.float)
-                             for i in range(cell_neighborhood_tokens.size(0)):
-                                 non_zero_indices = torch.nonzero(cell_neighborhood_tokens[i, :] != 0, as_tuple=True)[0]
-                                 rank[i, non_zero_indices] = torch.arange(1, len(non_zero_indices) + 1, dtype=torch.float, device=cell_neighborhood_tokens.device)
-                             rank_max = rank.max(dim=1, keepdim=True)[0]
-                             rank_sum = rank.sum(dim=1, keepdim=True)
-                             weights = (rank_max - rank + 1) / rank_sum
-                             weights = weights.unsqueeze(-1).expand_as(z)
-                             expanded_mask = expanded_mask*weights
-                          masked_features = z * expanded_mask
-                          summed_features = masked_features.sum(dim=1)
-                          if weighted_average:
-                             average_features = summed_features
-                          else:
-                             count_valid_positions = expanded_mask.sum(dim=1)
-                             average_features = summed_features / count_valid_positions.clamp(min=1)
-                             average_features[count_valid_positions == 0] = 0
-                          average_features_list.append(average_features.cpu().numpy())
-                        average_features = np.concatenate(average_features_list, axis=1)
-                        label_cpu = label_value
-                        for i in range(len(average_features)):
-                            sample_features = average_features[i]
-                            sample_label = label_cpu[i]
-                            data_dict = {
-                                'split': dataset_type,
-                                'label_name': label_name,
-                                'seed': seed,
-                                'just_pos':just_pos,
-                                label_name: sample_label,
-                                'layer_index':layer_index
-                            }
-                            for j, feature in enumerate(sample_features):
-                                data_dict[f'feature_{j}'] = feature
-                            data.append(data_dict)
-
-                    with torch.no_grad():
-                        if just_neighborhood:
-                           #for layer_index in range(top_layer):
-                           #   forward_context(seq_len, "niche_type", niche_label, layer_index=layer_index)
-                           #forward_context(seq_len, "niche_type", niche_label,layer_index=0, just_pos=True)
-                            forward_context(seq_len, "niche_type", niche_label)
-                        if just_cell:
-                           #for layer_index in range(top_layer):
-                           #   forward_context(seq_len_cell, "cell_type", cell_type, layer_index=layer_index)
-                           #forward_context(seq_len_cell, "cell_type", cell_type, layer_index=0, just_pos=True)
-                           forward_context(seq_len_cell, "cell_type", cell_type)
-
-                eval_step()
     #data=[]
-    process_loader(train_loader, 'train',gene_id=592)
-    process_loader(test_loader, 'test',gene_id=592)
-    '''
+    process_loader(target_encoder, train_loader, args, 'train', gene_id=592, data=data)
+    process_loader(target_encoder, test_loader, args, 'test', gene_id=592, data=data)
     final_df = pd.DataFrame(list(data))
-    final_df.to_csv("592_niche_emb_model.csv", index=False)
-    data=[]
-    process_loader(train_loader, 'train',gene_id=682)
-    process_loader(test_loader, 'test',gene_id=682)
-    final_df = pd.DataFrame(list(data))
-    final_df.to_csv("682_niche_emb_model.csv", index=False)
-    data=[]
-    process_loader(train_loader, 'train',gene_id=145)
-    process_loader(test_loader, 'test',gene_id=145)
-    final_df = pd.DataFrame(list(data))
-    final_df.to_csv("145_niche_emb_model.csv", index=False)
-    '''
-    ''' 
-    results_for_different_k = []
-    nmi_for_different_k = []
-    ari_for_different_k = []
-    #786
-    for k in tqdm(range(1,786)):
-       process_loader(train_loader, 'train',top_k=k)
-       process_loader(test_loader, 'test',top_k=k)
-       final_df = pd.DataFrame(list(data))
-       print(final_df)
-       nmi_ari_out = compute_nmi_ari(final_df,config.enc_emb_dim,'niche_type')
-       test_f1_cell, test_f1_niche = logistic_(final_df,num_features=config.enc_emb_dim)
-       #print(test_f1_niche)
-       results_for_different_k.append(test_f1_niche)
-       print(nmi_ari_out)
-       nmi_for_different_k.append(nmi_ari_out.loc[0,'nmi_score'])
-       ari_for_different_k.append(nmi_ari_out.loc[0,'ari_score'])
-       print(len(data))
-       data=[]
-       print(results_for_different_k)
-       with open('results_for_different_k_merfish.pkl', 'wb') as file:
-           pickle.dump(results_for_different_k, file)
-       print(nmi_for_different_k)
-       print(ari_for_different_k)
-       with open('nmi_for_different_k_merfish.pkl', 'wb') as file:
-            pickle.dump(nmi_for_different_k, file)
-       with open('ari_for_different_k_merfish.pkl', 'wb') as file:
-            pickle.dump(ari_for_different_k, file)
-     '''
+    final_df.to_csv("random_emb_model.csv", index=False)
+
+
 if __name__ == "__main__":
     main()

@@ -1,5 +1,55 @@
 import torch
 
+def compute_weight_based_ranks(tokens):
+    """
+    Compute rank-based weights for a 2D tensor of tokens.
+
+    Parameters:
+    tokens (torch.Tensor): A 2D tensor where each row represents a sequence of tokens. The tokens are gene_id of cell or neighborhood
+
+    Returns:
+    torch.Tensor: A 2D tensor of the same shape as `tokens` containing the computed weights.
+    """
+    # Create a mask for non-zero tokens
+    mask = tokens != 0
+    # Compute the ranks based on the mask
+    ranks = mask.cumsum(dim=1).float() * mask.float()
+
+    rank_max = ranks.max(dim=1, keepdim=True)[0]
+    rank_sum = ranks.sum(dim=1, keepdim=True)
+    weights = (rank_max - ranks + 1) / rank_sum
+    # Mask rank of padding tokens 
+    weights = weights * mask.float()
+
+    return weights
+
+def weighted_mean(items, weights, dim=1):
+    """
+    Compute the weighted mean of items.
+
+    Parameters:
+    items (torch.Tensor): The input items tensor (can be 2D or 3D).
+    weights (torch.Tensor): A tensor of weights (same size as the relevant dimension of items).
+    dim (int): The dimension along which to compute the weighted mean.
+
+    Returns:
+    torch.Tensor: The weighted mean tensor.
+    """
+    # Use broadcasting to multiply items by weights
+    if items.dim() == 3:
+        weighted_items = items * weights.unsqueeze(2)  # Broadcasting weights to match items dimensions
+        weighted_sum = weighted_items.sum(dim)
+        weights_sum = weights.sum(dim).unsqueeze(1)  # Sum weights along the specified dimension and keep the dimensions consistent
+        weighted_mean = weighted_sum / weights_sum
+
+    elif items.dim() == 2:
+        weighted_items = items * weights  # Broadcasting weights to match items dimensions
+        weighted_sum = weighted_items.sum(dim)
+        weights_sum = weights.sum(dim)  # Sum weights along the specified dimension
+        weighted_mean = weighted_sum / weights_sum
+
+    return weighted_mean
+
 def mean_nonpadding_embs(embs, mask, dim=1):
     """
     Compute the mean of non-padding embeddings.
@@ -25,9 +75,10 @@ def mean_nonpadding_embs(embs, mask, dim=1):
         
     return mean_embs
 
-def create_selection_mask(cell_neighborhood_tokens, label_name, seq_len_cell, top_k, 
+def create_selection_mask(cell_neighborhood_tokens, label_name, seq_len_cell, top_k=None, 
                           just_cell=False, just_neighborhood=False, 
-                          gene_id=None, mask_large_than_k=False):
+                          gene_id=None, mask_large_than_k=False,
+                          get_specefic_gene=False):
     """
     Create a selection mask for cell index tokens or neighborhood tokens based on various conditions.
 
@@ -49,11 +100,11 @@ def create_selection_mask(cell_neighborhood_tokens, label_name, seq_len_cell, to
     """
 
     # Ensure at most one of the conditions is true
-    assert (int(mask_large_than_k) + int(gene_id is not None)) <= 1, \
+    assert (int(mask_large_than_k) + int(get_specefic_gene)) <= 1, \
         "At most one of mask_large_than_k or specific_gene_mask must be True"
 
     # Initialize selection mask based on specific gene or non-zero tokens
-    if gene_id is not None:
+    if get_specefic_gene:
         select = (cell_neighborhood_tokens == gene_id).int()
     else:
         select = (cell_neighborhood_tokens != 0).int()

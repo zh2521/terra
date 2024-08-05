@@ -81,9 +81,9 @@ def sweep_func(args):
        "ema": 0.999,
        "context_mask_size": 1100,
        'n_targets': 4,
-       'epochs' : 10,
+       'epochs' : 0,
        'top_k' : 127,
-       'top_layer':1,
+       'top_layer':4,
        'enc_emb_dim':768,
       }
        wandb.init(project="nichejepa-sweep",config=config)

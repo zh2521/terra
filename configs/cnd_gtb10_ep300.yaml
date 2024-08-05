@@ -12,18 +12,18 @@ data:
   #vocab_size: 2781
   vocab_size: 1107
   #vocab_size: 1087
-  just_cell: False
-  just_neighborhood: True
+  just_cell: True
+  just_neighborhood: False
   seq_len_cell: 361
   #seq_len_cell: 457
   seq_len_neighborhood: 1091
   #seq_len_neighborhood: 786
   has_cls: False
-  weighted_average: True
+  weighted_average: False
   get_topk: False
   sample_size: 0k
   get_specefic_gene: False
-  gene_id: 592
+  gene_id: 332
 logging:
   folder: logs/merfish_200
   write_tag: jepa
@@ -49,7 +49,7 @@ optimization:
   ema:
   - 0.8
   - 1.0
-  epochs: 20
+  epochs: 0
   final_lr: 1.0e-06
   final_weight_decay: 0.4
   ipe_scale: 1.0
