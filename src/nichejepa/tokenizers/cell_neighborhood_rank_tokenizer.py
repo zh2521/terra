@@ -153,6 +153,8 @@ class CellNeighborhoodRankTokenizer:
             Only relevant if 'norm_method' in ['shifted_logmean'].
         token_dictionary_file:
             Path to pickle file containing token dictionary (gene tokens are Ensembl IDs + '_cell' or '_neighborhood').
+        separate_cell_and_neighborhood_tokens:
+            If 'True', separate cell and neighborhood gene tokens are used.
         cell_special_tokens:
             List with special tokens inserted into the gene token vector containing cell gene tokens.
         cell_special_tokens_idx:
