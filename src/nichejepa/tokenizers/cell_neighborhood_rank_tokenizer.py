@@ -318,6 +318,7 @@ class CellNeighborhoodRankTokenizer:
         if self.norm_method == "analytic_pearson_residuals":
             adata.X = normalize_by_analytic_pearson_residuals(adata.X)
             adata.layers["X_neighborhood"] = normalize_by_analytic_pearson_residuals(adata.layers["X_neighborhood"])
+        # if self.norm_method == "analytic_pearson_residuals", do not use norm_factor
         elif self.norm_factor == "read_depth":
             adata.X = normalize_by_read_depth(adata.X)
             adata.layers["X_neighborhood"] = normalize_by_read_depth(adata.layers["X_neighborhood"])
