@@ -59,7 +59,7 @@ from ..aggregators.aggregate_neighbors import aggregate_neighbors
 from ..normalizers.normalize_by_analytic_pearson_residuals import normalize_by_analytic_pearson_residuals
 from ..normalizers.normalize_by_cell_area import normalize_by_cell_area
 from ..normalizers.normalize_by_mean import normalize_by_mean
-from ..normalizers.normalize_by_nonzero_median import normalize_by_nonzero_median
+from ..normalizers.normalize_by_nonzero_mean import normalize_by_nonzero_mean
 from ..normalizers.normalize_by_read_depth import normalize_by_read_depth
 from ..normalizers.normalize_by_seurat import normalize_by_seurat
 from ..normalizers.normalize_by_shifted_log_mean import normalize_by_shifted_log_mean
@@ -73,11 +73,11 @@ logger = logging.getLogger(__name__)
 
 
 CELL_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_means_dictionary.pkl"
-CELL_GENE_NZMEDIANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmedians_dictionary.pkl"
+CELL_GENE_NZMEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmeans_dictionary.pkl"
 CELL_GENE_LOGMEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_logmeans_dictionary.pkl"
 NEIGHBORHOOD_GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "neighborhood_gene_means_dictionary.pkl"
-NEIGHBORHOOD_GENE_NZMEDIANS_FILE = Path(
-    __file__).parent.parent.parent.parent / "neighborhood_gene_nzmedians_dictionary.pkl"
+NEIGHBORHOOD_GENE_NZMEANS_FILE = Path(
+    __file__).parent.parent.parent.parent / "neighborhood_gene_nzmeans_dictionary.pkl"
 NEIGHBORHOOD_GENE_LOGMEANS_FILE = Path(
     __file__).parent.parent.parent.parent / "neighborhood_gene_logmeans_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
@@ -91,16 +91,16 @@ class CellNeighborhoodRankTokenizer:
                  model_input_size: int = 2048,
                  norm_method: Literal["analytic_pearson_residuals",
                                       "mean",
-                                      "nzmedian",
+                                      "nzmean",
                                       "seurat_v3",
                                       "shifted_logmean"
                                       "shifted_log"]="seurat_v3",
                  norm_factor: Optional[Literal["read_depth", "cell_area"]]=None,
                  cell_gene_means_file: Path | str = CELL_GENE_MEANS_FILE,
-                 cell_gene_nzmedians_file: Path | str = CELL_GENE_NZMEDIANS_FILE,
+                 cell_gene_nzmeans_file: Path | str = CELL_GENE_NZMEANS_FILE,
                  cell_gene_logmeans_file: Path | str = CELL_GENE_LOGMEANS_FILE,
                  neighborhood_gene_means_file: Path | str = NEIGHBORHOOD_GENE_MEANS_FILE,
-                 neighborhood_gene_nzmedians_file: Path | str = NEIGHBORHOOD_GENE_NZMEDIANS_FILE,
+                 neighborhood_gene_nzmeans_file: Path | str = NEIGHBORHOOD_GENE_NZMEANS_FILE,
                  neighborhood_gene_logmeans_file: Path | str = NEIGHBORHOOD_GENE_LOGMEANS_FILE,
                  token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
                  separate_cell_and_neighborhood_tokens: bool=False,
@@ -131,8 +131,8 @@ class CellNeighborhoodRankTokenizer:
         cell_gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
             Only relevant if 'norm_method' in ['mean'].
-        cell_gene_nzmedians_file:
-            Path to pickle file containing dictionary of non-zero median gene expression of cells across STcorpus (for
+        cell_gene_nzmeans_file:
+            Path to pickle file containing dictionary of non-zero mean gene expression of cells across STcorpus (for
             each gene).
             Only relevant if 'norm_method' in ['nzmean'].
         cell_gene_logmeans_file:
@@ -143,8 +143,8 @@ class CellNeighborhoodRankTokenizer:
             Path to pickle file containing dictionary of mean gene expression of neighborhoods across STcorpus (for each
             gene).
             Only relevant if 'norm_method' in ['mean'].
-        neighborhood_gene_nzmedians_file:
-            Path to pickle file containing dictionary of non-zero median gene expression of neighborhoods across
+        neighborhood_gene_nzmeans_file:
+            Path to pickle file containing dictionary of non-zero mean gene expression of neighborhoods across
             STcorpus (for each gene).
             Only relevant if 'norm_method' in ['nzmean'].
         neighborhood_gene_logmeans_file:
@@ -172,10 +172,10 @@ class CellNeighborhoodRankTokenizer:
         self.norm_method = norm_method
         self.norm_factor = norm_factor
         self.cell_gene_means_file = cell_gene_means_file
-        self.cell_gene_nzmedians_file = cell_gene_nzmedians_file
+        self.cell_gene_nzmeans_file = cell_gene_nzmeans_file
         self.cell_gene_logmeans_file = cell_gene_logmeans_file
         self.neighborhood_gene_means_file = neighborhood_gene_means_file
-        self.neighborhood_gene_nzmedians_file = neighborhood_gene_nzmedians_file
+        self.neighborhood_gene_nzmeans_file = neighborhood_gene_nzmeans_file
         self.neighborhood_gene_logmeans_file = neighborhood_gene_logmeans_file
         self.separate_cell_and_neighborhood_tokens = separate_cell_and_neighborhood_tokens
         self.cell_special_tokens = cell_special_tokens
@@ -342,13 +342,13 @@ class CellNeighborhoodRankTokenizer:
                 adata.layers["X_neighborhood"],
                 gene_means_file=self.neighborhood_gene_means_file,
                 probed_genes=adata.var["ensembl_id"])
-        elif self.norm_method == "nzmedian":
-            adata.X = normalize_by_nonzero_median(adata.X,
-                                                  gene_nzmedians_file=self.cell_gene_nzmedians_file,
+        elif self.norm_method == "nzmean":
+            adata.X = normalize_by_nonzero_mean(adata.X,
+                                                  gene_nzmeans_file=self.cell_gene_nzmeans_file,
                                                   probed_genes=adata.var["ensembl_id"])
-            adata.layers["X_neighborhood"] = normalize_by_nonzero_median(
+            adata.layers["X_neighborhood"] = normalize_by_nonzero_mean(
                 adata.layers["X_neighborhood"],
-                gene_nzmedians_file=self.neighborhood_gene_nzmedians_file,
+                gene_nzmeans_file=self.neighborhood_gene_nzmeans_file,
                 probed_genes=adata.var["ensembl_id"])
         elif self.norm_method == "shifted_logmean":
             adata.X = normalize_by_shifted_log_mean(adata.X,
