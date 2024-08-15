@@ -51,4 +51,3 @@ python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --task cell_typ
 ```
 ```
 
-You can copy and paste this markdown code into your README file on GitHub. It will render correctly with the appropriate formatting for sections, code blocks, and bullet points.
