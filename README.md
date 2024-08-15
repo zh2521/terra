@@ -1,4 +1,3 @@
-```markdown
 # Nichejepa
 
 ## Installation
@@ -49,5 +48,5 @@ To perform a sweep during training, use:
 ```shell
 python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --task cell_type --devices cuda:0 --test --do_sweep
 ```
-```
+
 
