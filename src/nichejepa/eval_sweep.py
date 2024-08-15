@@ -19,6 +19,7 @@ from .helper import load_checkpoint, init_model
 from tqdm import tqdm
 import anndata
 from .utils.eval_utils  import process_loader
+from .utils.emb_utils import calculate_sequence_length, merge_and_save_anndata
 
 # Set global seed
 _GLOBAL_SEED = 0
@@ -33,7 +34,6 @@ def eval_main(args, resume_preempt=False):
     # -- META
     use_bfloat16 = args['meta']['use_bfloat16']
     model_name = args['meta']['model_name']
-    load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
@@ -49,18 +49,25 @@ def eval_main(args, resume_preempt=False):
 
     # -- DATA
     batch_size = args['data']['batch_size']
-    seq_len = args['data']['seq_len']
     vocab_size = args['data']['vocab_size']
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
     data_set_name = args['data']['data_set_name']
     num_epochs = args['optimization']['epochs']
+    seq_len_cell = args['data']['seq_len_cell']
+    seq_len_neighborhood = args['data']['seq_len_neighborhood']
+    just_cell = args['data']['just_cell']
+    just_neighborhood = args['data']['just_neighborhood']
+    has_cls = args['data']['has_cls']
+
+    seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
 
     # -- MASK
     n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
+
 
     # -- LOGGING
 
@@ -115,6 +122,11 @@ def eval_main(args, resume_preempt=False):
         pin_mem=pin_mem,
         training=True,
         num_workers=num_workers,
+        just_cell=just_cell,
+        just_neighborhood=just_neighborhood,
+        seq_len_cell = seq_len_cell,
+        seq_len_neighborhood = seq_len_neighborhood,
+        has_cls = has_cls,
         distributed=False)
     _, test_loader = make_cell_neighborhood_dataset(
         batch_size=batch_size,
@@ -125,12 +137,17 @@ def eval_main(args, resume_preempt=False):
         pin_mem=pin_mem,
         training=False,
         num_workers=num_workers,
+        just_cell=just_cell,
+        just_neighborhood=just_neighborhood,
+        seq_len_cell = seq_len_cell,
+        seq_len_neighborhood = seq_len_neighborhood,
+        has_cls = has_cls,
         distributed=False)
 
     # Load training checkpoint
     ipe = len(train_loader)
-    if load_model:
-        encoder, predictor, target_encoder, optimizer, scaler, start_epoch = load_checkpoint(
+    
+    _,_, target_encoder,_,_, start_epoch = load_checkpoint(
             device=device,
             r_path=load_path,
             encoder=encoder,
@@ -138,19 +155,13 @@ def eval_main(args, resume_preempt=False):
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-        for _ in range(start_epoch * ipe):
+    for _ in range(start_epoch * ipe):
             mask_collator.step()
-
     target_encoder.eval()
     all_features = []
     all_obs = []
     process_loader(target_encoder, train_loader, args, 'train', gene_id=592, all_features=all_features, all_obs=all_obs)
     process_loader(target_encoder, test_loader, args, 'test', gene_id=592, all_features=all_features, all_obs=all_obs)
 
-    merged_features = np.vstack(all_features)
-    final_obs = pd.concat(all_obs, axis=0).reset_index(drop=True)
-    final_obs.index = final_obs.index.astype(str)
-    final_adata = anndata.AnnData(obs=final_obs)
-    final_adata.obsm['jepa_emb'] = merged_features
-    final_adata.write('final_result.h5ad')
+    merge_and_save_anndata(all_features, all_obs)
 

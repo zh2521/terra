@@ -188,4 +188,34 @@ def calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_le
         seq_len += 1 if just_cell or just_neighborhood else 2
 
     return seq_len
+import numpy as np
+import pandas as pd
+import anndata
+
+def merge_and_save_anndata(all_features, all_obs, output_file='final_result.h5ad'):
+    """
+    Merges features and observations into an AnnData object and saves it to a file.
+    
+    Parameters:
+    - all_features (list of np.array): A list of arrays containing features to be merged.
+    - all_obs (list of pd.DataFrame): A list of DataFrames containing observations to be concatenated.
+    - output_file (str): The file name to save the resulting AnnData object.
+    """
+    # Merge all feature arrays vertically (stack them)
+    merged_features = np.vstack(all_features)
+    
+    # Concatenate all observation DataFrames and reset the index
+    final_obs = pd.concat(all_obs, axis=0).reset_index(drop=True)
+    
+    # Convert the index to string type
+    final_obs.index = final_obs.index.astype(str)
+    
+    # Create an AnnData object with the merged observations
+    final_adata = anndata.AnnData(obs=final_obs)
+    
+    # Add the merged features to the 'obsm' slot of the AnnData object
+    final_adata.obsm['jepa_emb'] = merged_features
+    
+    # Write the AnnData object to a file
+    final_adata.write(output_file)
 

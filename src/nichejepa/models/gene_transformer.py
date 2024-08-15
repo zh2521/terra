@@ -335,11 +335,81 @@ class GeneTransformerEncoder(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, x, seg_label, masks=None, just_pos=False, just_emb=False, multi_layer=False):
-        if just_pos:
-            return [self.interpolate_pos_encoding(x, self.pos_embed).repeat(x.shape[0], 1, 1)]
-        if just_emb:
-            return [self.gene_embed(x)]
+    def return_position_emb(self, x):
+      """
+      Returns the positional embeddings for the input tensor.
+    
+      Parameters:
+      - x: Input tensor to be processed.
+    
+      Returns:
+      - A list containing the positional embedding repeated across the batch dimension.
+      """
+      # Generate positional embeddings
+      # and repeat them across the batch dimension to match the input shape
+      return [self.interpolate_pos_encoding(x, self.pos_embed).repeat(x.shape[0], 1, 1)]
+
+
+    def return_vocab_emb(self, x):
+      """
+      Returns the vocabulary embeddings for the input tensor.
+    
+      Parameters:
+      - x: Input tensor to be processed.
+    
+      Returns:
+      - A list containing the vocabulary embeddings.
+      """
+      # Generate vocabulary embeddings by passing the input tensor through the gene embedding layer
+      return [self.gene_embed(x)]
+
+
+    def return_multi_layer_emb(self, x, seg_label, masks=None):
+     """
+     Processes the input tensor through multiple layers of the model, applying masks, 
+     and returns a list of embeddings at each layer.
+
+     Parameters:
+     - x: Input tensor to be processed.
+     - masks: Optional; mask or list of masks to be applied to the input tensor.
+
+     Returns:
+     - emb_list: List of embeddings at each layer after processing.
+     """
+
+      # Ensure that masks is a list if it's provided as a single mask
+     if masks is not None:
+        if not isinstance(masks, list):
+            masks = [masks]
+     # -- get gene embeddings from sequence of gene tokens
+     x = self.gene_embed(x)
+     B, N, D = x.shape
+
+     # -- add positional embedding to x
+     pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
+     x = x + pos_embed + self.seg_embed(seg_label)
+
+     # Apply masks to the input if they are provided
+     if masks is not None:
+        x = apply_masks(x, masks)
+
+     # Initialize a list to store the embeddings at each layer
+     emb_list = []
+
+     # Process the input through each block in the model
+     for blk in self.blocks:
+        x = blk(x)  # Forward pass through the current block
+
+        # Apply normalization if it is defined, and store the result in emb_list
+        if self.norm is not None:
+            emb_list.append(self.norm(x))
+        else:
+            emb_list.append(x)  # Store the unnormalized output if normalization is not defined
+
+     return emb_list  # Return the list of embeddings
+
+
+    def forward(self, x, seg_label, masks=None):
         if masks is not None:
             if not isinstance(masks, list):
                 masks = [masks]
@@ -351,17 +421,7 @@ class GeneTransformerEncoder(nn.Module):
         # -- add positional embedding to x
         pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
         x = x + pos_embed + self.seg_embed(seg_label)
-        
-        if multi_layer:
-            out_list=[]
-            for i, blk in enumerate(self.blocks):
-                x = blk(x)
-                if self.norm is not None:
-                    x0 = self.norm(x)
-                else:
-                    x0 = x
-                out_list.append(x0)
-            return out_list        
+              
         # -- mask x
         if masks is not None:
             x = apply_masks(x, masks)

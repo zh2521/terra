@@ -100,7 +100,6 @@ def train_main(args, resume_preempt=False, rank=0):
         batch_size=70
     if config.epochs==0:
         batch_size=1000
-    seq_len = args['data']['seq_len']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     just_cell = args['data']['just_cell']
