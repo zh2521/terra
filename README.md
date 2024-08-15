@@ -19,7 +19,7 @@ Contains the model definition for the gene transformer, implementing the core ar
 Handles the training process in a distributed setting. This script contains the logic for executing the training loop and logging results.
 
 5. src/nichejepa/eval_sweep.py
-Manages the evaluation process in a distributed setting. It evaluates the trained model on the specified tasks and logs the performance metrics.
+Manages the evaluation process. It evaluates the trained model on the specified tasks and logs the performance metrics.
 
 6. src/nichejepa/utils/emb_utils.py
 Provides utility functions for handling and loading embeddings required by the model during training and inference.
