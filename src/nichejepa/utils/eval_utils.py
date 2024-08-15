@@ -84,9 +84,9 @@ def forward_context(model, data_dict, label_name,
     seg_label = data_dict["seg_label"]
 
     if args['optimization']['epochs'] == 0:
-        emb_list = model.return_position_emb(cell_neighborhood_tokens)
+        emb_list = model.module.return_position_emb(cell_neighborhood_tokens)
     else:
-        emb_list = model.return_multi_layer_emb(cell_neighborhood_tokens, seg_label)
+        emb_list = model.module.return_multi_layer_emb(cell_neighborhood_tokens, seg_label)
 
     features_list = []
     for emb in emb_list[top_layer - 1:]:

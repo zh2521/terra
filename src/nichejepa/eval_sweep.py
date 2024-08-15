@@ -59,6 +59,7 @@ def eval_main(args, resume_preempt=False):
     just_cell = args['data']['just_cell']
     just_neighborhood = args['data']['just_neighborhood']
     has_cls = args['data']['has_cls']
+    learnable = args['optimization']['learnable']
 
     seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
 
@@ -95,11 +96,17 @@ def eval_main(args, resume_preempt=False):
         seq_len=seq_len,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
-        vocab_size=vocab_size,
+        vocab_size =vocab_size,
         pred_depth=pred_depth,
+        pos_learnable=learnable,
         pred_emb_dim=pred_emb_dim,
-        model_name=model_name)
+        model_name=model_name,
+        has_cls=has_cls)
+
     target_encoder = copy.deepcopy(encoder)
+    encoder = DistributedDataParallel(encoder, static_graph=True)
+    predictor = DistributedDataParallel(predictor, static_graph=True)
+    target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
     mask_collator = MaskCollator(seq_len=seq_len,
@@ -143,9 +150,6 @@ def eval_main(args, resume_preempt=False):
         seq_len_neighborhood = seq_len_neighborhood,
         has_cls = has_cls,
         distributed=False)
-
-    # Load training checkpoint
-    ipe = len(train_loader)
     
     _,_, target_encoder,_,_, start_epoch = load_checkpoint(
             device=device,
@@ -155,8 +159,6 @@ def eval_main(args, resume_preempt=False):
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-    for _ in range(start_epoch * ipe):
-            mask_collator.step()
     target_encoder.eval()
     all_features = []
     all_obs = []

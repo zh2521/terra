@@ -78,7 +78,7 @@ def train_main(args, resume_preempt=False, rank=0):
     r_file = args['meta']['read_checkpoint']
     pred_depth = args['meta']['pred_depth']
     get_specefic_gene = args['data']['get_specefic_gene']
-    pred_emb_dim = args['meta']['enc_emb_dim']
+    pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']
     top_layer = args['meta']['top_layer']
@@ -97,7 +97,6 @@ def train_main(args, resume_preempt=False, rank=0):
     just_cell = args['data']['just_cell']
     just_neighborhood = args['data']['just_neighborhood']
     has_cls = args['data']['has_cls']
-    get_topk = args['data']['get_topk']
     data_set_name = args['data']['data_set_name']
 
     seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
@@ -111,15 +110,13 @@ def train_main(args, resume_preempt=False, rank=0):
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
-    top_niche = args['mask']['top_niche']
-    top_cell_type = args['mask']['top_cell_type']
 
     # --
 
     # -- OPTIMIZATION
     ema =[0,1]
     ema[0] = args['optimization']['ema']
-    learnable = params['optimization']['learnable']
+    learnable = args['optimization']['learnable']
     ipe_scale = args['optimization']['ipe_scale']  # scheduler scale factor (def: 1.0)
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
@@ -184,7 +181,7 @@ def train_main(args, resume_preempt=False, rank=0):
         pos_learnable=learnable,
         pred_emb_dim=pred_emb_dim,
         model_name=model_name,
-        has_cls=args['data']['has_cls'])
+        has_cls=has_cls)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -193,7 +190,7 @@ def train_main(args, resume_preempt=False, rank=0):
                                  context_mask_size = context_mask_size,
                                  n_targets=n_targets,
                                  n_contexts=n_contexts,
-                                 has_cls=args['data']['has_cls'])
+                                 has_cls=has_cls)
     
     # Initialize dataloader and -sampler
     data_path=args['data']['data_path']
@@ -240,7 +237,7 @@ def train_main(args, resume_preempt=False, rank=0):
             just_neighborhood=just_neighborhood,
             seq_len_cell = seq_len_cell,
             seq_len_neighborhood = seq_len_neighborhood,
-            has_cls =args['data']['has_cls'])
+            has_cls = has_cls)
 
     _, test_loader, test__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
@@ -258,7 +255,7 @@ def train_main(args, resume_preempt=False, rank=0):
             just_neighborhood=just_neighborhood,
             seq_len_cell = seq_len_cell,
             seq_len_neighborhood = seq_len_neighborhood,
-            has_cls =args['data']['has_cls'])
+            has_cls = has_cls)
 
     ipe = len(train_loader)
 
