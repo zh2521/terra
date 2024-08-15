@@ -33,7 +33,8 @@ def make_cell_neighborhood_dataset(
         just_neighborhood = False,
         seq_len_cell=0,
         seq_len_neighborhood=0,
-        has_cls = True):
+        has_cls = True,
+        distributed= True):
        
       dataset = CellNeighborhoodDataset(data,
                                         vocab_size,
@@ -45,11 +46,12 @@ def make_cell_neighborhood_dataset(
                                         seq_len_neighborhood = seq_len_neighborhood,
                                         has_cls = has_cls)
       
-      dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
+      if distributed:
+          dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
                                                                      num_replicas=world_size,
                                                                      rank=rank)
 
-      data_loader = torch.utils.data.DataLoader(dataset,
+          data_loader = torch.utils.data.DataLoader(dataset,
                                                 collate_fn=collator,
                                                 sampler=dist_sampler,
                                                 batch_size=batch_size,
@@ -57,10 +59,18 @@ def make_cell_neighborhood_dataset(
                                                 pin_memory=pin_mem,
                                                 num_workers=num_workers,
                                                 persistent_workers=False)
-      logger.info('Gene unsupervised data loader created')
       
-      return dataset, data_loader, dist_sampler
-
+          logger.info('Gene unsupervised data loader created')
+      
+          return dataset, data_loader, dist_sampler
+      else:
+          data_loader = torch.utils.data.DataLoader(dataset,
+                                                collate_fn=collator,
+                                                batch_size=batch_size,
+                                                pin_memory=pin_mem,
+                                                num_workers=num_workers,
+                                                persistent_workers=False)
+          return dataset, data_loader
 class CellNeighborhoodDataset(Dataset):
     def __init__(self,
                  data,
@@ -86,7 +96,7 @@ class CellNeighborhoodDataset(Dataset):
         self.just_neighborhood = just_neighborhood
         self.has_cls = has_cls
     def __len__(self):
-        
+      
         return self.len
     def __getitem__(self, item):
       gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]

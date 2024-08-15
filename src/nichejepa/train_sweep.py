@@ -38,6 +38,7 @@ from .utils.logging import (CSVLogger,
                             grad_logger,
                             AverageMeter)
 from .utils.tensors import repeat_interleave_batch
+from .utils.emb_utils import calculate_sequence_length 
 from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset 
 from .helper import (load_checkpoint,
                      init_model,
@@ -50,7 +51,7 @@ from sklearn.model_selection import train_test_split
 from src.nichejepa.logistic_reg import logistic_
 from src.nichejepa.nmi_ari import compute_nmi_ari
 from .eval_sweep import process_loader
-
+import anndata
 log_timings = True
 log_freq = 10
 checkpoint_freq = 50
@@ -65,7 +66,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-def main(args, resume_preempt=False,data=None,rank=0):
+def train_main(args, resume_preempt=False, rank=0):
 
     # ----------------------------------------------------------------------- #
     #  PASSED IN PARAMS FROM CONFIG FILE
@@ -79,7 +80,6 @@ def main(args, resume_preempt=False,data=None,rank=0):
     get_specefic_gene = args['data']['get_specefic_gene']
     pred_depth = int(config.pred_enc_depth %  10)
     pred_emb_dim = config.enc_emb_dim
-    #pred_emb_dim = 384
     enc_depth = int( config.pred_enc_depth // 10)
     enc_emb_dim= config.enc_emb_dim
     top_layer=config.top_layer
@@ -107,24 +107,12 @@ def main(args, resume_preempt=False,data=None,rank=0):
     just_neighborhood = args['data']['just_neighborhood']
     has_cls = args['data']['has_cls']
     get_topk = args['data']['get_topk']
+    data_set_name = args['data']['data_set_name']
     top_k = 0
     if get_topk:
        top_k = config.top_k
 
-    if just_cell and just_neighborhood:
-         seq_len = seq_len_neighborhood + seq_len_cell
-         if args['data']['has_cls']:
-             seq_len+=2
-    elif just_cell:
-        seq_len = seq_len_cell
-        if args['data']['has_cls']:
-            seq_len+=1
-    elif just_neighborhood:
-        seq_len = seq_len_neighborhood
-        if args['data']['has_cls']:
-            seq_len+=1
-    else:
-        assert "both seq_len_niche and seq_len_cell can't be zero"
+    seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
     vocab_size = args['data']['vocab_size']
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
@@ -154,7 +142,12 @@ def main(args, resume_preempt=False,data=None,rank=0):
 
     # -- LOGGING
     seed = args['seed']
-    folder = args['logging']['folder']+str(seed)+'/'
+    folder = (f"logs/{data_set_name}_"
+               f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
+               f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
+               f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
+               f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
+
     os.makedirs(folder, exist_ok=True)
     tag = args['logging']['write_tag']
 
@@ -242,7 +235,7 @@ def main(args, resume_preempt=False,data=None,rank=0):
     #dataset = dataset.train_test_split(test_size=args['data']['split'],
     #                                   seed=0)
     
-    _, train_loader, test__sampler = make_cell_neighborhood_dataset(
+    _, train_loader, train__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
             data=train_dataset,
             vocab_size=vocab_size,
@@ -260,7 +253,7 @@ def main(args, resume_preempt=False,data=None,rank=0):
             seq_len_neighborhood = seq_len_neighborhood,
             has_cls =args['data']['has_cls'])
 
-    _, test_loader, train__sampler = make_cell_neighborhood_dataset(
+    _, test_loader, test__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
             data=test_dataset,
             vocab_size=vocab_size,
@@ -453,13 +446,5 @@ def main(args, resume_preempt=False,data=None,rank=0):
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
         save_checkpoint(epoch+1)
-    target_encoder.eval()
-    #data=[]
-    process_loader(target_encoder, train_loader, args, 'train', gene_id=592, data=data)
-    process_loader(target_encoder, test_loader, args, 'test', gene_id=592, data=data)
-    final_df = pd.DataFrame(list(data))
-    final_df.to_csv("random_emb_model.csv", index=False)
-
-
 if __name__ == "__main__":
     main()

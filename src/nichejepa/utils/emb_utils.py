@@ -1,5 +1,7 @@
 import torch
-
+import anndata
+import numpy as np
+import pandas as pd
 def compute_weight_based_ranks(tokens):
     """
     Compute rank-based weights for a 2D tensor of tokens.
@@ -74,8 +76,8 @@ def mean_nonpadding_embs(embs, mask, dim=1):
         mean_embs = sum_embs / mask.sum(dim).float()
         
     return mean_embs
-
-def create_selection_mask(cell_neighborhood_tokens, label_name, seq_len_cell, top_k=None, 
+#change name here
+def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, top_k=None, 
                           just_cell=False, just_neighborhood=False, 
                           gene_id=None, mask_large_than_k=False,
                           get_specefic_gene=False):
@@ -124,4 +126,66 @@ def create_selection_mask(cell_neighborhood_tokens, label_name, seq_len_cell, to
         select[:, top_k:] = 0
 
     return select
+def create_anndata(features_list,
+         dataset_type, label_name, label_value,
+         just_pos, layer_index):
+    """
+    Create an AnnData object from the provided features and metadata.
+
+    Parameters:
+    features_list (list): The list of array of features to be stored in AnnData.
+    dataset_type (str): The type of the dataset (e.g., train, test, validation).
+    label_name (str): The name of the label associated with the data.
+    label_value: The value of the label for each sample.
+    just_pos (bool): A flag indicating whether only positional data is being processed.
+    layer_index (int): The index of the layer of the transformer from which features are derived.
+
+    Returns:
+    obs: The obs data that should be stored in the obs of anndata
+    features: the features that should store in obsm of the anndata
+    """
+    features = np.concatenate(features_list, axis=1)
+    obs_data = {
+        'split': dataset_type,
+        'label_name': label_name,
+        'just_pos': just_pos,
+        'layer_index': layer_index,
+        label_name: label_value
+    }
+
+    obs = pd.DataFrame(obs_data, index=range(len(features)))
+
+    return features, obs
+
+def calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls):
+    """
+    Calculate the sequence length based on the provided flags and sequence lengths.
+
+    Parameters:
+        just_cell (bool): Flag indicating if only cell sequence length is used.
+        just_neighborhood (bool): Flag indicating if only neighborhood sequence length is used.
+        seq_len_cell (int): Sequence length for the cell.
+        seq_len_neighborhood (int): Sequence length for the neighborhood.
+        has_cls (bool): Flag indicating if the class token should be included.
+
+    Returns:
+        int: The calculated sequence length.
+
+    Raises:
+        ValueError: If both just_cell and just_neighborhood are False.
+    """
+    if just_cell and just_neighborhood:
+        seq_len = seq_len_neighborhood + seq_len_cell
+    elif just_cell:
+        seq_len = seq_len_cell
+    elif just_neighborhood:
+        seq_len = seq_len_neighborhood
+    else:
+        raise ValueError("Both 'seq_len_neighborhood' and 'seq_len_cell' cannot be zero.")
+
+    # Adjust sequence length if 'has_cls' is enabled.
+    if has_cls:
+        seq_len += 1 if just_cell or just_neighborhood else 2
+
+    return seq_len
 

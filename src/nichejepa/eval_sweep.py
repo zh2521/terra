@@ -1,144 +1,156 @@
-from .utils.emb_utils import mean_nonpadding_embs,create_selection_mask,compute_weight_based_ranks,weighted_mean
-
-import torch
-from tqdm import tqdm
+import sys
+import yaml
+import pandas as pd
 import numpy as np
+import torch
+import torch.multiprocessing as mp
+import torch.nn.functional as F
+from datasets import load_from_disk
+from torch.nn.parallel import DistributedDataParallel
+import os
+import copy
+import logging
 
-def load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args):
-    """
-    Load cell neighborhoods from given data and masks, returning a dictionary with specific keys.
+from .masks.multigene import MaskCollator
+from .utils.distributed import init_distributed
+from .utils.logging import CSVLogger
+from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset
+from .helper import load_checkpoint, init_model
+from tqdm import tqdm
+import anndata
+from .utils.eval_utils  import process_loader
 
-    Parameters:
-    udata (list): List containing data elements. Expected to be of length 3 or 4.
-    masks_enc (list): List of encoder masks.
-    masks_pred (list): List of predicted masks.
-    device (torch.device): Device to load data onto (e.g., CPU or GPU).
-    args (dict): Dictionary contains various items to guide label extraction.
+# Set global seed
+_GLOBAL_SEED = 0
+np.random.seed(_GLOBAL_SEED)
+torch.manual_seed(_GLOBAL_SEED)
+torch.backends.cudnn.benchmark = True
 
-    Returns:
-    dict: A dictionary containing loaded cell neighborhood data with the following keys:
-        - "cell_neighborhood_tokens": The tokens for cell neighborhoods.
-        - "seg_label": The segmentation label.
-        - "niche_label": The niche label (or None if not available).
-        - "cell_type": The cell type (or None if not available).
-        - "masks_enc": List of encoder masks loaded to the device.
-        - "masks_pred": List of predicted masks loaded to the device.
-    """
-    # Load cell neighborhood tokens and segmentation label to the specified device
-    cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
-    seg_label = udata[1].to(device, non_blocking=True)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logger = logging.getLogger()
 
-    # Initialize niche_label and cell_type based on the length of udata and the just_cell flag
-    if len(udata) == 4:
-        niche_label = udata[2]
-        cell_type = udata[3]
-    elif len(udata) == 3:
-        if args['data']['just_cell']:
-            niche_label = None
-            cell_type = udata[2]
-        elif args['data']['just_neighborhood']:
-            cell_type = None
-            niche_label = udata[2]
+def eval_main(args, resume_preempt=False):
+    # -- META
+    use_bfloat16 = args['meta']['use_bfloat16']
+    model_name = args['meta']['model_name']
+    load_model = args['meta']['load_checkpoint'] or resume_preempt
+    r_file = args['meta']['read_checkpoint']
+    pred_depth = args['meta']['pred_depth']
+    pred_emb_dim = args['meta']['pred_emb_dim']
+    enc_depth = args['meta']['enc_depth']
+    enc_emb_dim = args['meta']['enc_emb_dim']
 
-    # Load masks to the specified device
-    masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
-    masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
-
-    # Return the results in a dictionary
-    return {
-        "cell_neighborhood_tokens": cell_neighborhood_tokens,
-        "seg_label": seg_label,
-        "niche_label": niche_label,
-        "cell_type": cell_type,
-        "masks_enc": masks_1,
-        "masks_pred": masks_2
-    }
-
-def forward_context(model, data_dict, label_name, label_value, layer_index, just_pos, args, dataset_type, data, top_layer):
-    """
-    Perform the forward pass of the model and gather average features for each sample.
-
-    Parameters:
-    model: The model to be used for the forward pass.
-    data_dict (dict): Dictionary containing cell neighborhood tokens and segmentation labels.
-    label_name (str): Name of the label.
-    label_value: Value of the label.
-    layer_index (int): Index of the layer to be used.
-    just_pos (bool): Flag for position-only processing.
-    args (dict): Dictionary of arguments.
-    dataset_type (str): Type of the dataset.
-    data (list): List to store processed data.
-    top_layer (int): Top layer to consider for feature extraction.
-    """
-    cell_neighborhood_tokens = data_dict["cell_neighborhood_tokens"]
-    seg_label = data_dict["seg_label"]
-
-    if args['optimization']['epochs'] == 0:
-        emb_list = model(cell_neighborhood_tokens, seg_label, just_pos=just_pos, just_emb=True)
+    # Set device
+    if not torch.cuda.is_available():
+        device = torch.device('cpu')
     else:
-        emb_list = model(cell_neighborhood_tokens, seg_label, just_pos=just_pos, multi_layer=True)
+        device = torch.device('cuda:0')
+        torch.cuda.set_device(device)
 
-    average_features_list = []
-    for emb in emb_list[top_layer - 1:]:
+    # -- DATA
+    batch_size = args['data']['batch_size']
+    seq_len = args['data']['seq_len']
+    vocab_size = args['data']['vocab_size']
+    pin_mem = args['data']['pin_mem']
+    num_workers = args['data']['num_workers']
+    data_set_name = args['data']['data_set_name']
+    num_epochs = args['optimization']['epochs']
 
-        if args['data']['weighted_average']:
-            weight =  compute_weight_based_ranks(cell_neighborhood_tokens)
-            average_features = weighted_mean(emb,weight)
-        else:
-            selection_mask = create_selection_mask(cell_neighborhood_tokens, label_name, args['data']['seq_len_cell'], just_cell=args['data']['just_cell'], just_neighborhood=args['data']['just_neighborhood'], get_specefic_gene=args['data']['get_specefic_gene'],
-                    gene_id=args['data']['gene_id'])
-            average_features = mean_nonpadding_embs(emb, selection_mask)
+    # -- MASK
+    n_targets = args['mask']['n_targets']
+    n_contexts = args['mask']['n_contexts']
+    target_mask_size = args['mask']['target_mask_size']
+    context_mask_size = args['mask']['context_mask_size']
 
-        average_features_list.append(average_features.cpu().numpy())
-      
-    average_features = np.concatenate(average_features_list, axis=1)
-    label_cpu = label_value
-    for i in range(len(average_features)):
-        sample_features = average_features[i]
-        sample_label = label_cpu[i]
-        data_dict = {
-            'split': dataset_type,
-            'label_name': label_name,
-            'just_pos': just_pos,
-            label_name: sample_label,
-            'layer_index': layer_index
-        }
-        for j, feature in enumerate(sample_features):
-            data_dict[f'feature_{j}'] = feature
-        data.append(data_dict)
+    # -- LOGGING
+
+    # Set the folder for saving extracted features
+    folder = (f"logs/{data_set_name}_"
+               f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
+               f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
+               f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
+               f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
+    save_folder = folder + '/extracted_features'
     
-def eval_step(model, data_dict, dataset_type, data, args, top_layer):
-    """
-    Evaluate the model on the provided context dictionary.
+    os.makedirs(save_folder, exist_ok=True)
+    tag = args['logging']['write_tag']
+    dump = os.path.join(folder, f'params-ijepa.yaml')
+    with open(dump, 'w') as f:
+        yaml.dump(args, f)
 
-    Parameters:
-    model: The model to be used for evaluation.
-    data_dict (dict): Dictionary containing cell neighborhood tokens, segmentation labels, niche labels, and cell types.
-    dataset_type (str): Type of the dataset.
-    data (list): List to store processed data.
-    args (dict): Dictionary of arguments.
-    top_layer (int): Top layer to consider for feature extraction.
-    """
-    with torch.no_grad():
-        if args['data']['just_neighborhood']:
-            forward_context(model, data_dict, "niche_type", data_dict["niche_label"], 0, False, args, dataset_type, data, top_layer)
-        if args['data']['just_cell']:
-            forward_context(model, data_dict, "cell_type", data_dict["cell_type"], 0, False, args, dataset_type, data, top_layer)
+    # -- log/checkpointing paths
+    latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
+    load_path = os.path.join(folder, r_file) if r_file is not None else latest_path
 
-def process_loader(model, loader, args, dataset_type, top_k=0, gene_id=0, data=None):
-    """
-    Process the data loader and evaluate the model on each batch.
+    # Initialize encoder, predictor, and target encoder
+    encoder, predictor = init_model(
+        device=device,
+        seq_len=seq_len,
+        enc_emb_dim=enc_emb_dim,
+        enc_depth=enc_depth,
+        vocab_size=vocab_size,
+        pred_depth=pred_depth,
+        pred_emb_dim=pred_emb_dim,
+        model_name=model_name)
+    target_encoder = copy.deepcopy(encoder)
 
-    Parameters:
-    model: The model to be used for processing.
-    loader: Data loader providing batches of data.
-    args (dict): Dictionary of arguments.
-    dataset_type (str): Type of the dataset.
-    top_k (int): Top k layers to consider for feature extraction.
-    gene_id (int): ID of the specific gene to be used for selection mask creation.
-    """
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
-        data_dict = load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args)
-        eval_step(model, data_dict, dataset_type, data, args, top_layer=top_k)
+    # Initialize mask collator
+    mask_collator = MaskCollator(seq_len=seq_len,
+                                 target_mask_size=target_mask_size,
+                                 context_mask_size=context_mask_size,
+                                 n_targets=n_targets,
+                                 n_contexts=n_contexts)
+
+    # Initialize dataloader and -sampler
+    data_path = args['data']['data_path']
+    dataset = load_from_disk(data_path, keep_in_memory=True)
+    dataset = dataset.train_test_split(test_size=args['data']['split'], seed=0)
+
+    _, train_loader = make_cell_neighborhood_dataset(
+        batch_size=batch_size,
+        data=dataset["train"],
+        vocab_size=vocab_size,
+        seq_len=seq_len,
+        collator=mask_collator,
+        pin_mem=pin_mem,
+        training=True,
+        num_workers=num_workers,
+        distributed=False)
+    _, test_loader = make_cell_neighborhood_dataset(
+        batch_size=batch_size,
+        data=dataset["test"],
+        vocab_size=vocab_size,
+        seq_len=seq_len,
+        collator=mask_collator,
+        pin_mem=pin_mem,
+        training=False,
+        num_workers=num_workers,
+        distributed=False)
+
+    # Load training checkpoint
+    ipe = len(train_loader)
+    if load_model:
+        encoder, predictor, target_encoder, optimizer, scaler, start_epoch = load_checkpoint(
+            device=device,
+            r_path=load_path,
+            encoder=encoder,
+            predictor=predictor,
+            target_encoder=target_encoder,
+            opt=None,
+            scaler=None)
+        for _ in range(start_epoch * ipe):
+            mask_collator.step()
+
+    target_encoder.eval()
+    all_features = []
+    all_obs = []
+    process_loader(target_encoder, train_loader, args, 'train', gene_id=592, all_features=all_features, all_obs=all_obs)
+    process_loader(target_encoder, test_loader, args, 'test', gene_id=592, all_features=all_features, all_obs=all_obs)
+
+    merged_features = np.vstack(all_features)
+    final_obs = pd.concat(all_obs, axis=0).reset_index(drop=True)
+    final_obs.index = final_obs.index.astype(str)
+    final_adata = anndata.AnnData(obs=final_obs)
+    final_adata.obsm['jepa_emb'] = merged_features
+    final_adata.write('final_result.h5ad')
 
