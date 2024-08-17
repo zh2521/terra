@@ -1,5 +1,9 @@
 import yaml
 import logging
+from datasets import load_from_disk
+from sklearn.model_selection import train_test_split
+import random
+
 
 def setup_batch_size(enc_pred_depth, is_training):
     """
@@ -81,10 +85,6 @@ def create_params_from_YAML_wandb_config(YAML_file, logger, sweep_config=None, i
     # Return the updated params dictionary
     return params
 
-from datasets import load_from_disk
-from sklearn.model_selection import train_test_split
-import random
-
 def prepare_dataset(args):
     """
     Prepare the dataset by loading it, determining sample size, and splitting it into
@@ -135,4 +135,37 @@ def prepare_dataset(args):
     test_dataset = dataset.select(test_indices)
 
     return train_dataset, test_dataset
+
+def generate_output_name(args):
+    """Generates a descriptive file name based on input arguments.
+
+    Args:
+        args (dict): A dictionary containing the configuration options.
+            Expected keys include 'meta', with possible sub-keys:
+            - 'just_cell' (bool): Whether to include 'cell_embedding' in the name.
+            - 'just_neighborhood' (bool): Whether to include 'niche_embedding' in the name.
+            - 'weighted_average' (bool): Whether to include 'weighted_average' in the name.
+
+    Returns:
+        str: A generated output file name with relevant parts joined by underscores and a '.h5ad' extension.
+    """
+    name_parts = []
+
+    # Add specific components to the name based on provided flags
+    if args['data']['just_cell'] and not args['data']['just_neighborhood']:
+        name_parts.append("cell_embedding")
+
+    if args['data']['just_neighborhood']:
+        name_parts.append("niche_embedding")
+
+    if args['data']['weighted_average']:
+        name_parts.append("weighted_average")
+    else:
+        name_parts.append("average")
+
+    # Construct the final name and add file extension
+    name = "_".join(name_parts) + '.h5ad'
+
+    return name
+
 

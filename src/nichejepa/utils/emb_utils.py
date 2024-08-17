@@ -198,6 +198,8 @@ def merge_and_save_anndata(all_features, all_obs, output_file='final_result.h5ad
     - all_features (list of np.array): A list of arrays containing features to be merged.
     - all_obs (list of pd.DataFrame): A list of DataFrames containing observations to be concatenated.
     - output_file (str): The file name to save the resulting AnnData object.
+    Returns
+        anndata: final_adata
     """
     # Merge all feature arrays vertically (stack them)
     merged_features = np.vstack(all_features)
@@ -216,4 +218,8 @@ def merge_and_save_anndata(all_features, all_obs, output_file='final_result.h5ad
     
     # Write the AnnData object to a file
     final_adata.write(output_file)
+
+    print(f"AnnData has been successfully saved at: {output_file}")
+
+    return final_adata
 

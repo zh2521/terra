@@ -20,6 +20,7 @@ from tqdm import tqdm
 import anndata
 from .utils.eval_utils  import process_loader
 from .utils.emb_utils import calculate_sequence_length, merge_and_save_anndata
+from .utils.config_utils import generate_output_name
 
 # Set global seed
 _GLOBAL_SEED = 0
@@ -78,8 +79,9 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
                f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
                f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
                f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
-    save_folder = folder + '/extracted_features'
-    
+    save_folder = f"{folder}/extracted_features"
+    feature_path = f"{save_folder}/" + generate_output_name(args)
+
     os.makedirs(save_folder, exist_ok=True)
     tag = args['logging']['write_tag']
     dump = os.path.join(folder, f'params-ijepa.yaml')
@@ -161,5 +163,5 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
     process_loader(target_encoder, train_loader, args, 'train', all_features=all_features, all_obs=all_obs)
     process_loader(target_encoder, test_loader, args, 'test', all_features=all_features, all_obs=all_obs)
 
-    merge_and_save_anndata(all_features, all_obs)
+    return merge_and_save_anndata(all_features, all_obs, output_file=feature_path)
 
