@@ -45,11 +45,8 @@ from .helper import (load_checkpoint,
                      init_opt)
 from tqdm import tqdm
 import pandas as pd
-from .logistic_reg import logistic_
 import multiprocessing as mp
 from sklearn.model_selection import train_test_split
-from src.nichejepa.logistic_reg import logistic_
-from src.nichejepa.nmi_ari import compute_nmi_ari
 from .eval_sweep import process_loader
 import anndata
 

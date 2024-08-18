@@ -3,9 +3,12 @@ from .emb_utils import create_anndata, mean_nonpadding_embs,create_selection,com
 import torch
 from tqdm import tqdm
 import numpy as np
-
 import anndata
 import pandas as pd
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score
+import scib_metrics as sm
 
 def load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args):
     """
@@ -147,4 +150,121 @@ def process_loader(model, loader, args, dataset_type, top_k=0, all_features=None
         all_features.append(features)
         all_obs.append(obs)
     return  all_features, all_obs
-          
+
+def classification_metrics(adata, label_col='cell_type', classifier='knn', n_neighbors=5):
+    """
+    Train and evaluate a classifier (KNN or Logistic Regression) on the provided AnnData object.
+
+    Parameters:
+    -----------
+    adata : AnnData
+        Annotated data object containing the features and labels.
+    label_col : str, optional
+        The name of the column in `adata.obs` containing the categorical labels for classification.
+        Default is 'cell_type'.
+    classifier : str, optional
+        The type of classifier to use ('knn' or 'logistic'). Default is 'knn'.
+    n_neighbors : int, optional
+        Number of neighbors to use in KNN classification. Only applicable if `classifier` is 'knn'.
+        Default is 5.
+
+    Returns:
+    --------
+    dict
+        A dictionary containing accuracy and F1 scores for both the training and test sets.
+    """
+
+    # Extract features and labels
+    X = adata.obsm['jepa_emb']
+    y = adata.obs[label_col]
+
+    # Create masks for training and testing sets based on the 'split' column
+    train_mask = adata.obs['split'] == 'train'
+    test_mask = adata.obs['split'] == 'test'
+
+    # Split the data into training and testing sets
+    X_train, X_test = X[train_mask], X[test_mask]
+    y_train, y_test = y[train_mask], y[test_mask]
+
+    # Initialize the classifier
+    if classifier == 'knn':
+        clf = KNeighborsClassifier(n_neighbors=n_neighbors)
+    elif classifier == 'logistic':
+        clf = LogisticRegression()
+    else:
+        raise ValueError("Classifier must be either 'knn' or 'logistic'")
+
+    # Train the classifier on the training set
+    clf.fit(X_train, y_train)
+
+    # Predict labels on the test set
+    y_test_pred = clf.predict(X_test)
+
+    # Evaluate the model on the test set
+    test_accuracy = accuracy_score(y_test, y_test_pred)
+    test_f1 = f1_score(y_test, y_test_pred, average='weighted')
+
+    # Predict labels on the training set
+    y_train_pred = clf.predict(X_train)
+
+    # Evaluate the model on the training set
+    train_accuracy = accuracy_score(y_train, y_train_pred)
+    train_f1 = f1_score(y_train, y_train_pred, average='weighted')
+
+    # Output the results
+    print(f"Test Accuracy: {test_accuracy:.2f}")
+    print(f"Test F1 Score: {test_f1:.2f}")
+    print(f"Train Accuracy: {train_accuracy:.2f}")
+    print(f"Train F1 Score: {train_f1:.2f}")
+
+    # Return the evaluation metrics as a dictionary
+    return {
+        'test_accuracy': test_accuracy,
+        'test_f1': test_f1,
+        'train_accuracy': train_accuracy,
+        'train_f1': train_f1
+    }
+
+def clustering_metrics(adata, emb_key='jepa_emb', label_col='cell_type'):
+    """
+    Evaluate clustering metrics (NMI and ARI) using KMeans clustering on the provided AnnData object.
+
+    Parameters:
+    -----------
+    adata : AnnData
+        Annotated data object containing the embeddings and labels.
+    emb_key : str, optional
+        The key in `adata.obsm` corresponding to the embeddings to use for clustering.
+        Default is 'jepa_emb'.
+    label_col : str, optional
+        The name of the column in `adata.obs` containing the true labels for comparison.
+        Default is 'cell_type'.
+
+    Returns:
+    --------
+    dict
+        A dictionary containing the NMI and ARI scores.
+    """
+    # Validate input
+    if emb_key not in adata.obsm:
+        raise ValueError(f"Embedding key '{emb_key}' not found in `adata.obsm`.")
+    if label_col not in adata.obs:
+        raise ValueError(f"Label column '{label_col}' not found in `adata.obs`.")
+
+    # Extract the embeddings and labels
+    embeddings = adata.obsm[emb_key]
+    true_labels = adata.obs[label_col]
+
+    # Calculate NMI and ARI using KMeans clustering
+    results = sm.nmi_ari_cluster_labels_kmeans(embeddings, true_labels)
+
+    # Output the results
+    print(f"NMI (Normalized Mutual Information): {results['nmi']}")
+    print(f"ARI (Adjusted Rand Index): {results['ari']}")
+
+    # Return the results as a dictionary
+    return {
+        'nmi': results['nmi'],
+        'ari': results['ari']
+    }
+
