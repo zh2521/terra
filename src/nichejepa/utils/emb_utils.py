@@ -26,30 +26,30 @@ def compute_weight_based_ranks(tokens):
 
     return weights
 
-def weighted_mean(items, weights, dim=1):
+def weighted_mean(embs, weights, dim=1):
     """
-    Compute the weighted mean of items.
+    Compute the weighted mean of embs.
 
     Parameters:
-    items (torch.Tensor): The input items tensor (can be 2D or 3D).
-    weights (torch.Tensor): A tensor of weights (same size as the relevant dimension of items).
+    embs (torch.Tensor): The input embs tensor (3D).
+    weights (torch.Tensor): A tensor of weights (same size as the relevant dimension of embs).
     dim (int): The dimension along which to compute the weighted mean.
 
     Returns:
     torch.Tensor: The weighted mean tensor.
+    
+    Raises:
+    ValueError: If the items tensor is not 3D.
+
     """
     # Use broadcasting to multiply items by weights
-    if items.dim() == 3:
-        weighted_items = items * weights.unsqueeze(2)  # Broadcasting weights to match items dimensions
-        weighted_sum = weighted_items.sum(dim)
+    if embs.dim() == 3:
+        weighted_embs = embs * weights.unsqueeze(2)  # Broadcasting weights to match embs dimensions
+        weighted_sum = weighted_embs.sum(dim)
         weights_sum = weights.sum(dim).unsqueeze(1)  # Sum weights along the specified dimension and keep the dimensions consistent
         weighted_mean = weighted_sum / weights_sum
-
-    elif items.dim() == 2:
-        weighted_items = items * weights  # Broadcasting weights to match items dimensions
-        weighted_sum = weighted_items.sum(dim)
-        weights_sum = weights.sum(dim)  # Sum weights along the specified dimension
-        weighted_mean = weighted_sum / weights_sum
+    else:
+        raise ValueError('Expected a 3D tensor for items, but got a tensor with {} dimensions.'.format(items.dim()))
 
     return weighted_mean
 
@@ -58,25 +58,26 @@ def mean_nonpadding_embs(embs, mask, dim=1):
     Compute the mean of non-padding embeddings.
     
     Parameters:
-    embs (torch.Tensor): The input embeddings tensor (can be 2D or 3D).
+    embs (torch.Tensor): The input embeddings tensor (3D).
     mask (torch.Tensor): A boolean mask tensor indicating the non-padding or cls positions (same size as the relevant dimension of embs).
     dim (int): The dimension along which to compute the mean.
     
     Returns:
     torch.Tensor: The mean embeddings tensor.
+
+    Raises:
+    ValueError: If the items tensor is not 3D.
     """
     # Use broadcasting to sum across non-padding positions
     if embs.dim() == 3:
         masked_embs = embs * mask.unsqueeze(2)  # Broadcasting mask to match embs dimensions
         sum_embs = masked_embs.sum(dim)
         mean_embs = sum_embs / mask.sum(dim).view(-1, 1).float()
+    else:
+        raise ValueError('Expected a 3D tensor for embs, but got a tensor with {} dimensions.'.format(items.dim()))
 
-    elif embs.dim() == 2:
-        masked_embs = embs * mask  # Broadcasting mask to match embs dimensions
-        sum_embs = masked_embs.sum(dim)
-        mean_embs = sum_embs / mask.sum(dim).float()
-        
     return mean_embs
+
 #change name here
 def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, top_k=None, 
                           just_cell=False, just_neighborhood=False, 

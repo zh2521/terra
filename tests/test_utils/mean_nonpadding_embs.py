@@ -18,12 +18,9 @@ def mean_nonpadding_embs(embs, mask, dim=1):
         masked_embs = embs * mask.unsqueeze(2)  # Broadcasting mask to match embs dimensions
         sum_embs = masked_embs.sum(dim)
         mean_embs = sum_embs / mask.sum(dim).view(-1, 1).float()
+    else:
+        raise ValueError('Expected a 3D tensor for embs, but got a tensor with {} dimensions.'.format(items.dim()))
 
-    elif embs.dim() == 2:
-        masked_embs = embs * mask  # Broadcasting mask to match embs dimensions
-        sum_embs = masked_embs.sum(dim)
-        mean_embs = sum_embs / mask.sum(dim).float()
-        
     return mean_embs
 
 class TestMeanNonPaddingEmbs(unittest.TestCase):
