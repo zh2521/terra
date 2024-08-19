@@ -33,6 +33,8 @@ It contains most important files.
 
 8. **`src/nichejepa/utils/config_utils.py`**  
    Includes helper functions to setup the model and batch size params.
+9. **`tests`**  
+   Includes test cases for differnet functions.
 
 ## Usage
 
