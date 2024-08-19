@@ -347,7 +347,7 @@ class GeneTransformerEncoder(nn.Module):
       """
       # Generate positional embeddings
       # and repeat them across the batch dimension to match the input shape
-      return [self.interpolate_pos_encoding(x, self.pos_embed).repeat(x.shape[0], 1, 1)]
+      return [self.pos_embed.repeat(x.shape[0], 1, 1)]
 
 
     def return_vocab_emb(self, x):
@@ -386,8 +386,7 @@ class GeneTransformerEncoder(nn.Module):
      B, N, D = x.shape
 
      # -- add positional embedding to x
-     pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
-     x = x + pos_embed + self.seg_embed(seg_label)
+     x = x + self.pos_embed + self.seg_embed(seg_label)
 
      # Apply masks to the input if they are provided
      if masks is not None:
@@ -419,8 +418,7 @@ class GeneTransformerEncoder(nn.Module):
         B, N, D = x.shape
         
         # -- add positional embedding to x
-        pos_embed = self.interpolate_pos_encoding(x, self.pos_embed)
-        x = x + pos_embed + self.seg_embed(seg_label)
+        x = x + self.pos_embed + self.seg_embed(seg_label)
               
         # -- mask x
         if masks is not None:
@@ -435,21 +433,6 @@ class GeneTransformerEncoder(nn.Module):
 
         return x
 
-    def interpolate_pos_encoding(self, x, pos_embed):
-        npatch = x.shape[1] - 1
-        N = pos_embed.shape[1] - 1
-        if npatch == N:
-            return pos_embed
-        class_emb = pos_embed[:, 0]
-        pos_embed = pos_embed[:, 1:]
-        dim = x.shape[-1]
-        pos_embed = nn.functional.interpolate(
-            pos_embed.reshape(1, int(math.sqrt(N)), int(math.sqrt(N)), dim).permute(0, 3, 1, 2),
-            scale_factor=math.sqrt(npatch / N),
-            mode='bicubic',
-        )
-        pos_embed = pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
-        return torch.cat((class_emb.unsqueeze(0), pos_embed), dim=1)
 def gt_predictor(**kwargs):
     model = GeneTransformerPredictor(
         mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6),
