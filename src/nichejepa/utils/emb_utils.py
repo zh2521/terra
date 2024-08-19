@@ -20,7 +20,7 @@ def compute_weight_based_ranks(tokens):
 
     rank_max = ranks.max(dim=1, keepdim=True)[0]
     rank_sum = ranks.sum(dim=1, keepdim=True)
-    weights = (rank_max - ranks + 1) / rank_sum
+    weights = (rank_max - ranks + 1) / (rank_sum + 1e-9)
     # Mask rank of padding tokens 
     weights = weights * mask.float()
 
