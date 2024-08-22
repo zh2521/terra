@@ -19,15 +19,22 @@ data:
   seq_len_neighborhood: 1091
   #seq_len_neighborhood: 786
   has_cls: False
-  weighted_average: False
-  get_topk: False
   sample_size: 0k
-  get_specefic_gene: False
-  gene_id: 332
   sample_subset: False
   random_state: 0
   stratify: False
   split: 0.2
+emb:
+  weighted_average: False
+  average: True
+  cls: False
+  select_topk: False
+  retrieve_gene: False
+  retrieve_niche: False
+  retrieve_cell: True
+  gene_id: 332
+  retrieve_position_emb: False
+  retrieve_emb_from_layer: 3 # This indicates that we should retrieve embeddings from the layer specified by #retrieve_emb_from_layer and upwards its value should be between zero and #enc_depth-1
 logging:
   folder: logs/merfish_200
   write_tag: jepa
@@ -58,7 +65,7 @@ optimization:
   - 0.999
   - 1.0
   learnable: 1
-  epochs: 15
+  epochs: 1
   final_lr: 1.0e-06
   final_weight_decay: 0.4
   ipe_scale: 1.0

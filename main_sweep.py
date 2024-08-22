@@ -26,15 +26,10 @@ def parse_arguments():
                         help='Name of the config file to load')
     parser.add_argument('--devices', type=str, nargs='+', default=['cuda:0'],
                         help='Devices to use on the local machine')
-    parser.add_argument('--seed', type=int,
-                        help='Seed value for random initialization')
     parser.add_argument('--do_sweep', action='store_true',
                         help='Enable or disable parameter sweeping')
     parser.add_argument('--test', action='store_true',
                         help='Run in test mode')
-    parser.add_argument('--task', type=str, required=True,
-                        help='Name of the task to perform')
-
     return parser.parse_args()
 
 # Main function to handle training or evaluation per process

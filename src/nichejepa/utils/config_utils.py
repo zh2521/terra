@@ -18,7 +18,7 @@ def setup_batch_size(enc_pred_depth, is_training):
     """
     # Adjust batch size if we are in evaluation mode
     if not is_training:
-        return 1000
+        return 200
 
     # Default batch size assignment based on the encoder prediction depth
     if enc_pred_depth < 41:
@@ -158,7 +158,7 @@ def generate_output_name(args):
     if args['data']['just_neighborhood']:
         name_parts.append("niche_embedding")
 
-    if args['data']['weighted_average']:
+    if args['emb']['weighted_average']:
         name_parts.append("weighted_average")
     else:
         name_parts.append("average")

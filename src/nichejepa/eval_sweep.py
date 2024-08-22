@@ -19,7 +19,7 @@ from .helper import load_checkpoint, init_model
 from tqdm import tqdm
 import anndata
 from .utils.eval_utils  import process_loader
-from .utils.emb_utils import calculate_sequence_length, merge_and_save_anndata
+from .utils.emb_utils import calculate_sequence_length, create_and_save_anndata
 from .utils.config_utils import generate_output_name
 
 # Set global seed
@@ -61,7 +61,8 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
     just_neighborhood = args['data']['just_neighborhood']
     has_cls = args['data']['has_cls']
     learnable = args['optimization']['learnable']
-
+    
+    # Compute seq_len based on different configuration files.
     seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
 
     # -- MASK
@@ -157,11 +158,12 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
+    #Extract Features.
     target_encoder.eval()
     all_features = []
     all_obs = []
     process_loader(target_encoder, train_loader, args, 'train', all_features=all_features, all_obs=all_obs)
     process_loader(target_encoder, test_loader, args, 'test', all_features=all_features, all_obs=all_obs)
-
-    return merge_and_save_anndata(all_features, all_obs, output_file=feature_path)
+    #Save and return anndata
+    return create_and_save_anndata(all_features, all_obs, output_file=feature_path)
 

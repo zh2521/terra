@@ -76,7 +76,6 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
     load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
     pred_depth = args['meta']['pred_depth']
-    get_specefic_gene = args['data']['get_specefic_gene']
     pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']
@@ -90,7 +89,6 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
 
     # -- DATA
     batch_size = args['data']['batch_size']
-    weighted_average = args['data']['weighted_average']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     just_cell = args['data']['just_cell']
