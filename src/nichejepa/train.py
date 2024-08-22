@@ -46,10 +46,6 @@ from .helper import (load_checkpoint,
 from tqdm import tqdm
 import pandas as pd
 import multiprocessing as mp
-from sklearn.model_selection import train_test_split
-from .eval_sweep import process_loader
-import anndata
-
 
 log_timings = True
 log_freq = 10

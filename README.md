@@ -10,7 +10,7 @@ pip install -e .
 
 ## Repository Structure
 It contains most important files.
-1. **`main_sweep.py`**  
+1. **`main.py`**  
    The main entry point for the project, which supports running training and evaluation sweeps. It includes command-line arguments for customization and handles multi-GPU setups.
 
 2. **`configs/cnd_gtb10_ep300.yaml`**  
@@ -19,10 +19,10 @@ It contains most important files.
 3. **`src/nichejepa/models/gene_transformer.py`**  
    Contains the model definition for the gene transformer, implementing the core architecture that will be trained and evaluated.
 
-4. **`src/nichejepa/train_sweep.py`**  
+4. **`src/nichejepa/train.py`**  
    Handles the training process in a distributed setting. This script contains the logic for executing the training loop and logging results.
 
-5. **`src/nichejepa/eval_sweep.py`**  
+5. **`src/nichejepa/eval.py`**  
    Manages the evaluation process. It evaluates the trained model on the specified tasks and logs the performance metrics.
 
 6. **`src/nichejepa/utils/emb_utils.py`**  
@@ -43,7 +43,7 @@ It contains most important files.
 To start training, use the following command:
 
 ```shell
-python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 
+python -m pdb main.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 
 ```
 
 ### Training with Sweep
@@ -51,7 +51,7 @@ python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:
 To perform a sweep during training, use:
 
 ```shell
-python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 --do_sweep
+python -m pdb main.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 --do_sweep
 ```
 
 
