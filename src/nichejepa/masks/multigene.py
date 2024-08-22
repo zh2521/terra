@@ -60,7 +60,6 @@ class MaskCollator():
         # cls will be added to the start and end of sequence
         if self.has_cls:
             mask[0] = 0
-            mask[-1] = 0
         mask = torch.nonzero(mask.flatten())
         mask = mask.squeeze()
         
@@ -70,7 +69,6 @@ class MaskCollator():
         # cls will be added to the start and end of sequence
         if self.has_cls:
             mask_complement[0] = 1
-            mask_complement[-1] = 1
         # --
         return mask, mask_complement
 
@@ -122,12 +120,12 @@ class MaskCollator():
             collated_masks_context.append(masks_context)
 
         if self.has_cls:
-           collated_masks_target = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_target],torch.tensor([self.seq_len-1]))) for cm in cm_list] for cm_list in collated_masks_target]
+           collated_masks_target = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_target])) for cm in cm_list] for cm_list in collated_masks_target]
         else:
            collated_masks_target = [[cm[:keep_tokens_target] for cm in cm_list] for cm_list in collated_masks_target]
         collated_masks_target = torch.utils.data.default_collate(collated_masks_target)
         if self.has_cls:
-           collated_masks_context = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_context],torch.tensor([self.seq_len-1]))) for cm in cm_list] for cm_list in collated_masks_context]
+           collated_masks_context = [[torch.cat((torch.tensor([0]),cm[:keep_tokens_context])) for cm in cm_list] for cm_list in collated_masks_context]
         else:
            collated_masks_context = [[cm[:keep_tokens_context] for cm in cm_list] for cm_list in collated_masks_context]
         collated_masks_context = torch.utils.data.default_collate(collated_masks_context)
