@@ -43,7 +43,7 @@ It contains most important files.
 To start training, use the following command:
 
 ```shell
-python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --task cell_type --devices cuda:0 --test
+python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 
 ```
 
 ### Training with Sweep
@@ -51,7 +51,7 @@ python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --task cell_typ
 To perform a sweep during training, use:
 
 ```shell
-python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --task cell_type --devices cuda:0 --test --do_sweep
+python -m pdb main_sweep.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 --do_sweep
 ```
 
 
