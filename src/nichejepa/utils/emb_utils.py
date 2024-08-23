@@ -158,7 +158,7 @@ def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, args, t
     # Otherwise, it will select non-zero tokens.
     if retrieve_label == 'retrieve_gene':
         select = (cell_neighborhood_tokens == args['emb']['gene_id']).int()
-        select[:, seq_len_cell:0] = 0
+        select[:, seq_len_cell:] = 0
         return select
     else:
         select = (cell_neighborhood_tokens != 0).int()
