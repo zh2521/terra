@@ -135,6 +135,14 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
     if args['data']['just_neighborhood']:
        folder += "_just_neighborhood"
 
+    # Append subset name based on specific_cell_types
+    specific_cell_types = args['data'].get('specific_cell_types')
+    if len(specific_cell_types)!=0:
+       subset_name = "_".join(specific_cell_types)  # Create a subset name from specific cell types
+       folder += f"_subset_{subset_name}"
+    else:
+       folder += "_total"
+
     os.makedirs(folder, exist_ok=True)
     tag = args['logging']['write_tag']
 

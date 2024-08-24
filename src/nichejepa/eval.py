@@ -89,6 +89,14 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
     if args['data']['just_neighborhood']:
        folder += "_just_neighborhood"
 
+    # Append subset name based on specific_cell_types
+    specific_cell_types = args['data'].get('specific_cell_types')
+    if len(specific_cell_types)!=0:
+       subset_name = "_".join(specific_cell_types)  # Create a subset name from specific cell types
+       folder += f"_subset_{subset_name}"
+    else:
+       folder += "_total"
+
     save_folder = f"{folder}/extracted_features"
     feature_path = f"{save_folder}/" + generate_output_name(args)
 

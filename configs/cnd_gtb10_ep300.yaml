@@ -24,6 +24,8 @@ data:
   random_state: 0
   stratify: False
   split: 0.2
+  #specific_cell_types: []
+  specific_cell_types: ['Celltype5','Celltype6']
 emb:
   weighted_average: False
   average: False
@@ -40,12 +42,9 @@ logging:
   write_tag: jepa
 mask:
   context_mask_size: 361
-  target_mask_size: 20
+  target_mask_size: 19
   n_contexts: 1
   n_targets: 4
-  target_mask_size: 19
-  top_niche: -1
-  top_cell_type: 361
 
 meta:
   copy_data: false

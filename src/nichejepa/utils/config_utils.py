@@ -108,6 +108,12 @@ def prepare_dataset(args):
     data_path = args['data']['data_path']
     dataset = load_from_disk(data_path)
 
+    # Filter dataset to include only specific cell types
+    specific_cell_types = args['data']['specific_cell_types']
+    if len(specific_cell_types) !=0:
+       specific_cell_types = args['data']['specific_cell_types']  # List of cell types to keep
+       dataset = dataset.filter(lambda x: x['cell_types'] in specific_cell_types)
+
     # Sample subset if specified
     if args['data']['sample_subset']:
         total_size = len(dataset)
