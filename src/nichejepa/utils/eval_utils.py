@@ -158,6 +158,9 @@ def eval_step(model, data_dict, split, args):
     split (str): The split of the dataset (e.g., train, test, validation).
     args (dict): Dictionary of Configs.
     """
+    assert args['emb']['retrieve_niche'] and not args['data']['just_neighborhood'], (
+    " The data has not been trained on neighborhood data.")
+
     with torch.no_grad():
       with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=args['meta']['use_bfloat16']):
         if args['emb']['retrieve_niche']:
