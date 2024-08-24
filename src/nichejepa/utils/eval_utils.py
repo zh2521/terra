@@ -108,6 +108,8 @@ def forward_context(model, data_dict, label_name,
             # Compute weights based on the cell neighborhood tokens and calculate a weighted mean of embeddings
             weight = compute_weight_based_ranks(cell_neighborhood_tokens)
             features = weighted_mean(emb, weight)
+            # We put gene_count here as None as it does not have meaning in weighted case
+            gene_count = None
         elif args['emb']['average']:
             # Create a selection mask to determine which embeddings to average
             selection = create_selection(
