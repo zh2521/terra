@@ -80,6 +80,15 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
                f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
                f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
                f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
+
+    # Append "just_cell" to the folder name if just_cell is True
+    if args['data']['just_cell']:
+       folder += "_just_cell"
+
+    # Append "just_neighborhood" to the folder name if just_neighborhood is True
+    if args['data']['just_neighborhood']:
+       folder += "_just_neighborhood"
+
     save_folder = f"{folder}/extracted_features"
     feature_path = f"{save_folder}/" + generate_output_name(args)
 
