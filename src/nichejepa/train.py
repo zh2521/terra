@@ -75,8 +75,6 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
     pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']
-    top_layer = args['meta']['top_layer']
-    top_k = args['meta']['top_k'] 
     if not torch.cuda.is_available():
         device = torch.device('cpu')
     else:
