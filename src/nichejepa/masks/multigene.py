@@ -19,7 +19,7 @@ logger = getLogger()
 
 class MaskCollator():
     """
-    MaskCollator.
+    MaskCollator class.
 
     Parameters
     ----------
@@ -113,7 +113,7 @@ class MaskCollator():
         # 1. sample several target masks
         # 2. sample non-overlapping context masks
         # 3. Add <cls> token to both context and target masks
-        # 5. return context and target masks
+        # 4. return context and target masks
 
         Parameters
         ----------
