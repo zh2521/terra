@@ -478,9 +478,10 @@ class CellNeighborhoodRankTokenizer:
             def dict_generator():
                 for i in range(len(gene_tokens_cell)):
                     yield {k: dataset_dict[k][i] for k in dataset_dict.keys()}
-
+            print("Using generator for dataset creation.")
             dataset = Dataset.from_generator(dict_generator, num_proc=self.nproc,keep_in_memory=True)
         else:
+            print("Using dict for dataset creation.")
             dataset = Dataset.from_dict(dataset_dict)
 
         def format_gene_tokens(example):
@@ -516,6 +517,7 @@ class CellNeighborhoodRankTokenizer:
 
             return example
 
+        print("Formatting gene tokens...")
         formatted_dataset = dataset.map(
             format_gene_tokens, num_proc=self.nproc)
 
