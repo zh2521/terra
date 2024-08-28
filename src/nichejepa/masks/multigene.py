@@ -57,7 +57,7 @@ class MaskCollator():
         if valid_token_masks is not None:
             for k in range(len(valid_token_masks)):
                 mask *= valid_token_masks[k]
-        # cls will be added to the start and end of sequence
+        # cls will be added to the start of sequence
         if self.has_cls:
             mask[0] = 0
         mask = torch.nonzero(mask.flatten())
@@ -66,7 +66,7 @@ class MaskCollator():
         # --
         mask_complement = torch.ones(self.seq_len, dtype=torch.int32)
         mask_complement[start:start+mask_size] = 0
-        # cls will be added to the start and end of sequence
+        # cls will be added to the start of sequence
         if self.has_cls:
             mask_complement[0] = 1
         # --
