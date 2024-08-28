@@ -22,14 +22,17 @@ from .utils.eval_utils  import process_loader
 from .utils.emb_utils import calculate_sequence_length, create_and_save_anndata
 from .utils.config_utils import generate_output_name
 
+
 # Set global seed
 _GLOBAL_SEED = 0
 np.random.seed(_GLOBAL_SEED)
 torch.manual_seed(_GLOBAL_SEED)
 torch.backends.cudnn.benchmark = True
 
+
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
+
 
 def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
     # -- META
@@ -116,7 +119,7 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
         seq_len=seq_len,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
-        vocab_size =vocab_size,
+        vocab_size=vocab_size,
         pred_depth=pred_depth,
         pos_learnable=learnable,
         pred_emb_dim=pred_emb_dim,
@@ -175,12 +178,14 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-    #Extract Features.
+
+    # Extract features
     target_encoder.eval()
     all_features = []
     all_obs = []
     process_loader(target_encoder, train_loader, args, 'train', all_features=all_features, all_obs=all_obs)
     process_loader(target_encoder, test_loader, args, 'test', all_features=all_features, all_obs=all_obs)
-    #Save and return anndata
+    
+    # Save and return adata
     return create_and_save_anndata(all_features, all_obs, output_file=feature_path)
 

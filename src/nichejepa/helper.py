@@ -9,11 +9,11 @@ import sys
 
 import torch
 
-import nichejepa.models.gene_transformer as gt
-
+import .models.gene_transformer as gt
 from .utils.schedulers import (WarmupCosineSchedule,
                                CosineWDSchedule)
 from .utils.tensors import trunc_normal_
+
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
@@ -63,28 +63,27 @@ def load_checkpoint(device,
     return encoder, predictor, target_encoder, opt, scaler, epoch
 
 
-def init_model(device,
-               seq_len,
-               enc_emb_dim=192, 
-               enc_depth=12, 
-               model_name="gt_base",
-               pred_depth=6,
-               pos_learnable = 1,
-               vocab_size =6033,
-               pred_emb_dim=384,
-               has_cls = True):
+def init_model(device: torch.device,
+               seq_len: int,
+               enc_emb_dim: int=192, 
+               enc_depth: int=12, 
+               model_name: str="gt_base",
+               pred_depth: int=6,
+               pos_learnable=1,
+               vocab_size: int=6033,
+               pred_emb_dim: int=384,
+               has_cls: bool=True):
     encoder = gt.__dict__[model_name](
         seq_len=seq_len,
         embed_dim=enc_emb_dim,
-        pos_learnable = pos_learnable,
-        depth = enc_depth,
+        pos_learnable=pos_learnable,
+        depth=enc_depth,
         vocab_size=vocab_size,
-        has_cls=True
-        )
+        has_cls=True)
     predictor = gt.__dict__["gt_predictor"](
         seq_len=seq_len,
         embed_dim=encoder.embed_dim,
-        pos_learnable = pos_learnable,
+        pos_learnable=pos_learnable,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
         num_heads=encoder.num_heads,
@@ -110,6 +109,7 @@ def init_model(device,
     logger.info(encoder)
     return encoder, predictor
 
+    
 def init_opt(encoder,
              predictor,
              iterations_per_epoch,
