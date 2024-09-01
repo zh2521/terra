@@ -1,1 +1,0 @@
-from nichejepa.masks import multigene
