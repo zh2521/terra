@@ -17,7 +17,6 @@ def make_cell_neighborhood_dataset(
         data,
         vocab_size,
         seq_len,
-        mask_index=1,
         collator=None,
         pin_mem=True,
         num_workers=8,
@@ -38,7 +37,6 @@ def make_cell_neighborhood_dataset(
 
       dataset = CellNeighborhoodDataset(data,
                                         vocab_size,
-                                        mask_index,
                                         seq_len=seq_len,
                                         just_cell=just_cell,
                                         just_neighborhood=just_neighborhood,
@@ -75,7 +73,6 @@ class CellNeighborhoodDataset(Dataset):
     def __init__(self,
                  data,
                  vocab_size,
-                 mask_index,
                  seq_len,
                  just_cell=True,
                  just_neighborhood=False,
@@ -88,7 +85,6 @@ class CellNeighborhoodDataset(Dataset):
         self.dataset = data
         self.len = len(self.dataset)
         self.vocab_size = vocab_size
-        self.mask_index = mask_index
         self.seq_len = seq_len
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
