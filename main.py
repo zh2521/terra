@@ -40,7 +40,7 @@ def process_main(rank, args, world_size, devices, is_training=True):
     logger = logging.getLogger()
     logger.setLevel(logging.INFO if rank == 0 else logging.ERROR)
 
-    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size), port=40316)
+    world_size, rank = init_distributed(rank_and_world_size=(rank, world_size), port=40000)
     logger.info(f'Running... (rank: {rank}/{world_size})')
 
     # Execute training or evaluation

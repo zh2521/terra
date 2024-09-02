@@ -36,7 +36,6 @@ mask:
   target_mask_size: 19
   n_contexts: 1
   n_targets: 4
-
 meta:
   copy_data: false
   enc_depth: 3

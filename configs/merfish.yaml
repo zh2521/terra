@@ -14,7 +14,7 @@ data:
   #seq_len_neighborhood: 1091 #this is for simulated data
   seq_len_neighborhood: 786 #this is for merfish data
   has_cls: True
-  sample_size: 100000
+  sample_size: 300000
   sample_subset: True
   random_state: 0
   stratify: False
@@ -36,7 +36,7 @@ logging:
   folder: logs/merfish_200
   write_tag: jepa
 mask:
-  context_mask_size: 1000
+  context_mask_size: 1240
   target_mask_size: 10
   n_contexts: 1
   n_targets: 9

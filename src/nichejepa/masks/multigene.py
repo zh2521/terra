@@ -72,7 +72,7 @@ class MaskCollator:
             i.value += 1
             v = i.value
         return v
-    
+
     def _sample_gene_mask(self,
                           non_zero_seq_len_cell: int,
                           non_zero_seq_len_neighborhood: int,
@@ -208,13 +208,10 @@ class MaskCollator:
         g.manual_seed(seed)  # Ensure reproducibility by setting the seed
 
         for i in range(B):
+            # Initialize lists to store target masks and their complements for the current observation
             masks_target_complement = []
             masks_target = []
             masks_context = []
-
-            if self.has_cls:
-                start_idx = 1
-            
             
             # Calculate the number of non-zero tokens in the cell segment
             if self.seq_len_cell != 0:
@@ -228,6 +225,7 @@ class MaskCollator:
             else:
                 non_zero_seq_len_neighborhood = 0
 
+            # Sample target masks for the current observation
             for _ in range(self.n_targets):
                 mask_target, mask_target_complement = self._sample_gene_mask(
                     non_zero_seq_len_cell=non_zero_seq_len_cell,
@@ -238,7 +236,8 @@ class MaskCollator:
                 masks_target.append(mask_target)
                 masks_target_complement.append(mask_target_complement)
                 keep_tokens_target = min(keep_tokens_target, len(mask_target))
-            
+
+            # Sample context masks for the current observation, ensuring they do not overlap with target masks
             for _ in range(self.n_contexts):
                 mask_context, _ = self._sample_gene_mask(
                     non_zero_seq_len_cell=non_zero_seq_len_cell,
@@ -250,12 +249,15 @@ class MaskCollator:
                 masks_context.append(mask_context)
                 keep_tokens_context = min(keep_tokens_context, len(mask_context))
 
+            # Append the masks for the current observation to the collated lists
             collated_masks_target.append(masks_target)
             collated_masks_context.append(masks_context)
 
+        # Trim the masks to the minimum size across the batch and collate them
         collated_masks_target = [[cm[:keep_tokens_target] for cm in cm_list] for cm_list in collated_masks_target]
         collated_masks_target = torch.utils.data.default_collate(collated_masks_target)
         collated_masks_context = [[cm[:keep_tokens_context] for cm in cm_list] for cm_list in collated_masks_context]
         collated_masks_context = torch.utils.data.default_collate(collated_masks_context)
-        
+
         return collated_batch, collated_masks_context, collated_masks_target
+
