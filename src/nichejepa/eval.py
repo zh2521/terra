@@ -129,7 +129,10 @@ def evaluation(args, train_dataset, test_dataset, resume_preempt=False):
     target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
-    mask_collator = MaskCollator(seq_len=seq_len,
+    mask_collator = MaskCollator(just_neighborhood=just_neighborhood,
+                                 seq_len_cell = seq_len_cell,
+                                 seq_len_neighborhood = seq_len_neighborhood,
+                                 just_cell = just_cell,
                                  target_mask_size=target_mask_size,
                                  context_mask_size=context_mask_size,
                                  n_targets=n_targets,
