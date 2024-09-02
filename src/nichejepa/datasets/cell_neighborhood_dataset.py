@@ -14,6 +14,106 @@ _GLOBAL_SEED = 0
 logger = getLogger()
 
 
+class CellNeighborhoodDataset(Dataset):
+    def __init__(self,
+                 data: datasets.arrow_dataset.Dataset,
+                 vocab_size: int,
+                 seq_len: int,
+                 incl_cell_seq: bool=True,
+                 incl_neighborhood_seq: bool=False,
+                 seq_len_cell: int=0,
+                 seq_len_neighborhood: int=0,
+                 has_cls: bool=True):
+        """
+        Torch CellNeighborhoodDataset class.
+
+        Parameters
+        -----------
+        data:
+            Huggingface dataset with cell and neighborhood tokens and cell-level labels.
+        vocab_size:
+            Size of the vocabulary.
+        seq_len:
+            Sequence length of all tokens.
+        incl_cell_seq:
+            If 'True', cell tokens are included for each cell.
+        incl_neighborhood_seq:
+            If 'True', neighborhood tokens are included for each cell.
+        seq_len_cell:
+            Sequence length of the cell tokens.
+        seq_len_neighborhood:
+            Sequence length of the neighborhood tokens.
+        has_cls:
+            If 'True', a <cls> token is included for each cell at position 0.
+        """
+        self.dataset = data
+        self.len = len(self.dataset)
+        self.vocab_size = vocab_size
+        self.seq_len = seq_len
+        self.seq_len_cell = seq_len_cell
+        self.seq_len_neighborhood = seq_len_neighborhood
+        self.incl_cell_seq = incl_cell_seq
+        self.incl_neighborhood_seq = incl_neighborhood_seq
+        self.has_cls = has_cls
+        
+    def __len__(self):
+        return self.len
+         
+    def __getitem__(self, item):
+        # Extract specified sequence length of gene tokens for both the cell and neighborhood
+        gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]
+        gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
+
+        # Collect tokens and labels
+        # Case 1: both cell and neighborhood tokens are included
+        if self.incl_cell_seq and self.incl_neighborhood_seq:
+            tokens = gene_tokens_cell + gene_tokens_neighborhood
+            niche_types = self.dataset[item]['niche_types']
+            cell_types = self.dataset[item]['cell_types']
+            if self.has_cls:
+                # If a CLS token is used, prepend it to the tokens and consider for segment labels
+                tokens = [self.vocab_size] + tokens
+                # Create segment labels: 1 for cell tokens and <cls> token and 2 for neighborhood tokens
+                # Maybe we need to think about this part
+                labels = torch.cat((torch.ones(self.seq_len_cell + 1), torch.ones(self.seq_len_neighborhood) * 2)).int()
+            else:
+                # Create segment labels: 1 for cell tokens, 2 for neighborhood tokens
+                labels = torch.cat((torch.ones(self.seq_len_cell), torch.ones(self.seq_len_neighborhood) * 2)).int()
+            return torch.tensor(tokens), labels, niche_types, cell_types
+        
+        # Case 2: only cell tokens are included
+        elif self.incl_cell_seq:
+            tokens = gene_tokens_cell
+            cell_types = self.dataset[item]['cell_types']
+            if self.has_cls:
+              # If a CLS token is used, prepend it to the tokens and consider for segment labels  
+              tokens = [self.vocab_size] + tokens
+              # Create segment labels: 1 for cell tokens and <cls> token
+              labels = torch.ones(self.seq_len_cell + 1).int()
+            else:
+              # Create segment labels: 1 for cell tokens
+              labels = torch.ones(self.seq_len_cell).int()
+            return torch.tensor(tokens), labels, cell_types
+        
+        # Case 3: only neighborhood tokens are included
+        elif self.incl_neighborhood_seq:
+            tokens = gene_tokens_neighborhood
+            niche_types = self.dataset[item]['niche_types']
+            if self.has_cls:
+                # If a CLS token is used, prepend it to the tokens and consider for segment labels  
+                tokens = [self.vocab_size] + tokens
+                # Create segment labels: 2 for neighborhood tokens and <cls> token
+                labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
+            else:
+                # Create segment labels: 2 for neighborhood tokens
+                labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
+            return torch.tensor(tokens), labels, niche_types
+        
+        # Case 4: neither cell nor neighborhood tokens are included, which is an invalid state
+        else:
+            raise ValueError("Invalid state: neither 'incl_cell_seq' nor 'incl_neighborhood_seq' is set.")
+
+
 def make_cell_neighborhood_dataset(batch_size: int,
                                    data: datasets.arrow_dataset.Dataset,
                                    vocab_size: int,
@@ -81,7 +181,6 @@ def make_cell_neighborhood_dataset(batch_size: int,
     """
     dataset = CellNeighborhoodDataset(data,
                                       vocab_size,
-                                      mask_index,
                                       seq_len=seq_len,
                                       incl_cell_seq=incl_cell_seq,
                                       incl_neighborhood_seq=incl_neighborhood_seq,
@@ -114,104 +213,3 @@ def make_cell_neighborhood_dataset(batch_size: int,
                                                   persistent_workers=False)
         logger.info('Data loader created.')
         return dataset, data_loader
-
-
-class CellNeighborhoodDataset(Dataset):
-    def __init__(self,
-                 data: datasets.arrow_dataset.Dataset,
-                 vocab_size: int,
-                 seq_len: int,
-                 incl_cell_seq: bool=True,
-                 incl_neighborhood_seq: bool=False,
-                 seq_len_cell: int=0,
-                 seq_len_neighborhood: int=0,
-                 has_cls: bool=True):
-        """
-        Torch CellNeighborhoodDataset class.
-
-        Parameters
-        -----------
-        data:
-            Huggingface dataset with cell and neighborhood tokens and cell-level labels.
-        vocab_size:
-            Size of the vocabulary.
-        seq_len:
-            Sequence length of all tokens.
-        incl_cell_seq:
-            If 'True', cell tokens are included for each cell.
-        incl_neighborhood_seq:
-            If 'True', neighborhood tokens are included for each cell.
-        seq_len_cell:
-            Sequence length of the cell tokens.
-        seq_len_neighborhood:
-            Sequence length of the neighborhood tokens.
-        has_cls:
-            If 'True', a <cls> token is included for each cell at position 0.
-        """
-        self.dataset = data
-        self.len = len(self.dataset)
-        self.vocab_size = vocab_size
-        self.mask_index = mask_index
-        self.seq_len = seq_len
-        self.seq_len_cell = seq_len_cell
-        self.seq_len_neighborhood = seq_len_neighborhood
-        self.incl_cell_seq = incl_cell_seq
-        self.incl_neighborhood_seq = incl_neighborhood_seq
-        self.has_cls = has_cls
-        
-    def __len__(self):
-        return self.len
-         
-    def __getitem__(self, item):
-        # Extract specified sequence length of gene tokens for both the cell and neighborhood
-        gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]
-        gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
-
-        # Collect tokens and labels
-        # Case 1: both cell and neighborhood tokens are included
-        if self.incl_cell_seq and self.incl_neighborhood_seq:
-            tokens = gene_tokens_cell + gene_tokens_neighborhood
-            niche_types = self.dataset[item]['niche_types']
-            cell_types = self.dataset[item]['cell_types']
-            if self.has_cls:
-                # If a CLS token is used, prepend it to the tokens and consider for segment labels
-                tokens = [self.vocab_size] + tokens
-                # Create segment labels: 1 for cell tokens and <cls> token and 2 for neighborhood tokens
-                # Maybe we need to think about this part
-                labels = torch.cat((torch.ones(self.seq_len_cell + 1), torch.ones(self.seq_len_neighborhood) * 2)).int()
-            else:
-                # Create segment labels: 1 for cell tokens, 2 for neighborhood tokens
-                labels = torch.cat((torch.ones(self.seq_len_cell), torch.ones(self.seq_len_neighborhood) * 2)).int()
-            return torch.tensor(tokens), labels, niche_types, cell_types
-        
-        # Case 2: only cell tokens are included
-        elif self.incl_cell_seq:
-            tokens = gene_tokens_cell
-            cell_types = self.dataset[item]['cell_types']
-            if self.has_cls:
-              # If a CLS token is used, prepend it to the tokens and consider for segment labels  
-              tokens = [self.vocab_size] + tokens
-              # Create segment labels: 1 for cell tokens and <cls> token
-              labels = torch.ones(self.seq_len_cell + 1).int()
-            else:
-              # Create segment labels: 1 for cell tokens
-              labels = torch.ones(self.seq_len_cell).int()
-            return torch.tensor(tokens), labels, cell_types
-        
-        # Case 3: only neighborhood tokens are included
-        elif self.incl_neighborhood_seq:
-            tokens = gene_tokens_neighborhood
-            niche_types = self.dataset[item]['niche_types']
-            if self.has_cls:
-                # If a CLS token is used, prepend it to the tokens and consider for segment labels  
-                tokens = [self.vocab_size] + tokens
-                # Create segment labels: 2 for neighborhood tokens and <cls> token
-                labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
-            else:
-                # Create segment labels: 2 for neighborhood tokens
-                labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
-            return torch.tensor(tokens), labels, niche_types
-        
-        # Case 4: neither cell nor neighborhood tokens are included, which is an invalid state
-        else:
-            raise ValueError("Invalid state: neither 'incl_cell_seq' nor 'incl_neighborhood_seq' is set.")
