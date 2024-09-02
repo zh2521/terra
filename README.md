@@ -58,5 +58,3 @@ To perform a sweep during training, use:
 ```shell
 python -m pdb main.py --fname configs/cnd_gtb10_ep300.yaml --devices cuda:0 --do_sweep
 ```
-
-
