@@ -1,7 +1,10 @@
-import torch
+from typing import List
+
 import anndata
 import numpy as np
 import pandas as pd
+import torch
+
 
 def compute_weight_based_ranks(tokens):
     """
@@ -35,6 +38,8 @@ def compute_weight_based_ranks(tokens):
 
     # Return the computed weights
     return weights
+
+
 def weighted_mean(embs, weights, dim=1):
     """
     Compute the weighted mean of embs.
@@ -73,6 +78,8 @@ def weighted_mean(embs, weights, dim=1):
 
     # Return the calculated weighted mean
     return weighted_mean
+
+
 def mean_nonpadding_embs(embs, mask, dim=1):
     """
     Compute the mean of non-padding embeddings.
@@ -116,6 +123,7 @@ def mean_nonpadding_embs(embs, mask, dim=1):
     # This value in upper function could be used as gene_count
 
     return mean_embs, mask.sum(dim)
+
 
 def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, args, top_k=None,
                           just_cell=False, just_neighborhood=False,
@@ -214,9 +222,14 @@ def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, args, t
     return select
 
 
-def process_features(features_list,
-         split, label_name, label_value, retrieve_label,
-         retrieve_position_emb, retrieve_emb_from_layer, gene_count=None):
+def process_features(features_list: List,
+                     split,
+                     label_name,
+                     label_value,
+                     retrieve_label,
+                     retrieve_position_emb,
+                     retrieve_emb_from_layer,
+                     gene_count=None):
     """
     Process features from the provided features and metadata to make it ready for anndata
 
@@ -254,7 +267,11 @@ def process_features(features_list,
     return features, obs
 
 
-def calculate_sequence_length(incl_cell_seq, incl_neighborhood_seq, seq_len_cell, seq_len_neighborhood, has_cls):
+def calculate_sequence_length(incl_cell_seq: bool,
+                              incl_neighborhood_seq: bool,
+                              seq_len_cell: int,
+                              seq_len_neighborhood: int,
+                              has_cls: bool):
     """
     Calculate the total sequence length (including cls token) based on the provided flags and sequence lengths.
 
@@ -285,36 +302,36 @@ def calculate_sequence_length(incl_cell_seq, incl_neighborhood_seq, seq_len_cell
     return seq_len
 
 
-def create_and_save_anndata(all_features, all_obs, output_file='final_result.h5ad'):
+def create_and_save_anndata(all_features: List[np.ndarray],
+                            all_obs: List[np.ndarray],
+                            output_file: str='final_result.h5ad') -> anndata.AnnData:
     """
-    Merges features and observations into an AnnData object and saves it to a file.
-    
-    Parameters:
-    - all_features (list of np.array): A list of arrays containing features to be merged.
-    - all_obs (list of pd.DataFrame): A list of DataFrames containing observations to be concatenated.
-    - output_file (str): The file name to save the resulting AnnData object.
+    Merges features and observations into an AnnData object and saves the object to an 'h5ad' file.
+
+    Parameters
+    -----------
+    all_features:
+        A list of arrays containing features to be merged.
+    all_obs:
+        A list of DataFrames containing observations to be concatenated.
+    output_file:
+        The file name to save the resulting AnnData object.
+        
     Returns
-        anndata: final_adata
+    --------
+    adata:
+        AnnData object containing the features/embeddings in `adata.obsm` and the observations in `adata.obs`.
     """
-    # Merge all feature arrays vertically (stack them)
+    # Merge features and observations
     merged_features = np.vstack(all_features)
+    merged_obs = pd.concat(all_obs, axis=0).reset_index(drop=True)
+    merged_obs.index = merged_obs.index.astype(str)
 
-    # Concatenate all observation DataFrames and reset the index
-    final_obs = pd.concat(all_obs, axis=0).reset_index(drop=True)
-
-    # Convert the index to string type
-    final_obs.index = final_obs.index.astype(str)
-
-    # Create an AnnData object with the merged observations
-    final_adata = anndata.AnnData(obs=final_obs)
-
-    # Add the merged features to the 'obsm' slot of the AnnData object
-    final_adata.obsm['jepa_emb'] = merged_features
-
-    # Write the AnnData object to a file
-    final_adata.write(output_file)
-
+    # Store in adata
+    adata = anndata.AnnData(obs=merged_obs)
+    adata.obsm['jepa_emb'] = merged_features
+    adata.write(output_file)
     print(f"AnnData has been successfully saved at: {output_file}")
 
-    return final_adata
+    return adata
 

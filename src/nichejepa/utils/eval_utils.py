@@ -1,26 +1,36 @@
+from typing import List, Literal, Optional
+
+import anndata
+import numpy as np
+import pandas as pd
+import scib_metrics as sm
 import torch
 from tqdm import tqdm
-import numpy as np
-import anndata
-import pandas as pd
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
-import scib_metrics as sm
-from .emb_utils import process_features, mean_nonpadding_embs,create_selection,compute_weight_based_ranks,weighted_mean
+from sklearn.neighbors import KNeighborsClassifier
 
-def load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args):
+from .emb_utils import process_features, mean_nonpadding_embs, create_selection, compute_weight_based_ranks, weighted_mean
+
+
+def load_cell_neighborhoods(udata: List,
+                            masks_enc: List,
+                            masks_pred: List,
+                            device: torch.device,
+                            args: dict) -> dict:
     """
     Load cell neighborhoods from given data and masks, returning a dictionary with specific keys.
 
-    Parameters:
+    Parameters
+    -----------
     udata (list): List containing data elements. Expected to be of length 3 or 4.
     masks_enc (list): List of encoder masks.
     masks_pred (list): List of predicted masks.
     device (torch.device): Device to load data onto (e.g., CPU or GPU).
     args (dict): Dictionary contains various items to guide label extraction.
 
-    Returns:
+    Returns
+    --------
     dict: A dictionary containing loaded cell neighborhood data with the following keys:
         - "cell_neighborhood_tokens": The tokens for cell neighborhoods.
         - "seg_label": The segmentation label.
@@ -58,13 +68,19 @@ def load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args):
         "masks_enc": masks_1,
         "masks_pred": masks_2
     }
-def forward_context(model, data_dict, label_name,
-        retrieve_label, args,
-        split):
+
+
+def forward_context(model,
+                    data_dict: dict,
+                    label_name: str,
+                    retrieve_label: str,
+                    args: dict,
+                    split: str):
     """
     Perform the forward pass of the model and gather average features for each sample.
 
-    Parameters:
+    Parameters
+    -----------
     model: The model to be used for the forward pass.
     data_dict (dict): Dictionary containing cell neighborhood tokens and segmentation labels.
     label_name (str): Name of the label that could be cell_type or niche_type
@@ -72,7 +88,8 @@ def forward_context(model, data_dict, label_name,
     args (dict): Dictionary of configs.
     split (str): The split of the dataset (e.g., train, test, validation).
 
-    Returns:
+    Returns
+    --------
     obs: The obs data that should be stored in the obs of anndata
     features: the features that should store in obsm of the anndata
     """
@@ -96,7 +113,7 @@ def forward_context(model, data_dict, label_name,
         # Retrieve embeddings from multiple layers, based on segmentation labels
         emb_list = model.module.return_multi_layer_emb(cell_neighborhood_tokens, seg_label)
 
-    features_list = []  # Initialize a list to store processed features
+    features_list = []
 
     # Ensure that exactly one of 'weighted_average', 'average', or 'cls' is True.
     assert sum([args['emb']['weighted_average'], args['emb']['average'], args['emb']['cls']]) == 1, \
@@ -141,13 +158,19 @@ def forward_context(model, data_dict, label_name,
 
     # Further process the list of features for the final output
     features, obs = process_features(
-        features_list, split, label_name, data_dict[label_name], retrieve_label,
-        retrieve_position_emb, retrieve_emb_from_layer, gene_count=gene_count
-    )
-
+        features_list,
+        split,
+        label_name,
+        data_dict[label_name],
+        retrieve_label,
+        retrieve_position_emb,
+        retrieve_emb_from_layer,
+        gene_count=gene_count)
 
     # Return the processed features and corresponding observations
     return features, obs
+
+
 def eval_step(model, data_dict, split, args):
     """
     Evaluate the model on the provided context dictionary.
@@ -170,31 +193,47 @@ def eval_step(model, data_dict, split, args):
         elif args['emb']['retrieve_gene']:
             return forward_context(model, data_dict, "cell_type", 'retrieve_gene', args, split)
 
-def process_loader(model, loader, args, split, all_features=None, all_obs=None):
+
+def process_loader(model,
+                   loader: torch.utils.data.DataLoader,
+                   args: dict,
+                   split: str,
+                   all_features=None,
+                   all_obs=None):
     """
     Process the data loader and evaluate the model on each batch.
 
-    Parameters:
+    Parameters
+    -----------
     model: The model to be used for processing.
     loader: Data loader providing batches of data.
     args (dict): Dictionary of Configs.
     split (str): Type of the dataset.
     
-    Returns:
-    all_obs: The list of all obs computed from different batches, which should be merged and stored in the final AnnData.
-    all_features: The list of all features computed from different batches, which should be merged and stored in the final AnnData
+    Returns
+    --------
+    all_obs:
+        The list of all obs computed from different batches, which should be merged and stored in the final AnnData.
+    all_features:
+        The list of all features computed from different batches, which should be merged and stored in the final AnnData
 
     """
-    # Determine the device to use: GPU if available, otherwise CPU
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Iterate over the data loader with a progress bar
     for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
         # Load and preprocess the cell neighborhood data, moving it to the appropriate device (GPU or CPU)
-        data_dict = load_cell_neighborhoods(udata, masks_enc, masks_pred, device, args)
+        data_dict = load_cell_neighborhoods(udata,
+                                            masks_enc,
+                                            masks_pred,
+                                            device,
+                                            args)
         
         # Perform an evaluation step using the model and the preprocessed data
-        features, obs = eval_step(model, data_dict, split, args)
+        features, obs = eval_step(model,
+                                  data_dict,
+                                  split,
+                                  args)
         
         # Append the extracted features and observations to their respective lists
         all_features.append(features)
@@ -202,96 +241,84 @@ def process_loader(model, loader, args, split, all_features=None, all_obs=None):
 
     # Return two lists that have information for different batch
     return all_features, all_obs
-def classification_metrics(adata, label_col='cell_type', classifier='knn', n_neighbors=5):
+
+
+def classification_metrics(adata: anndata.AnnData,
+                           label_col: str='cell_type',
+                           classifier: Literal['knn', 'logistic']='knn',
+                           n_neighbors: Optional[int]=5):
     """
-    Train and evaluate a classifier (KNN or Logistic Regression) on the provided AnnData object.
+    Train and evaluate a classifier (KNN or Logistic Regression) on learned embeddings.
 
-    Parameters:
+    Parameters
     -----------
-    adata : AnnData
+    adata:
         Annotated data object containing the features and labels.
-    label_col : str, optional
+    label_col:
         The name of the column in `adata.obs` containing the categorical labels for classification.
-        Default is 'cell_type'.
-    classifier : str, optional
-        The type of classifier to use ('knn' or 'logistic'). Default is 'knn'.
-    n_neighbors : int, optional
+    classifier:
+        The type of classifier to use ('knn' or 'logistic').
+    n_neighbors:
         Number of neighbors to use in KNN classification. Only applicable if `classifier` is 'knn'.
-        Default is 5.
 
-    Returns:
+    Returns
     --------
-    dict
+    metrics:
         A dictionary containing accuracy and F1 scores for both the training and test sets.
     """
-    # Extract features and labels
+    # Split the data into training and testing sets
     X = adata.obsm['jepa_emb']
     y = adata.obs[label_col]
-
-    # Create masks for training and testing sets based on the 'split' column
     train_mask = adata.obs['split'] == 'train'
     test_mask = adata.obs['split'] == 'test'
-
-    # Split the data into training and testing sets
     X_train, X_test = X[train_mask], X[test_mask]
     y_train, y_test = y[train_mask], y[test_mask]
 
-    # Initialize the classifier
+    # Train the classifier
     if classifier == 'knn':
         clf = KNeighborsClassifier(n_neighbors=n_neighbors)
     elif classifier == 'logistic':
         clf = LogisticRegression()
     else:
         raise ValueError("Classifier must be either 'knn' or 'logistic'")
-
-    # Train the classifier on the training set
     clf.fit(X_train, y_train)
 
-    # Predict labels on the test set
+    # Evaluate the model on the test and training sets
     y_test_pred = clf.predict(X_test)
-
-    # Evaluate the model on the test set
     test_accuracy = accuracy_score(y_test, y_test_pred)
     test_f1 = f1_score(y_test, y_test_pred, average='weighted')
-
-    # Predict labels on the training set
     y_train_pred = clf.predict(X_train)
-
-    # Evaluate the model on the training set
     train_accuracy = accuracy_score(y_train, y_train_pred)
     train_f1 = f1_score(y_train, y_train_pred, average='weighted')
-
-    # Output the results
     print(f"Test Accuracy: {test_accuracy:.2f}")
     print(f"Test F1 Score: {test_f1:.2f}")
     print(f"Train Accuracy: {train_accuracy:.2f}")
     print(f"Train F1 Score: {train_f1:.2f}")
+    metrics = {'test_accuracy': test_accuracy,
+               'test_f1': test_f1,
+               'train_accuracy': train_accuracy,
+               'train_f1': train_f1}
+    return metrics
 
-    # Return the evaluation metrics as a dictionary
-    return {
-        'test_accuracy': test_accuracy,
-        'test_f1': test_f1,
-        'train_accuracy': train_accuracy,
-        'train_f1': train_f1
-    }
-def clustering_metrics(adata, emb_key='jepa_emb', label_col='cell_type'):
+
+def clustering_metrics(adata: anndata.AnnData,
+                       emb_key: str='jepa_emb',
+                       label_col: str='cell_type') -> dict:
     """
-    Evaluate clustering metrics (NMI and ARI) using KMeans clustering on the provided AnnData object.
+    Compute clustering metrics (NMI and ARI) using K-Means clustering.
 
-    Parameters:
+    Parameters
     -----------
-    adata : AnnData
-        Annotated data object containing the embeddings and labels.
-    emb_key : str, optional
-        The key in `adata.obsm` corresponding to the embeddings to use for clustering.
-        Default is 'jepa_emb'.
-    label_col : str, optional
-        The name of the column in `adata.obs` containing the true labels for comparison.
-        Default is 'cell_type'.
+    adata:
+        Annotated data object containing the embeddings and ground truth labels.
+    emb_key:
+        The key in `adata.obsm` containing the embeddings to use for clustering.
+    label_col:
+        The name of the column in `adata.obs` containing the ground truth labels for comparison.
 
-    Returns:
+    Returns
     --------
-    dict
+    metrics:
         A dictionary containing the NMI and ARI scores.
     """
     # Validate input
@@ -300,21 +327,12 @@ def clustering_metrics(adata, emb_key='jepa_emb', label_col='cell_type'):
     if label_col not in adata.obs:
         raise ValueError(f"Label column '{label_col}' not found in `adata.obs`.")
 
-    # Extract the embeddings and labels
+    # Calculate NMI and ARI using K-Means clustering
     embeddings = adata.obsm[emb_key]
     true_labels = adata.obs[label_col]
-
-    # Calculate NMI and ARI using KMeans clustering
     results = sm.nmi_ari_cluster_labels_kmeans(embeddings, true_labels)
-
-    # Output the results
     print(f"NMI (Normalized Mutual Information): {results['nmi']}")
     print(f"ARI (Adjusted Rand Index): {results['ari']}")
-
-    # Return the results as a dictionary
-    return {
-        'nmi': results['nmi'],
-        'ari': results['ari']
-    }
-
-
+    metrics = {'nmi': results['nmi'],
+               'ari': results['ari']}
+    return metrics
