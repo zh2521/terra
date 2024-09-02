@@ -9,8 +9,12 @@ import torch
 
 def apply_masks(x, masks):
     """
-    :param x: tensor of shape [B (batch-size), N (num-patches), D (feature-dim)]
-    :param masks: list of tensors containing indices of patches in [N] to keep
+    Parameters
+    ----------
+    x:
+        Tensor of shape [B (batch size), N (number of tokens), D (feature dimensions)].
+    masks:
+        List of tensors containing indices of tokens in [N] to keep.
     """
     all_x = []
     for m in masks:

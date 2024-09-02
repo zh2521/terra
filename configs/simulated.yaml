@@ -1,17 +1,14 @@
 data:
   batch_size: 10
-  #data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/scGPT.dataset
-  #data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/nichecompass.dataset 
-  data_path: ../../nichejepa-reproducibility/nichejepa-reproducibility/datasets/st_data/gold/cell_neighborhood_tokenizer/sim1_1105fts_10000locs/sim1_1105fts_10000locs_read_depth_shifted_log_2210.dataset
-  #data_path: /lustre/scratch126/cellgen/team361/mv10/nichejepa-reproducibility/nichejepa-reproducibility/datasets/st_data/gold/cell_neighborhood_tokenizer/merfish_mouse_brain_subset/merfish_mouse_brain_subset_read_depth_shifted_log_2170.dataset/
+  data_path: /lustre/scratch126/cellgen/team361/mv10/nichejepa-reproducibility/nichejepa-reproducibility/datasets/st_data/gold/cell_neighborhood_tokenizer/sim1_1105fts_10000locs/sim1_1105fts_10000locs_read_depth_shifted_log_2210.dataset
   data_set_name: 'Simulated_data'
   num_workers: 18
   pin_mem: true
-  vocab_size: 1107 #this is for simulated data
-  just_cell: True
-  just_neighborhood: True
-  seq_len_cell: 361 #this is for simulated data
-  seq_len_neighborhood: 1091 #this is for simulated data
+  vocab_size: 1107
+  incl_cell_seq: True
+  incl_neighborhood_seq: True
+  seq_len_cell: 361
+  seq_len_neighborhood: 1091
   has_cls: True
   sample_size: 100000
   sample_subset: False
@@ -39,7 +36,6 @@ mask:
   target_mask_size: 19
   n_contexts: 1
   n_targets: 4
-
 meta:
   copy_data: false
   enc_depth: 3

@@ -15,6 +15,7 @@ from ..utils.tensors import (trunc_normal_,
                              repeat_interleave_batch)
 from ..masks.utils import apply_masks
 
+
 def get_1d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
     """
     grid_size: int of the grid length

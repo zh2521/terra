@@ -85,12 +85,12 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
     batch_size = args['data']['batch_size']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
-    just_cell = args['data']['just_cell']
-    just_neighborhood = args['data']['just_neighborhood']
+    incl_cell_seq = args['data']['incl_cell_seq']
+    incl_neighborhood_seq = args['data']['incl_neighborhood_seq']
     has_cls = args['data']['has_cls']
     data_set_name = args['data']['data_set_name']
 
-    seq_len = calculate_sequence_length(just_cell, just_neighborhood, seq_len_cell, seq_len_neighborhood, has_cls)
+    seq_len = calculate_sequence_length(incl_cell_seq, incl_neighborhood_seq, seq_len_cell, seq_len_neighborhood, has_cls)
     vocab_size = args['data']['vocab_size']
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
@@ -125,13 +125,13 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
                f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
                f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
                f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
-    # Append "just_cell" to the folder name if just_cell is True
-    if args['data']['just_cell']:
-       folder += "_just_cell"
+    # Append "incl_cell_seq" to the folder name if incl_cell_seq is True
+    if args['data']['incl_cell_seq']:
+       folder += "_incl_cell_seq"
 
-    # Append "just_neighborhood" to the folder name if just_neighborhood is True
-    if args['data']['just_neighborhood']:
-       folder += "_just_neighborhood"
+    # Append "incl_neighborhood_seq" to the folder name if incl_neighborhood_seq is True
+    if args['data']['incl_neighborhood_seq']:
+       folder += "_incl_neighborhood_seq"
 
     # Append subset name based on specific_cell_types
     specific_cell_types = args['data'].get('specific_cell_types')
@@ -192,18 +192,16 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
-    mask_collator = MaskCollator(just_neighborhood=just_neighborhood,
-                                 seq_len_cell = seq_len_cell,
-                                 seq_len_neighborhood = seq_len_neighborhood,
-                                 just_cell = just_cell,
-                                 target_mask_size = target_mask_size,
-                                 context_mask_size = context_mask_size,
-                                 n_targets=n_targets,
-                                 n_contexts=n_contexts,
-                                 has_cls=has_cls)
+    mask_collator = MaskCollator(
+        n_targets=n_targets,
+        n_contexts=n_contexts,
+        target_mask_size=target_mask_size,
+        context_mask_size=context_mask_size,
+        seq_len_cell=seq_len_cell,
+        seq_len_neighborhood=seq_len_neighborhood,
+        has_cls=has_cls)
     
     # Initialize dataloader and -sampler
-     
     _, train_loader, train__sampler = make_cell_neighborhood_dataset(
             batch_size=batch_size,
             data=train_dataset,
@@ -211,13 +209,12 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
             seq_len=seq_len,
             collator=mask_collator,
             pin_mem=pin_mem,
-            training=True,
             num_workers=num_workers,
             world_size=world_size,
             rank=rank,
             drop_last=False,
-            just_cell=just_cell,
-            just_neighborhood=just_neighborhood,
+            incl_cell_seq=incl_cell_seq,
+            incl_neighborhood_seq=incl_neighborhood_seq,
             seq_len_cell = seq_len_cell,
             seq_len_neighborhood = seq_len_neighborhood,
             has_cls = has_cls)
@@ -229,16 +226,15 @@ def train(args, train_dataset, test_dataset, resume_preempt=False):
             seq_len=seq_len,
             collator=mask_collator,
             pin_mem=pin_mem,
-            training=False,
             num_workers=num_workers,
             world_size=world_size,
             rank=rank,
             drop_last=False,
-            just_cell=just_cell,
-            just_neighborhood=just_neighborhood,
-            seq_len_cell = seq_len_cell,
-            seq_len_neighborhood = seq_len_neighborhood,
-            has_cls = has_cls)
+            incl_cell_seq=incl_cell_seq,
+            incl_neighborhood_seq=incl_neighborhood_seq,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
+            has_cls=has_cls)
 
     ipe = len(train_loader)
 

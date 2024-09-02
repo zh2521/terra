@@ -1,30 +1,26 @@
 data:
-  batch_size: 10
-  #data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/scGPT.dataset
-  #data_path: /lustre/scratch126/cellgen/team361/mv10/jepa/nichejepa/nichecompass.dataset 
-  #data_path: ../../nichejepa-reproducibility/nichejepa-reproducibility/datasets/st_data/gold/cell_neighborhood_tokenizer/sim1_1105fts_10000locs/sim1_1105fts_10000locs_read_depth_shifted_log_2210.dataset
+  batch_size: 2
   data_path: /lustre/scratch126/cellgen/team361/mv10/nichejepa-reproducibility/nichejepa-reproducibility/datasets/st_data/gold/cell_neighborhood_tokenizer/merfish_mouse_brain_subset/merfish_mouse_brain_subset_read_depth_shifted_log_2170.dataset/
   data_set_name: 'merfish'
-  num_workers: 18
-  pin_mem: true
-  vocab_size: 1087 #this is for merfish data
+  num_workers: 1
+  pin_mem: False
+  seq_len: 2000
+  vocab_size: 1087
   incl_cell_seq: True
   incl_neighborhood_seq: True
-  seq_len_cell: 457 #this is for merfish data
-  #seq_len_neighborhood: 1091 #this is for simulated data
-  seq_len_neighborhood: 786 #this is for merfish data
+  seq_len_cell: 1000
+  seq_len_neighborhood: 1000
   has_cls: True
-  sample_size: 300000
+  sample_size: 100000
   sample_subset: True
   random_state: 0
   stratify: False
   split: 0.2
   specific_cell_types: []
-  #specific_cell_types: ['Celltype5','Celltype6']
 emb:
   weighted_average: False
   average: True
-  cls: False
+  cls: True
   select_topk: False
   retrieve_gene: False
   retrieve_niche: False
@@ -36,11 +32,10 @@ logging:
   folder: logs/merfish_200
   write_tag: jepa
 mask:
-  context_mask_size: 1240
-  target_mask_size: 10
+  context_mask_size: 2
+  target_mask_size: 4
   n_contexts: 1
-  n_targets: 9
-
+  n_targets: 2
 meta:
   copy_data: false
   enc_depth: 3

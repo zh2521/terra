@@ -28,7 +28,13 @@ def setup_batch_size(enc_pred_depth, is_training):
     else:
         return 70
 
-def create_params_from_YAML_wandb_config(YAML_file, logger, sweep_config=None, is_training=True, has_same_dimention=True, update_from_sweep=False):
+
+def create_params_from_YAML_wandb_config(YAML_file,
+                                         logger,
+                                         sweep_config=None,
+                                         is_training=True,
+                                         has_same_dimention=True,
+                                         update_from_sweep=False):
     """
     Updates the `params` dictionary with values from the YAML config file and optionally from the wandb configuration file.
     This can be useful when using wandb sweeps for hyperparameter optimization. Also sets the seed in `params` from `args.seed`.
@@ -84,6 +90,7 @@ def create_params_from_YAML_wandb_config(YAML_file, logger, sweep_config=None, i
 
     # Return the updated params dictionary
     return params
+
 
 def prepare_dataset(args):
     """
@@ -141,6 +148,7 @@ def prepare_dataset(args):
     test_dataset = dataset.select(test_indices)
 
     return train_dataset, test_dataset
+
 
 def generate_output_name(args):
     """Generates a descriptive file name based on input arguments.
