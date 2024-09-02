@@ -120,7 +120,7 @@ class MaskCollator:
             # Apply the mask within the cell segment if the start is within the cell
             if start < (self.valid_min_start + non_zero_seq_len_cell):
                 # Determine the end of the mask within the cell
-                cell_end = min(start + mask_size, valid_min_start + non_zero_seq_len_cell)
+                cell_end = min(start + mask_size, self.valid_min_start + non_zero_seq_len_cell)
                 mask[start:cell_end] = 1
                 mask_complement[start:cell_end] = 0
 
