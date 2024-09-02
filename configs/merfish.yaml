@@ -7,12 +7,9 @@ data:
   data_set_name: 'merfish'
   num_workers: 18
   pin_mem: true
-  #vocab_size: 2781
-  #vocab_size: 1107 #this is for simulated data
   vocab_size: 1087 #this is for merfish data
   just_cell: True
   just_neighborhood: True
-  #seq_len_cell: 361 #this is for simulated data
   seq_len_cell: 457 #this is for merfish data
   #seq_len_neighborhood: 1091 #this is for simulated data
   seq_len_neighborhood: 786 #this is for merfish data

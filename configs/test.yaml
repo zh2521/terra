@@ -4,12 +4,12 @@ data:
   data_set_name: 'merfish'
   num_workers: 1
   pin_mem: False
-  seq_len: 30
-  vocab_size: 20
+  seq_len: 2000
+  vocab_size: 1087
   incl_cell_seq: True
   incl_neighborhood_seq: True
-  seq_len_cell: 15
-  seq_len_neighborhood: 15
+  seq_len_cell: 1000
+  seq_len_neighborhood: 1000
   has_cls: True
   sample_size: 100000
   sample_subset: True
@@ -20,7 +20,7 @@ data:
 emb:
   weighted_average: False
   average: True
-  cls: False
+  cls: True
   select_topk: False
   retrieve_gene: False
   retrieve_niche: False
@@ -32,8 +32,8 @@ logging:
   folder: logs/merfish_200
   write_tag: jepa
 mask:
-  context_mask_size: 10
-  target_mask_size: 3
+  context_mask_size: 2
+  target_mask_size: 4
   n_contexts: 1
   n_targets: 2
 meta:
