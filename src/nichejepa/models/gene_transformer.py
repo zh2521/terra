@@ -85,9 +85,9 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int,
     return pos_emb
 
 
-def drop_path(x,
+def drop_path(x: torch.Tensor,
               drop_prob: float=0.,
-              training: bool=False):
+              training: bool=False) -> torch.Tensor:
     """
     Helper function for forward pass of DropPath module.
 
@@ -125,8 +125,8 @@ def drop_path(x,
 
 class DropPath(nn.Module):
     """
-    DropPath module to stochastically drop paths per sample, applied in main
-    path of residual blocks.
+    DropPath module to drop paths per observation, applied in main path of
+    residual blocks, with stochastically increasing drop path rate per depth.
 
     Parameters
     -----------
@@ -321,8 +321,8 @@ class Block(nn.Module):
                  drop: float=0.,
                  attn_drop: float=0.,
                  drop_path: float=0.,
-                 act_layer: nn.module.activation=nn.GELU,
-                 norm_layer: nn.module.layer_norm=nn.LayerNorm):
+                 act_layer: nn.modules.activation=nn.GELU,
+                 norm_layer: nn.modules.normalization=nn.LayerNorm):
         super().__init__()
         self.norm1 = norm_layer(dim)
         self.attn = Attention(dim,
@@ -343,7 +343,7 @@ class Block(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 return_attention: bool=False,
-                masks=Optional[torch.Tensor]=None) -> torch.Tensor:
+                masks: Optional[torch.Tensor]=None) -> torch.Tensor:
         """
         Forward pass of the transformer block.
 
@@ -358,7 +358,9 @@ class Block(nn.Module):
             Mask used in Attention module.
 
         Returns
-        -----------       
+        -----------
+        x:
+            Output of the transformer block with shape (B, N, D).       
         """
         y, attn = self.attn(self.norm1(x),
                             masks=masks)
@@ -372,48 +374,75 @@ class Block(nn.Module):
 
 class GeneTransformerPredictor(nn.Module):
     """
-    GeneTransformerPredictor class to predict targets from contexts.
+    GeneTransformerPredictor class to predict encoded targets from encoded
+    contexts.
     
     Parameters
     -----------
     embed_dim:
+        Dimension of the input embedding.
     seq_len:
-    predictor_embed_dim:
-    depth:
-    num_heads:
-    mlp_ratio:
-    qkv_bias:
-    qk_scale:
-    drop_rate:
-    attn_drop_rate:
-    drop_path_rate:
-    norm_layer:
-    init_std:
+        Length of the token sequences (w/o <cls> token).
+    has_cls:
+        If 'True', sequences include a <cls> token at the start.
     pos_learnable:
+        If 'True', positional embeddings are learnable, otherwise use sin cos
+        positional embeddings.
+    predictor_embed_dim:
+        Dimension of the embedding of the predictor.
+    depth:
+        Number of transformer blocks in the predictor.
+    num_heads:
+        Number of attention heads in the Attention module.
+    mlp_ratio:
+        Ratio to determine number of hidden dimensions in MLP module compared to
+        input and output dimensions.
+    qkv_bias:
+        If 'True', include bias in query, key, and value layers of Attention
+        module.
+    qk_scale:
+        Scaling factor for query and key vectors of Attention module.
+    drop_rate:
+        Dropout ratio in projection layer of Attention module and in layers of
+        MLP module.
+    attn_drop_rate:
+        Dropout ratio in attention layer of Attention module.
+    drop_path_rate:
+        Probability for dropping paths in DropPath module.
+    norm_layer:
+        Normalization layer.
+    init_std:
+        Standard deviation for weight initialization.
     """
     def __init__(self,
-                 embed_dim: int=768,
-                 seq_len: int=10,
+                 embed_dim: int,
+                 seq_len: int,
+                 has_cls: bool=True,
+                 pos_learnable: bool=False,
                  predictor_embed_dim: int=384,
                  depth: int=6,
                  num_heads: int=8,
                  mlp_ratio: float=4.0,
                  qkv_bias: bool=True,
-                 qk_scale=None,
-                 drop_rate=0.0,
-                 attn_drop_rate=0.0,
-                 drop_path_rate=0.0,
-                 norm_layer=nn.LayerNorm,
+                 qk_scale: Optional[float]=None,
+                 drop_rate: float=0.0,
+                 attn_drop_rate: float=0.0,
+                 drop_path_rate: float=0.0,
+                 norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
-                 pos_learnable: bool=True,
                  **kwargs):
         super().__init__()
+        self.init_std = init_std
+
+        # Initialize layer to project from encoder to predictor embed dim
         self.predictor_embed = nn.Linear(embed_dim,
                                          predictor_embed_dim,
                                          bias=True)
+
+        # Initialize mask tokens to be predicted
         self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
 
-        # Retrieve stochastic depth decay rule
+        # Define decaying drop path rate (higher drop rate in deeper blocks)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
         # Retrieve positional embedding
@@ -423,16 +452,17 @@ class GeneTransformerPredictor(nn.Module):
                 requires_grad=True)
         else:
             self.predictor_pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len, predictor_embed_dim),
+                torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
                 requires_grad=False)
             predictor_pos_embed = get_1d_sincos_pos_embed(
                 self.predictor_pos_embed.shape[-1],
                 seq_len,
-                cls_token=False)
+                cls_token=has_cls)
             self.predictor_pos_embed.data.copy_(
                 torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
         
-        # Initialize predictor blocks
+        # Initialize predictor blocks, norm layer, and predictor projection
+        # layer
         self.predictor_blocks = nn.ModuleList([
             Block(dim=predictor_embed_dim,
                   num_heads=num_heads,
@@ -448,9 +478,11 @@ class GeneTransformerPredictor(nn.Module):
         self.predictor_proj = nn.Linear(predictor_embed_dim,
                                         embed_dim,
                                         bias=True)
-        # ------
-        self.init_std = init_std
+
+        # Initialize mask token weights
         trunc_normal_(self.mask_token, std=self.init_std)
+        
+        # Initialize layer weights
         self.apply(self._init_weights)
         self.fix_init_weight()
 
@@ -480,45 +512,64 @@ class GeneTransformerPredictor(nn.Module):
                 masks_enc: Union[list, torch.Tensor],
                 masks_pred: Union[list, torch.Tensor]) -> torch.Tensor:
         """
-        Forward pass.
+        Run forward pass for a batch of input tokens.
 
         Parameters
         -----------
+        x:
+            Embeddings from the encoder with shape (BATCH_SIZE*N_CONTEXT_MASKS,
+            CONTEXT_MASK_SIZE, EMBED_DIM).
+        masks_enc:
+            List of N_CONTEXT_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            CONTEXT_MASK_SIZE).
+        masks_pred:
+            List of N_TARGET_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            TARGET_MASK_SIZE).
 
         Returns
         -----------
+        x:
+            Embeddings of tokens included in the target masks with shape (
+            BATCH_SIZE*N_TARGET_MASKS, TARGET_MASK_SIZE, EMBED_DIM).   
         """
-        assert (masks_enc is not None) and (
-            masks_pred is not None), 'Cannot run predictor without mask indices'
+        assert (masks_enc is not None) and (masks_pred is not None), \
+            'Cannot run predictor without mask indices.'
 
+        # Format masks
         if not isinstance(masks_enc, list):
             masks_enc = [masks_enc]
-
         if not isinstance(masks_pred, list):
             masks_pred = [masks_pred]
 
         # Retrieve batch size
-        B = len(x) // len(masks_enc)
+        B = len(x) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
 
         # Map from encoder dim to pedictor dim
         x = self.predictor_embed(x)
 
-        # Add positional embedding to tokens
+        # Add positional embeddings to token embeddings
         x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
         x += apply_masks(x_pos_embed, masks_enc)
 
-        _, N_ctxt, D = x.shape
+        _, N_ctxt, D = x.shape # N_ctxt: context_mask_size,
+                               # D: predictor_embed_dim
 
-        # -- concat mask tokens to x
+        # Concatenate mask tokens to x
         pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
         pos_embs = apply_masks(pos_embs, masks_pred)
-        pos_embs = repeat_interleave_batch(pos_embs, B, repeat=len(masks_enc))
+        pos_embs = repeat_interleave_batch(
+            pos_embs,
+            B,
+            repeat=len(masks_enc)) # repeat pos embeddings for all context masks
         # --
-        pred_tokens = self.mask_token.repeat(pos_embs.size(0),
-                                             pos_embs.size(1),
-                                             1)
-        # --
-        pred_tokens += pos_embs
+        pred_tokens = self.mask_token.repeat(
+            pos_embs.size(0), # batch_size*n_target_masks
+            pos_embs.size(1), # target_mask_size
+            1)
+                                             
+        pred_tokens += pos_embs # add positional embeddings to mask tokens
         x = x.repeat(len(masks_pred), 1, 1)
         x = torch.cat([x, pred_tokens], dim=1)
 
@@ -527,7 +578,7 @@ class GeneTransformerPredictor(nn.Module):
             x = blk(x)
         x = self.predictor_norm(x)
 
-        # Return predictions for masked tokens
+        # Return predictions for (target) mask tokens
         x = x[:, N_ctxt:]
         x = self.predictor_proj(x)
 
@@ -541,48 +592,69 @@ class GeneTransformerEncoder(nn.Module):
     Parameters
     -----------
     vocab_size:
+        Size of the token vocabulary. Includes <pad> token.
     embed_dim:
+        Dimension of the output embedding.
     seq_len:
-    predictor_embed_dim:
-    depth:
-    predictor_depth:
-    num_heads:
-    mlp_ratio:
-    qkv_bias:
-    qk_scale:
-    drop_rate:
-    attn_drop_rate:
-    drop_path_rate:
-    norm_layer:
-    init_std:
-    pos_learnable:
+        Length of the token sequences (w/o <cls> token).
     has_cls:
+        If 'True', sequences include a <cls> token at the start.
+    pos_learnable:
+        If 'True', positional embeddings are learnable, otherwise use sin cos
+        positional embeddings.
+    predictor_embed_dim:
+        Dimension of the embedding of the predictor.
+    depth:
+        Number of transformer blocks in the encoder.
+    predictor_depth:
+        Number of transformer blocks in the predictor.
+    num_heads:
+        Number of attention heads in the Attention module.
+    mlp_ratio:
+        Ratio to determine number of hidden dimensions in MLP module compared to
+        input and output dimensions.
+    qkv_bias:
+        If 'True', include bias in query, key, and value layers of Attention
+        module.
+    qk_scale:
+        Scaling factor for query and key vectors of Attention module.
+    drop:
+        Dropout ratio in projection layer of Attention module and in layers of
+        MLP module.
+    attn_drop:
+        Dropout ratio in attention layer of Attention module.
+    drop_path_rate:
+        Probability for dropping paths in DropPath module.
+    norm_layer:
+        Normalization layer.
+    init_std:
+        Standard deviation for weight initialization.
     """
     def __init__(self,
-                 vocab_size: int=6035,
+                 vocab_size: int,
+                 seq_len: int,
+                 has_cls: bool=True,
+                 pos_learnable: bool=False,
                  embed_dim: int=768,
-                 seq_len: int=10,
-                 predictor_embed_dim: int=384,
                  depth: int=12,
+                 predictor_embed_dim: int=384,
                  predictor_depth: int=12,
                  num_heads: int=12,
                  mlp_ratio: float=4.0,
                  qkv_bias: bool=True,
-                 qk_scale=None,
+                 qk_scale: Optional[float]=None,
                  drop_rate: float=0.0,
                  attn_drop_rate: float=0.0,
                  drop_path_rate: float=0.0,
-                 norm_layer=nn.LayerNorm,
+                 norm_layer: nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
-                 pos_learnable: bool=True,
-                 has_cls: bool=True,
                  **kwargs):
         super().__init__()
         self.seq_len = seq_len
-        self.num_features = self.embed_dim = embed_dim
+        self.has_cls = has_cls
+        self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
-        self.has_cls = has_cls
         
         # Initialize gene embeddings
         self.gene_embed = nn.Embedding(
@@ -591,7 +663,7 @@ class GeneTransformerEncoder(nn.Module):
             padding_idx=0)
                                           
         # Initialize segment embeddings (to differentiate cell and neighborhood
-        # tokens)
+        # gene tokens)
         self.seg_embed = nn.Embedding(2 + 1, # incl. <pad>
                                       embed_dim,
                                       padding_idx=0)
@@ -609,12 +681,12 @@ class GeneTransformerEncoder(nn.Module):
                 torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
                 requires_grad=False)
             pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1],
-                                                int(self.seq_len),
+                                                self.seq_len,
                                                 cls_token=has_cls)
             self.pos_embed.data.copy_(
                 torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        # Stochastic depth decay rule
+        # Define decaying drop path rate (higher drop rate in deeper blocks)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
         # Initialize encoder blocks and norm layer
@@ -632,11 +704,14 @@ class GeneTransformerEncoder(nn.Module):
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
-        # Initialize layer weights
+        # Initialize weights of layers
         self.apply(self._init_weights)
         self.fix_init_weight()
 
     def fix_init_weight(self):
+        """
+        Helper function to scale initialized layer weights.
+        """
         def rescale(param, layer_id):
             param.div_(math.sqrt(2.0 * layer_id))
 
@@ -645,6 +720,9 @@ class GeneTransformerEncoder(nn.Module):
             rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     def _init_weights(self, m):
+        """
+        Helper function to initialize layer weights.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=self.init_std)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -666,13 +744,13 @@ class GeneTransformerEncoder(nn.Module):
         Parameters
         -----------
         x:
-            Tensor containing input tokens with shape (B, N).
+            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
 
         Returns
         -----------
         pos_embeds:
             A list containing the positional embeddings repeated across the
-            batch dimension with shape (B, N, D).
+            batch dimension with shape (BATCH_SIZE, SEQ_LEN, EMBED_DIM).
         """
         # Repeat the positional embeddings across the batch dimension to match
         # the input shape
@@ -689,12 +767,13 @@ class GeneTransformerEncoder(nn.Module):
         Parameters
         -----------
         x:
-            Tensor containing input tokens with shape (B, N).
+            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
 
         Returns
         -----------
         gene_embeds:
-            A list containing the gene embeddings with shape (B, N, D).
+            A list containing the gene embeddings with shape (BATCH_SIZE,
+            SEQ_LEN, EMBED_DIM).
         """
         # Retrieve gene embeddings
         gene_embeds = [self.gene_embed(x)]
@@ -708,23 +787,26 @@ class GeneTransformerEncoder(nn.Module):
         seg_label: torch.Tensor,
         masks: Optional[Union[list, torch.Tensor]]=None) -> list:
         """
-        Process the batch of input tokens through multiple layers of the model,
-        applying masks if provided, and return a list of embeddings from each
-        layer.
+        Process the batch of input tokens through the encoder blocks, applying
+        masks if provided, and return a list containing the embeddings after
+        each block.
 
         Parameters
         -----------
         x:
-            Tensor containing input tokens with shape (B, N).
+            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
         seg_label:
-            Tensor containing segment labels with shape (B, N).
+            Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
         masks:
-            Masks applied to embeddings.
+            List of N_CONTEXT_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE, 
+            CONTEXT_MASK_SIZE).
 
         Returns
         -----------
         emb_list:
-            List containing the embeddings after each layer with shape(B, N, D).
+            List containing the embeddings after each layer with shape (
+            BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
         """
         # Format masks
         if masks is not None:
@@ -758,21 +840,27 @@ class GeneTransformerEncoder(nn.Module):
         seg_label: torch.Tensor,
         masks: Optional[Union[list, torch.Tensor]]=None) -> torch.Tensor:
         """
-        Run forward pass for a batch of input tokens.
+        Run encoder forward pass on a batch of input token sequences. For each 
+        observation in the batch return only embeddings for tokens included in
+        mask.
 
         Parameters
         -----------
         x:
-            Tensor containing input tokens with shape (B, N).
+            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
         seg_label:
-            Tensor containing segment labels with shape (B, N).
+            Tensor containing segment labels to differentiate between cell and
+            neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN).
         masks:
-            Masks applied to embeddings.
+            List of N_CONTEXT_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE, 
+            CONTEXT_MASK_SIZE).
 
         Returns
         -----------
         x:
-            Embeddings of input tokens after complete forward pass.      
+            Embeddings of input tokens included in the masks with shape (
+            BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).    
         """
         # Format masks
         if masks is not None:
@@ -781,7 +869,7 @@ class GeneTransformerEncoder(nn.Module):
 
         # Get gene embeddings for sequence of gene tokens
         x = self.gene_embed(x)
-        B, N, D = x.shape
+        B, N, D = x.shape # B: batch_size, N: seq_len, D: embed_dim
         
         # Add positional and segment embeddings to gene embedding
         x = x + self.pos_embed + self.seg_embed(seg_label)
