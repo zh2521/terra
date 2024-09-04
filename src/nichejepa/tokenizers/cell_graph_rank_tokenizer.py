@@ -73,7 +73,7 @@ warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
 logger = logging.getLogger(__name__)
 
 GENE_MEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_means_dictionary.pkl"
-GENE_NZMEDIANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmedians_dictionary.pkl"
+GENE_NZMEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_nzmeans_dictionary.pkl"
 GENE_LOGMEANS_FILE = Path(__file__).parent.parent.parent.parent / "cell_gene_logmeans_dictionary.pkl"
 TOKEN_DICTIONARY_FILE = Path(__file__).parent.parent.parent.parent / "token_dictionary.pkl"
 
@@ -93,7 +93,7 @@ class CellGraphRankTokenizer:
                                       "shifted_log"]="seurat_v3",
                  norm_factor: Optional[Literal["read_depth", "cell_area"]]=None,
                  gene_means_file: Path | str = GENE_MEANS_FILE,
-                 gene_nzmedians_file: Path | str = GENE_NZMEDIANS_FILE,
+                 gene_nzmeans_file: Path | str = GENE_NZMEDIANS_FILE,
                  gene_logmeans_file: Path | str = GENE_LOGMEANS_FILE,
                  token_dictionary_file: Path | str = TOKEN_DICTIONARY_FILE,
                  special_tokens: Optional[list[str]] = None, # ["<cls>"],
@@ -121,8 +121,8 @@ class CellGraphRankTokenizer:
         gene_means_file:
             Path to pickle file containing dictionary of mean gene expression of cells across STcorpus (for each gene).
             Only relevant if 'norm_method' in ['mean'].
-        gene_nzmedians_file:
-            Path to pickle file containing dictionary of non-zero median gene expression of cells across STcorpus (for
+        gene_nzmeans_file:
+            Path to pickle file containing dictionary of non-zero mean gene expression of cells across STcorpus (for
             each gene).
             Only relevant if 'norm_method' in ['nzmean'].
         gene_logmeans_file:
@@ -145,7 +145,7 @@ class CellGraphRankTokenizer:
         self.norm_method = norm_method
         self.norm_factor = norm_factor
         self.gene_means_file = gene_means_file
-        self.gene_nzmedians_file = gene_nzmedians_file
+        self.gene_nzmeans_file = gene_nzmeans_file
         self.gene_logmeans_file = gene_logmeans_file
         self.special_tokens = special_tokens
         self.special_tokens_idx = special_tokens_idx
@@ -302,9 +302,9 @@ class CellGraphRankTokenizer:
             adata.X = normalize_by_mean(adata.X,
                                         gene_means_file=self.gene_means_file,
                                         probed_genes=adata.var["ensembl_id"])
-        elif self.norm_method == "nzmedian":
-            adata.X = normalize_by_nonzero_median(adata.X,
-                                                  gene_nzmedians_file=self.gene_nzmedians_file,
+        elif self.norm_method == "nzmean":
+            adata.X = normalize_by_nonzero_mean(adata.X,
+                                                  gene_nzmeans_file=self.gene_nzmeans_file,
                                                   probed_genes=adata.var["ensembl_id"])
         elif self.norm_method == "shifted_logmean":
             adata.X = normalize_by_shifted_log_mean(adata.X,
