@@ -1,7 +1,9 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Adapted from Assran, M. et al. Self-supervised learning from images with a
+Joint-Embedding Predictive Architecture.
 Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/masks/utils.py (05.06.2024).
+https://github.com/facebookresearch/ijepa/blob/main/src/masks/utils.py
+(05.06.2024).
 """
 
 import torch
@@ -9,12 +11,18 @@ import torch
 
 def apply_masks(x, masks):
     """
+    Apply masks to an input tensor.
+
     Parameters
     ----------
     x:
-        Tensor of shape [B (batch size), N (number of tokens), D (feature dimensions)].
+        Tensor of shape (B, N, D); B: batch size, N: number of tokens,
+        D: feature dimensions.
     masks:
         List of tensors containing indices of tokens in [N] to keep.
+
+    Returns
+    ----------
     """
     all_x = []
     for m in masks:

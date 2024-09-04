@@ -20,7 +20,7 @@ from ..utils.tensors import (repeat_interleave_batch,
 
 
 def get_1d_sincos_pos_embed(embed_dim: int,
-                            grid_size: int,
+                            seq_len: int,
                             cls_token: bool=False) -> np.ndarray:
     """
     Retrieve 1D sin cos positional embedding based on number of positions and
@@ -29,21 +29,22 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     Parameters
     -----------
     embed_dim:
-        Output dimension D of the positional embedding (for each position). Has
-        to be divisible by 2.
-    grid_size:
-        Number of positions to be embedded (M).
+        Output dimension of the positional embedding (for each position). Has to
+        be divisible by 2.
+    seq_len:
+        Number of positions to be embedded.
     cls_token:
-        If 'True', considers a <cls> token in the positional embedding.
+        If 'True', considers a <cls> token and assigns a positional embedding of
+        0s.
 
     Returns
     -----------
     pos_embed:
-        The positional embedding with shape (1+M, D) w/ <cls> token or shape
-        (M, D) w/o <cls> token.
+        The positional embedding with shape (1+SEQ_LEN, EMBED_DIM) w/ <cls>
+        token or shape (SEQ_LEN, EMBED_DIM) w/o <cls> token.
     """
-    grid = np.arange(grid_size, dtype=float)
-    pos_embed = get_1d_sincos_pos_embed_from_grid(embed_dim, grid)
+    pos = np.arange(seq_len, dtype=float)
+    pos_embed = get_1d_sincos_pos_embed_from_pos(embed_dim, pos)
     if cls_token:
         pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed],
                                    axis=0)
@@ -51,36 +52,39 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     return pos_embed
 
 
-def get_1d_sincos_pos_embed_from_grid(embed_dim: int,
-                                      pos: np.ndarray) -> np.ndarray:
+def get_1d_sincos_pos_embed_from_pos(embed_dim: int,
+                                     pos: np.ndarray) -> np.ndarray:
     """
-    Retrieve 1D sin cos positional embedding from an array of positions.
+    Retrieve 1D sin cos positional embedding from an array of positions/sequence
+    index.
 
     Parameters
     -----------
     embed_dim:
-        Output dimension D of the positional embedding (for each position). Has
+        Output dimension of the positional embedding (for each position). Has
         to be divisible by 2.
     pos:
-        An array containing the positions to be embedded with shape (M,).
+        An array containing the positions to be embedded with shape (SEQ_LEN,).
         
     Returns
     -----------
     pos_emb:
-        The positional embedding with shape (M, D).
+        The positional embedding with shape (SEQ_LEN, EMBED_DIM).
     """
     assert embed_dim % 2 == 0
     omega = np.arange(embed_dim // 2, dtype=float)
     omega /= embed_dim / 2.
-    omega = 1. / 10000**omega # shape (D/2,)
+    omega = 1. / 10000**omega # shape (EMBED_DIM/2,)
 
-    pos = pos.reshape(-1) # shape (M,)
-    out = np.einsum('m,d->md', pos, omega) # shape (M, D/2); outer product
+    pos = pos.reshape(-1) # shape (SEQ_LEN,)
+    out = np.einsum('m,d->md', pos, omega) # shape (SEQ_LEN, EMBED_DIM/2);
+                                           # outer product
 
-    emb_sin = np.sin(out) # shape (M, D/2)
-    emb_cos = np.cos(out) # shape (M, D/2)
+    emb_sin = np.sin(out) # shape (SEQ_LEN, EMBED_DIM/2)
+    emb_cos = np.cos(out) # shape (SEQ_LEN, EMBED_DIM/2)
 
-    pos_emb = np.concatenate([emb_sin, emb_cos], axis=1) # shape (M, D)
+    pos_emb = np.concatenate([emb_sin, emb_cos], axis=1) # shape (SEQ_LEN,
+                                                         # EMBED_DIM)
 
     return pos_emb
 
@@ -126,7 +130,8 @@ def drop_path(x: torch.Tensor,
 class DropPath(nn.Module):
     """
     DropPath module to drop paths per observation, applied in main path of
-    residual blocks, with stochastically increasing drop path rate per depth.
+    residual blocks of transformer blocks, with stochastically increasing drop
+    path rate per depth.
 
     Parameters
     -----------
@@ -372,219 +377,6 @@ class Block(nn.Module):
         return x
 
 
-class GeneTransformerPredictor(nn.Module):
-    """
-    GeneTransformerPredictor class to predict encoded targets from encoded
-    contexts.
-    
-    Parameters
-    -----------
-    embed_dim:
-        Dimension of the input embedding.
-    seq_len:
-        Length of the token sequences (w/o <cls> token).
-    has_cls:
-        If 'True', sequences include a <cls> token at the start.
-    pos_learnable:
-        If 'True', positional embeddings are learnable, otherwise use sin cos
-        positional embeddings.
-    predictor_embed_dim:
-        Dimension of the embedding of the predictor.
-    depth:
-        Number of transformer blocks in the predictor.
-    num_heads:
-        Number of attention heads in the Attention module.
-    mlp_ratio:
-        Ratio to determine number of hidden dimensions in MLP module compared to
-        input and output dimensions.
-    qkv_bias:
-        If 'True', include bias in query, key, and value layers of Attention
-        module.
-    qk_scale:
-        Scaling factor for query and key vectors of Attention module.
-    drop_rate:
-        Dropout ratio in projection layer of Attention module and in layers of
-        MLP module.
-    attn_drop_rate:
-        Dropout ratio in attention layer of Attention module.
-    drop_path_rate:
-        Probability for dropping paths in DropPath module.
-    norm_layer:
-        Normalization layer.
-    init_std:
-        Standard deviation for weight initialization.
-    """
-    def __init__(self,
-                 embed_dim: int,
-                 seq_len: int,
-                 has_cls: bool=True,
-                 pos_learnable: bool=False,
-                 predictor_embed_dim: int=384,
-                 depth: int=6,
-                 num_heads: int=8,
-                 mlp_ratio: float=4.0,
-                 qkv_bias: bool=True,
-                 qk_scale: Optional[float]=None,
-                 drop_rate: float=0.0,
-                 attn_drop_rate: float=0.0,
-                 drop_path_rate: float=0.0,
-                 norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
-                 init_std: float=0.02,
-                 **kwargs):
-        super().__init__()
-        self.init_std = init_std
-
-        # Initialize layer to project from encoder to predictor embed dim
-        self.predictor_embed = nn.Linear(embed_dim,
-                                         predictor_embed_dim,
-                                         bias=True)
-
-        # Initialize mask tokens to be predicted
-        self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
-
-        # Define decaying drop path rate (higher drop rate in deeper blocks)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-
-        # Retrieve positional embedding
-        if pos_learnable:
-            self.predictor_pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len, predictor_embed_dim),
-                requires_grad=True)
-        else:
-            self.predictor_pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
-                requires_grad=False)
-            predictor_pos_embed = get_1d_sincos_pos_embed(
-                self.predictor_pos_embed.shape[-1],
-                seq_len,
-                cls_token=has_cls)
-            self.predictor_pos_embed.data.copy_(
-                torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
-        
-        # Initialize predictor blocks, norm layer, and predictor projection
-        # layer
-        self.predictor_blocks = nn.ModuleList([
-            Block(dim=predictor_embed_dim,
-                  num_heads=num_heads,
-                  mlp_ratio=mlp_ratio,
-                  qkv_bias=qkv_bias,
-                  qk_scale=qk_scale,
-                  drop=drop_rate,
-                  attn_drop=attn_drop_rate,
-                  drop_path=dpr[i],
-                  norm_layer=norm_layer)
-            for i in range(depth)])
-        self.predictor_norm = norm_layer(predictor_embed_dim)
-        self.predictor_proj = nn.Linear(predictor_embed_dim,
-                                        embed_dim,
-                                        bias=True)
-
-        # Initialize mask token weights
-        trunc_normal_(self.mask_token, std=self.init_std)
-        
-        # Initialize layer weights
-        self.apply(self._init_weights)
-        self.fix_init_weight()
-
-    def fix_init_weight(self):
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.predictor_blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=self.init_std)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=self.init_std)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-
-    def forward(self,
-                x: torch.Tensor, 
-                masks_enc: Union[list, torch.Tensor],
-                masks_pred: Union[list, torch.Tensor]) -> torch.Tensor:
-        """
-        Run forward pass for a batch of input tokens.
-
-        Parameters
-        -----------
-        x:
-            Embeddings from the encoder with shape (BATCH_SIZE*N_CONTEXT_MASKS,
-            CONTEXT_MASK_SIZE, EMBED_DIM).
-        masks_enc:
-            List of N_CONTEXT_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE,
-            CONTEXT_MASK_SIZE).
-        masks_pred:
-            List of N_TARGET_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE,
-            TARGET_MASK_SIZE).
-
-        Returns
-        -----------
-        x:
-            Embeddings of tokens included in the target masks with shape (
-            BATCH_SIZE*N_TARGET_MASKS, TARGET_MASK_SIZE, EMBED_DIM).   
-        """
-        assert (masks_enc is not None) and (masks_pred is not None), \
-            'Cannot run predictor without mask indices.'
-
-        # Format masks
-        if not isinstance(masks_enc, list):
-            masks_enc = [masks_enc]
-        if not isinstance(masks_pred, list):
-            masks_pred = [masks_pred]
-
-        # Retrieve batch size
-        B = len(x) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
-
-        # Map from encoder dim to pedictor dim
-        x = self.predictor_embed(x)
-
-        # Add positional embeddings to token embeddings
-        x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
-        x += apply_masks(x_pos_embed, masks_enc)
-
-        _, N_ctxt, D = x.shape # N_ctxt: context_mask_size,
-                               # D: predictor_embed_dim
-
-        # Concatenate mask tokens to x
-        pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
-        pos_embs = apply_masks(pos_embs, masks_pred)
-        pos_embs = repeat_interleave_batch(
-            pos_embs,
-            B,
-            repeat=len(masks_enc)) # repeat pos embeddings for all context masks
-        # --
-        pred_tokens = self.mask_token.repeat(
-            pos_embs.size(0), # batch_size*n_target_masks
-            pos_embs.size(1), # target_mask_size
-            1)
-                                             
-        pred_tokens += pos_embs # add positional embeddings to mask tokens
-        x = x.repeat(len(masks_pred), 1, 1)
-        x = torch.cat([x, pred_tokens], dim=1)
-
-        # Run forward prop
-        for blk in self.predictor_blocks:
-            x = blk(x)
-        x = self.predictor_norm(x)
-
-        # Return predictions for (target) mask tokens
-        x = x[:, N_ctxt:]
-        x = self.predictor_proj(x)
-
-        return x
-
-
 class GeneTransformerEncoder(nn.Module):
     """
     GeneTransformerEncoder class to encode contexts or targets.
@@ -593,8 +385,6 @@ class GeneTransformerEncoder(nn.Module):
     -----------
     vocab_size:
         Size of the token vocabulary. Includes <pad> token.
-    embed_dim:
-        Dimension of the output embedding.
     seq_len:
         Length of the token sequences (w/o <cls> token).
     has_cls:
@@ -602,6 +392,8 @@ class GeneTransformerEncoder(nn.Module):
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
         positional embeddings.
+    embed_dim:
+        Dimension of the output embedding.
     predictor_embed_dim:
         Dimension of the embedding of the predictor.
     depth:
@@ -806,7 +598,7 @@ class GeneTransformerEncoder(nn.Module):
         -----------
         emb_list:
             List containing the embeddings after each layer with shape (
-            BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
+            BATCH_SIZE * N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
         """
         # Format masks
         if masks is not None:
@@ -847,10 +639,12 @@ class GeneTransformerEncoder(nn.Module):
         Parameters
         -----------
         x:
-            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
+            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN) if
+            no <cls> token is included and (BATCH_SIZE, SEQ_LEN+1) otherwise. 
         seg_label:
             Tensor containing segment labels to differentiate between cell and
-            neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN).
+            neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN) if no
+            <cls> token is included and (BATCH_SIZE, SEQ_LEN+1) otherwise.
         masks:
             List of N_CONTEXT_MASKS tensors containing indices (within the
             sequence) of tokens to keep with shape (BATCH_SIZE, 
@@ -860,7 +654,7 @@ class GeneTransformerEncoder(nn.Module):
         -----------
         x:
             Embeddings of input tokens included in the masks with shape (
-            BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).    
+            BATCH_SIZE * N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).    
         """
         # Format masks
         if masks is not None:
@@ -869,7 +663,7 @@ class GeneTransformerEncoder(nn.Module):
 
         # Get gene embeddings for sequence of gene tokens
         x = self.gene_embed(x)
-        B, N, D = x.shape # B: batch_size, N: seq_len, D: embed_dim
+        B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
         
         # Add positional and segment embeddings to gene embedding
         x = x + self.pos_embed + self.seg_embed(seg_label)
@@ -887,8 +681,245 @@ class GeneTransformerEncoder(nn.Module):
         return x
 
 
-def gt_predictor(**kwargs):
-    model = GeneTransformerPredictor(
+class GeneTransformerPredictor(nn.Module):
+    """
+    GeneTransformerPredictor class to predict encoded targets from encoded
+    contexts.
+    
+    Parameters
+    -----------
+    embed_dim:
+        Dimension of the input embedding.
+    seq_len:
+        Length of the token sequences (w/o <cls> token).
+    has_cls:
+        If 'True', sequences include a <cls> token at the start.
+    pos_learnable:
+        If 'True', positional embeddings are learnable, otherwise use sin cos
+        positional embeddings.
+    predictor_embed_dim:
+        Dimension of the embedding of the predictor.
+    depth:
+        Number of transformer blocks in the predictor.
+    num_heads:
+        Number of attention heads in the Attention module.
+    mlp_ratio:
+        Ratio to determine number of hidden dimensions in MLP module compared to
+        input and output dimensions.
+    qkv_bias:
+        If 'True', include bias in query, key, and value layers of Attention
+        module.
+    qk_scale:
+        Scaling factor for query and key vectors of Attention module.
+    drop_rate:
+        Dropout ratio in projection layer of Attention module and in layers of
+        MLP module.
+    attn_drop_rate:
+        Dropout ratio in attention layer of Attention module.
+    drop_path_rate:
+        Probability for dropping paths in DropPath module.
+    norm_layer:
+        Normalization layer.
+    init_std:
+        Standard deviation for weight initialization.
+    """
+    def __init__(self,
+                 embed_dim: int,
+                 seq_len: int,
+                 has_cls: bool=True,
+                 pos_learnable: bool=False,
+                 predictor_embed_dim: int=384,
+                 depth: int=6,
+                 num_heads: int=8,
+                 mlp_ratio: float=4.0,
+                 qkv_bias: bool=True,
+                 qk_scale: Optional[float]=None,
+                 drop_rate: float=0.0,
+                 attn_drop_rate: float=0.0,
+                 drop_path_rate: float=0.0,
+                 norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
+                 init_std: float=0.02,
+                 **kwargs):
+        super().__init__()
+        self.init_std = init_std
+
+        # Initialize layer to project from encoder to predictor embed dim
+        self.predictor_embed = nn.Linear(embed_dim,
+                                         predictor_embed_dim,
+                                         bias=True)
+
+        # Initialize mask token embedding for prediction
+        self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
+
+        # Define decaying drop path rate (higher drop rate in deeper blocks)
+        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+
+        # Retrieve positional embedding
+        if pos_learnable:
+            self.predictor_pos_embed = nn.Parameter(
+                torch.zeros(1,
+                            seq_len + (1 if has_cls else 0),
+                            predictor_embed_dim),
+                requires_grad=True)
+            trunc_normal_(self.predictor_pos_embed, std=self.init_std)
+            if has_cls:
+                self.predictor_pos_embed.data[0, 0, :] = 0
+        else:
+            self.predictor_pos_embed = nn.Parameter(
+                torch.zeros(1, seq_len + (1 if has_cls else 0),
+                predictor_embed_dim),
+                requires_grad=False)
+            predictor_pos_embed = get_1d_sincos_pos_embed(
+                self.predictor_pos_embed.shape[-1],
+                seq_len,
+                cls_token=has_cls)
+            self.predictor_pos_embed.data.copy_(
+                torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
+        
+        # Initialize predictor blocks, norm layer, and predictor projection
+        # layer to project back to encoder embedding size
+        self.predictor_blocks = nn.ModuleList([
+            Block(dim=predictor_embed_dim,
+                  num_heads=num_heads,
+                  mlp_ratio=mlp_ratio,
+                  qkv_bias=qkv_bias,
+                  qk_scale=qk_scale,
+                  drop=drop_rate,
+                  attn_drop=attn_drop_rate,
+                  drop_path=dpr[i],
+                  norm_layer=norm_layer)
+            for i in range(depth)])
+        self.predictor_norm = norm_layer(predictor_embed_dim)
+        self.predictor_proj = nn.Linear(predictor_embed_dim,
+                                        embed_dim,
+                                        bias=True)
+
+        # Initialize mask token weights
+        trunc_normal_(self.mask_token, std=self.init_std)
+        
+        # Initialize layer weights
+        self.apply(self._init_weights)
+        self.fix_init_weight()
+
+    def fix_init_weight(self):
+        """
+        Helper function to scale initialized layer weights.
+        """
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.predictor_blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
+
+    def _init_weights(self, m):
+        """
+        Helper function to initialize layer weights.
+        """
+        if isinstance(m, nn.Linear):
+            trunc_normal_(m.weight, std=self.init_std)
+            if isinstance(m, nn.Linear) and m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.LayerNorm):
+            nn.init.constant_(m.bias, 0)
+            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, nn.Conv2d):
+            trunc_normal_(m.weight, std=self.init_std)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self,
+                x: torch.Tensor, 
+                masks_enc: Union[list, torch.Tensor],
+                masks_pred: Union[list, torch.Tensor]) -> torch.Tensor:
+        """
+        Run predictor forward pass for a batch of input tokens.
+
+        Parameters
+        -----------
+        x:
+            Embeddings from the encoder with shape (BATCH_SIZE*N_CONTEXT_MASKS,
+            CONTEXT_MASK_SIZE, EMBED_DIM).
+        masks_enc:
+            List of N_CONTEXT_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            CONTEXT_MASK_SIZE).
+        masks_pred:
+            List of N_TARGET_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            TARGET_MASK_SIZE).
+
+        Returns
+        -----------
+        x:
+            Embeddings of tokens included in the target masks with shape (
+            BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS, TARGET_MASK_SIZE,
+            EMBED_DIM).   
+        """
+        assert (masks_enc is not None) and (masks_pred is not None), \
+            'Cannot run predictor without index masks.'
+
+        # Format masks
+        if not isinstance(masks_enc, list):
+            masks_enc = [masks_enc]
+        if not isinstance(masks_pred, list):
+            masks_pred = [masks_pred]
+
+        # Retrieve batch size
+        B = len(x) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
+
+        # Map from encoder dim to pedictor dim
+        x = self.predictor_embed(x)
+
+        # Add positional embeddings to tokens from context masks
+        x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
+        x += apply_masks(x_pos_embed, masks_enc) # only keep pos from encoder
+                                                 # masks
+
+        _, N_ctxt, D = x.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
+
+        # Create positional embeddings for tokens from target masks
+        pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
+        pos_embs = apply_masks(pos_embs, masks_pred) # only keep pos from
+                                                     # predictor masks
+        pos_embs = repeat_interleave_batch(
+            pos_embs,
+            B,
+            repeat=len(masks_enc)) # repeat pos embeddings for all encoder masks
+        
+        # Repeat mask token for all batches, masks and positions from
+        # predictor masks
+        pred_tokens = self.mask_token.repeat(
+            pos_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
+            pos_embs.size(1), # TARGET_MASK_SIZE
+            1)
+                                             
+        pred_tokens += pos_embs # add positional embeddings to mask tokens
+
+        # Repeat context embeddings for all target masks
+        x = x.repeat(len(masks_pred), 1, 1)
+
+        # Concatenate context embeddings and mask tokens (both incl. pos
+        # embedding)
+        x = torch.cat([x, pred_tokens], dim=1)
+
+        # Run forward prop
+        for blk in self.predictor_blocks:
+            x = blk(x)
+        x = self.predictor_norm(x)
+
+        # Return predictions for (target) mask tokens
+        x = x[:, N_ctxt:]
+
+        # Map back from predictor dim to encoder dim
+        x = self.predictor_proj(x)
+
+        return x
+
+
+def gt_encoder(**kwargs):
+    model = GeneTransformerEncoder(
+        num_heads=8,
         mlp_ratio=4,
         qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
@@ -896,9 +927,8 @@ def gt_predictor(**kwargs):
     return model
 
 
-def gt_encoder(**kwargs):
-    model = GeneTransformerEncoder(
-        num_heads=8,
+def gt_predictor(**kwargs):
+    model = GeneTransformerPredictor(
         mlp_ratio=4,
         qkv_bias=True,
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
