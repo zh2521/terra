@@ -83,7 +83,7 @@ class CellGraphRankTokenizer:
     def __init__(self,
                  custom_attr_name_dict: Optional[dict] = None,
                  nproc: int = 1,
-                 processing_mode: Optional[Literal["sequential", "parallel"]] = "sequential",                 
+                 processing_mode: Optional[Literal["sequential", "parallel"]] = "sequential",
                  chunk_size: int = 512,
                  model_input_size: int = 2048,
                  tokens_per_cell: int = 64,
@@ -169,7 +169,9 @@ class CellGraphRankTokenizer:
                       output_directory: Path | str,
                       output_file_prefix: str,
                       file_format: Literal["h5ad"] = "h5ad",
-                      use_generator: bool = False):
+                      use_generator: bool = False,
+                      cache_directory_path: Path | str = None,
+                      keep_in_memory: bool = False):
         """
         Tokenize files in 'input_directory' and save as tokenized '.dataset' file in 'output_directory'.
 
@@ -185,6 +187,10 @@ class CellGraphRankTokenizer:
             Format of input files. Can be '.h5ad'.
         use_generator:
             If 'True', use generator for tokenization, else dict.
+        cache_directory_path:
+            If specified, cache directory path for dataset creation.
+        keep_in_memory:
+            If 'True', keep dataset in memory when using generator.            
         """
 
         gene_tokens, cell_pos_tokens, gene_pos_tokens, cell_metadata = self.tokenize_files(
@@ -195,7 +201,9 @@ class CellGraphRankTokenizer:
                                                 cell_pos_tokens,
                                                 gene_pos_tokens,
                                                 cell_metadata,
-                                                use_generator=use_generator)
+                                                use_generator=use_generator,
+                                                cache_directory_path=cache_directory_path,
+                                                keep_in_memory=keep_in_memory)
 
         output_path = str((Path(output_directory) / output_file_prefix).with_suffix(".dataset"))
         tokenized_dataset.save_to_disk(output_path)
@@ -402,7 +410,9 @@ class CellGraphRankTokenizer:
                        cell_metadata: dict,
                        use_generator: bool = False,
                        add_pos_tokens: bool = True,
-                       keep_original_gene_tokens: bool = False) -> Dataset:
+                       keep_original_gene_tokens: bool = False,
+                       cache_directory_path: Path | str = None,
+                       keep_in_memory: bool = False) -> Dataset:
         """
         Create a Hugging Face dataset based on tokenized cells.
 
@@ -423,6 +433,10 @@ class CellGraphRankTokenizer:
         keep_original_gene_tokens:
             If 'True', keep original gene tokens in Hugging Face dataset (before padding/truncation and addition of
             special tokens).
+        cache_directory_path:
+            If specified, cache directory path for dataset creation.
+        keep_in_memory:
+            If 'True', keep dataset in memory when using generator.            
 
         Returns
         ----------
@@ -446,7 +460,11 @@ class CellGraphRankTokenizer:
                 for i in range(len(gene_tokens)):
                     yield {k: dataset_dict[k][i] for k in dataset_dict.keys()}
 
-            dataset = Dataset.from_generator(dict_generator, num_proc=self.nproc)
+            print("Using generator for dataset creation.")
+            dataset = Dataset.from_generator(dict_generator,
+                                             num_proc=self.nproc,
+                                             keep_in_memory=keep_in_memory,
+                                             cache_dir=cache_directory_path)            
         else:
             dataset = Dataset.from_dict(dataset_dict)
 
@@ -464,7 +482,12 @@ class CellGraphRankTokenizer:
 
             return example
 
+        # formatted_dataset = dataset.map(
+            # format_gene_tokens, num_proc=self.nproc)
+        print("Formatting gene tokens...")
         formatted_dataset = dataset.map(
-            format_gene_tokens, num_proc=self.nproc)
+            format_gene_tokens, 
+            num_proc=self.nproc,
+            cache_file_name=str(cache_directory_path / "formatted_dataset.cache"))            
 
         return formatted_dataset
