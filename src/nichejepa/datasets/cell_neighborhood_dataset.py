@@ -8,7 +8,7 @@ import datasets
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-
+from ..utils.distributed import CustomDistributedLengthGroupedSampler
 
 _GLOBAL_SEED = 0
 logger = getLogger()
@@ -189,10 +189,13 @@ def make_cell_neighborhood_dataset(batch_size: int,
                                       has_cls=has_cls)
     
     if distributed:
-        dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
-                                                                       num_replicas=world_size,
-                                                                       rank=rank)
-        
+        #dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
+        #                                                               num_replicas=world_size,
+        #                                                               rank=rank)
+        dist_sampler = CustomDistributedLengthGroupedSampler(dataset=dataset,
+                                                             num_replicas=world_size,
+                                                             rank=rank)
+
         data_loader = torch.utils.data.DataLoader(dataset,
                                                   collate_fn=collator,
                                                   sampler=dist_sampler,

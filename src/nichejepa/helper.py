@@ -27,11 +27,11 @@ def load_checkpoint(
     encoder: gt.GeneTransformerEncoder,
     predictor: gt.GeneTransformerPredictor,
     target_encoder: gt.GeneTransformerEncoder,
-    opt: torch.optim.adamw.AdamW,
+    opt: torch.optim.AdamW,
     scaler: torch.cuda.amp.GradScaler) -> Tuple[gt.GeneTransformerEncoder,
                                                 gt.GeneTransformerPredictor,
                                                 gt.GeneTransformerEncoder,
-                                                torch.optim.adamw.AdamW,
+                                                torch.optim.AdamW,
                                                 torch.cuda.amp.GradScaler,
                                                 int]:
     """
@@ -194,7 +194,7 @@ def init_opt(encoder: gt.GeneTransformerEncoder,
              final_wd: float=1e-6,
              final_lr: float=0.0,
              use_bfloat16: bool=False,
-             ipe_scale: float=1.25) -> Tuple[torch.optim.adamw.AdamW,
+             ipe_scale: float=1.25) -> Tuple[torch.optim.AdamW,
                                              torch.cuda.amp.GradScaler,
                                              WarmupCosineSchedule,
                                              CosineWDSchedule]:

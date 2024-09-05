@@ -19,7 +19,7 @@ from .helper import load_checkpoint, init_model
 from .masks.multigene import MaskCollator
 from .utils.config_utils import generate_output_name
 from .utils.distributed import init_distributed
-from .utils.emb_utils import calculate_sequence_length, create_and_save_anndata
+from .utils.emb_utils import create_and_save_anndata
 from .utils.eval_utils import process_loader
 from .utils.logging import CSVLogger
 
@@ -79,11 +79,8 @@ def evaluation(args: dict,
         torch.cuda.set_device(device)
     
     # Compute seq_len based on config
-    seq_len = calculate_sequence_length(incl_cell_seq,
-                                        incl_neighborhood_seq,
-                                        seq_len_cell,
-                                        seq_len_neighborhood,
-                                        has_cls)
+    seq_len = (1 if has_cls else 0) + seq_len_cell + seq_len_neighborhood
+  
 
     # Set the folder for saving extracted features
     folder = (f"logs/{data_set_name}_"

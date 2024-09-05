@@ -43,7 +43,6 @@ from .masks.multigene import MaskCollator
 from .masks.utils import apply_masks
 from .utils.distributed import (init_distributed,
                                 AllReduce)
-from .utils.emb_utils import calculate_sequence_length
 from .utils.logging import (CSVLogger,
                             gpu_timer,
                             grad_logger,
@@ -99,6 +98,8 @@ def train(args,
     has_cls = args['data']['has_cls']
     data_set_name = args['data']['data_set_name']
     vocab_size = args['data']['vocab_size']
+    incl_cell_seq = args['data']['incl_cell_seq']
+    incl_neighborhood_seq = args['data']['incl_neighborhood_seq']
 
     # Load mask params
     n_targets = args['mask']['n_targets']
