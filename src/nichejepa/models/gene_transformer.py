@@ -598,7 +598,7 @@ class GeneTransformerEncoder(nn.Module):
         -----------
         emb_list:
             List containing the embeddings after each layer with shape (
-            BATCH_SIZE * N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
+            BATCH_SIZE * N_CONTEXT_MASKS, MIN_CONTEXT_SIZE, EMBED_DIM).
         """
         # Format masks
         if masks is not None:
@@ -646,15 +646,15 @@ class GeneTransformerEncoder(nn.Module):
             neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN) if no
             <cls> token is included and (BATCH_SIZE, SEQ_LEN+1) otherwise.
         masks:
-            List of N_CONTEXT_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE, 
-            CONTEXT_MASK_SIZE).
+            List of N_MASKS tensors containing indices (within the sequence) of
+            tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
 
         Returns
         -----------
         x:
             Embeddings of input tokens included in the masks with shape (
-            BATCH_SIZE * N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).    
+            BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE
+            is minimum size in the batch.    
         """
         # Format masks
         if masks is not None:
