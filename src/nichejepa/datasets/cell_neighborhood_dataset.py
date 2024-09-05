@@ -120,7 +120,6 @@ def make_cell_neighborhood_dataset(
     batch_size: int,
     data: datasets.arrow_dataset.Dataset,
     vocab_size: int,
-    seq_len: int,
     collator=None,
     pin_mem: bool=True,
     num_workers: int=8,
@@ -181,7 +180,6 @@ def make_cell_neighborhood_dataset(
     """
     dataset = CellNeighborhoodDataset(data,
                                       vocab_size,
-                                      seq_len=seq_len,
                                       seq_len_cell=seq_len_cell,
                                       seq_len_neighborhood=seq_len_neighborhood,
                                       has_cls=has_cls)
