@@ -279,11 +279,11 @@ class CellNeighborhoodDataset(Dataset):
         return n_nonzero_neighborhood_tokens
             
     def create_sampled_token_sequence(self, 
-                                       tokens: List,
-                                       n_nonzero_tokens: int,
-                                       size: int,
-                                       sampling_strategy: str = "normalized_count_rank_sampling",
-                                       seed: int = 42) -> List:
+                                        tokens: List,
+                                        n_nonzero_tokens: int,
+                                        size: int,
+                                        sampling_strategy: str = "normalized_count_rank_sampling",
+                                        seed: int = 42) -> List:
         """
         Sample a subset of tokens based on the sampling strategy and seed.
 
@@ -313,15 +313,21 @@ class CellNeighborhoodDataset(Dataset):
             
             # Calculate weights based on rank and number of nonzero tokens
             # Higher the rank, higher the weight
-            sum_rank = n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0
+            # a = [4, 1, 3, 2, 5, 0, 0, 0]
+            # n_nonzero_tokens = 5  
+            # sum_rank = 5 * (5 + 1) / 2.0 = 15.0
+            # weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)] 
+            # = [0.3333333333333333, 0.26666666666666666, 0.2, 0.13333333333333333, 0.06666666666666667]
+            # np.sum(weights) = 1.0
+            sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
             weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)]
             assert np.isclose(np.sum(weights), 1.0)
             
             # Sample seq_cell_len or seq_neighborhood token indices based on weights
             sampled_indices = np.random.choice(np.arange(n_nonzero_tokens),
-                                               size=size,
-                                               p=weights,
-                                               replace=False)
+                                                size=size,
+                                                p=weights,
+                                                replace=False)
             
             # Sort sampled indices to preserve rank order
             sampled_indices = np.sort(sampled_indices)
