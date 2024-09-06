@@ -56,6 +56,11 @@ class CellNeighborhoodDataset(Dataset):
         gene_tokens_neighborhood = self.dataset[item][
             "gene_tokens_neighborhood"][:self.seq_len_neighborhood]
 
+        # Extract number of nonzero cell and neighborhood tokens
+        # Total number of nonzero tokens is set below
+        n_nonzero_cell_tokens = self.dataset[item]["n_nonzero_cell_tokens"]
+        n_nonzero_neighborhood_tokens = self.dataset[item]["n_nonzero_neighborhood_tokens"]
+
         # Collect tokens and labels
         # Case 1: both cell and neighborhood tokens are included
         if self.seq_len_cell > 0 and self.seq_len_neighborhood > 0:
@@ -71,13 +76,17 @@ class CellNeighborhoodDataset(Dataset):
                 labels = torch.cat(
                     (torch.ones(self.seq_len_cell + 1),
                     torch.ones(self.seq_len_neighborhood) * 2)).int()
+                # Set total number of nonzero tokens to include <cls> token
+                n_nonzero_tokens = self.dataset[item]["n_nonzero_tokens"] + 1
             else:
                 # Create segment labels: 1 for cell tokens, 2 for neighborhood
                 # tokens
                 labels = torch.cat(
                     (torch.ones(self.seq_len_cell),
                     torch.ones(self.seq_len_neighborhood) * 2)).int()
-            return torch.tensor(tokens), labels, niche_types, cell_types
+                # Set total number of nonzero tokens to number of nonzero cell plus neighborhood tokens
+                n_nonzero_tokens = self.dataset[item]["n_nonzero_tokens"]
+            return torch.tensor(tokens), labels, niche_types, cell_types, n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens, n_nonzero_tokens
         
         # Case 2: only cell tokens are included
         elif self.seq_len_cell > 0:
@@ -89,10 +98,14 @@ class CellNeighborhoodDataset(Dataset):
                 tokens = [self.vocab_size] + tokens
                 # Create segment labels: 1 for cell tokens and <cls> token
                 labels = torch.ones(self.seq_len_cell + 1).int()
+                # Set total number of nonzero tokens to include <cls> token
+                n_nonzero_tokens = n_nonzero_cell_tokens + 1
             else:
                 # Create segment labels: 1 for cell tokens
                 labels = torch.ones(self.seq_len_cell).int()
-            return torch.tensor(tokens), labels, cell_types
+                # Set total number of nonzero tokens to number of nonzero cell tokens
+                n_nonzero_tokens = n_nonzero_cell_tokens
+            return torch.tensor(tokens), labels, cell_types, n_nonzero_cell_tokens, n_nonzero_tokens
         
         # Case 3: only neighborhood tokens are included
         elif self.seq_len_neighborhood > 0:
@@ -105,10 +118,14 @@ class CellNeighborhoodDataset(Dataset):
                 # Create segment labels: 2 for neighborhood tokens and <cls>
                 # token
                 labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
+                # Set total number of nonzero tokens to include <cls> token
+                n_nonzero_tokens = n_nonzero_neighborhood_tokens + 1
             else:
                 # Create segment labels: 2 for neighborhood tokens
                 labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
-            return torch.tensor(tokens), labels, niche_types
+                # Set total number of nonzero tokens to number of nonzero neighborhood tokens
+                n_nonzero_tokens = n_nonzero_neighborhood_tokens
+            return torch.tensor(tokens), labels, niche_types, n_nonzero_neighborhood_tokens, n_nonzero_tokens
         
         # Case 4: neither cell nor neighborhood tokens are included, which is an
         # invalid state
