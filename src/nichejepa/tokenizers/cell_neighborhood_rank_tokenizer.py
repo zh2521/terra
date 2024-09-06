@@ -515,18 +515,20 @@ class CellNeighborhoodRankTokenizer:
                 example["gene_tokens_neighborhood_original"] = example["gene_tokens_neighborhood"]
                 example["gene_tokens_neighborhood_original_length"] = len(example["gene_tokens_neighborhood"])
 
-            example["gene_tokens_cell"] = process_gene_tokens(example["gene_tokens_cell"],
+            example["gene_tokens_cell"], example["n_nonzero_cell_tokens"] = process_gene_tokens(example["gene_tokens_cell"],
                                                               int(self.model_input_size / 2),
                                                               self.token_dict,
                                                               self.cell_special_tokens,
                                                               self.cell_special_tokens_idx)
 
-            example["gene_tokens_neighborhood"] = process_gene_tokens(example["gene_tokens_neighborhood"],
+            example["gene_tokens_neighborhood"], example["n_nonzero_neighborhood_tokens"] = process_gene_tokens(example["gene_tokens_neighborhood"],
                                                                       int(self.model_input_size / 2),
                                                                       self.token_dict,
                                                                       self.neighborhood_special_tokens,
                                                                       self.neighborhood_special_tokens_idx)
 
+            example["n_nonzero_tokens"] = example["n_nonzero_cell_tokens"] + example["n_nonzero_neighborhood_tokens"]
+            
             # example["gene_tokens_cell"] = example["gene_tokens_cell"].astype(np.int64)
             # example["gene_tokens_neighborhood"] = example["gene_tokens_neighborhood"].astype(np.int64)
             # if not isinstance(example["gene_tokens_cell"], np.int64):
