@@ -125,8 +125,12 @@ class SegmentMaskCollator:
                 segment_masks.append(torch.tensor(masked_indices))  # Append the masked indices io the list
             else:
                 segment_masks.append(torch.tensor([]))  # If no elements to mask, append an empty list
+        # DON'T USE torch.rand as it could produce repeated indices
+        # We randomly permut data so if we trim last item with keep_tokens_context
+        # We avoid always discarding the last items of a sequence, as this may be problematic.
         context_mask = torch.nonzero(context_mask).squeeze()
         context_mask = context_mask[torch.randperm(len(context_mask), generator=generator)]
+        # Add cls to context if it exist
         if self.has_cls:
             context_mask = torch.cat((torch.tensor([0]), context_mask))
         return segment_masks, [context_mask], keep_tokens_target
