@@ -192,7 +192,8 @@ def make_cell_neighborhood_dataset(batch_size: int,
         #dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
         #                                                               num_replicas=world_size,
         #                                                               rank=rank)
-        dist_sampler = CustomDistributedLengthGroupedSampler(dataset=dataset,
+        dist_sampler = CustomDistributedLengthGroupedSampler(dataset,
+                                                             batch_size,
                                                              num_replicas=world_size,
                                                              rank=rank)
 

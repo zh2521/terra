@@ -13,7 +13,8 @@ from logging import getLogger
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Dataset
 from typing import Iterator, List, Optional
-
+import math
+from transformers import BatchEncoding
 logger = getLogger()
 
 
@@ -162,7 +163,7 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         self.model_input_name = (
             model_input_name if model_input_name is not None else "input_ids"
         )
-
+        ''' 
         if lengths is None:
             print("Lengths is none - calculating lengths.")
             if (
@@ -177,6 +178,12 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
                     f"'{self.model_input_name}' key."
                 )
             lengths = [len(feature[self.model_input_name]) for feature in dataset]
+        '''
+        lengths = [
+                 torch.nonzero(
+                  feature[0]
+                 ).size(0) for feature in dataset
+                  ]
         self.lengths = lengths
 
     def __iter__(self) -> Iterator:
