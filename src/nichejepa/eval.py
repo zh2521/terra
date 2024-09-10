@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import yaml
+from typing import Literal
 
 import anndata
 import numpy as np
@@ -14,13 +15,14 @@ from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
-from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset
+from .datasets.cell_neighborhood_dataset import (CellNeighborhoodDataset,
+                                                 make_cell_neighborhood_dataset)
 from .helper import load_checkpoint, init_model
 from .masks.multigene import MaskCollator
 from .utils.config_utils import generate_output_name
 from .utils.distributed import init_distributed
 from .utils.emb_utils import create_and_save_anndata
-from .utils.eval_utils import process_loader
+from .utils.eval_utils import process_loader, retrieve_gene_emb_from_cell_emb
 from .utils.logging import CSVLogger
 
 
@@ -34,10 +36,13 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
+@torch.no_grad()
 def evaluation(args: dict,
-               train_dataset: CellNeighborhoodDataset,
-               test_dataset: CellNeighborhoodDataset,
-               resume_preempt: bool=False):
+               dataset: CellNeighborhoodDataset,
+               cell_gene_ids: list=[],
+               neighborhood_gene_ids: list=[],
+               agg_type: Literal['average', 'cls']='average',
+               feature_norm: bool=False):
     """
     Evaluate the model.
 
@@ -45,11 +50,18 @@ def evaluation(args: dict,
     -----------
     args:
         Dictionary containing the hyperparams from the config file.
-    train_dataset:
-        Train split CellNeighborhoodDataset.
-    test_dataset:
-        Test split CellNeighborhoodDataset.
-    resume_preempt:
+    dataset:
+        CellNeighborhoodDataset.
+    agg_type:
+        Specifies how cell embeddings are retrieved from gene embeddings. Can be
+        'average' or 'cls'.
+    feature_norm:
+        If 'True', apply feature norm in the last embedding layer.
+
+    Returns
+    -----------
+    adata:
+        An AnnData object with the stored embeddings and labels.
     """
     # ----------------------------- #
     #  Load params from config file
@@ -78,11 +90,15 @@ def evaluation(args: dict,
     # Load optimization params
     learnable = args['optimization']['learnable']
 
-    # -- MASK
+    # Load mask params
     n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
+
+    # ----------------------------- #
+    #  Load model and data loader
+    # ----------------------------- #
 
     # Set device
     if not torch.cuda.is_available():
@@ -90,6 +106,9 @@ def evaluation(args: dict,
     else:
         device = torch.device('cuda:0')
         torch.cuda.set_device(device)
+
+    # Initialize torch distributed backend
+    world_size, rank = init_distributed()
     
     # Compute seq_len based on config
     seq_len = seq_len_cell + seq_len_neighborhood
@@ -119,7 +138,7 @@ def evaluation(args: dict,
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
-    # -- log/checkpointing paths
+    # Define checkpointing path
     latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
     load_path = os.path.join(folder, r_file) if r_file is not None else latest_path
 
@@ -150,24 +169,10 @@ def evaluation(args: dict,
         seq_len_neighborhood=seq_len_neighborhood,
         has_cls=has_cls)
 
-    # Initialize dataloader and -sampler
-    _, train_loader = make_cell_neighborhood_dataset(
+    # Initialize dataloader
+    _, loader = make_cell_neighborhood_dataset(
         batch_size=batch_size,
-        data=train_dataset,
-        vocab_size=vocab_size,
-        collator=mask_collator,
-        pin_mem=pin_mem,
-        num_workers=num_workers,
-        world_size=world_size,
-        rank=rank,
-        drop_last=False,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls,
-        distributed=False)
-    _, test_loader = make_cell_neighborhood_dataset(
-        batch_size=batch_size,
-        data=train_dataset,
+        data=dataset,
         vocab_size=vocab_size,
         collator=mask_collator,
         pin_mem=pin_mem,
@@ -188,9 +193,18 @@ def evaluation(args: dict,
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-            
-    #---------NEW------#
-    @torch.no_grad()
+
+    # ----------------------------- #
+    #  Retrieve embeddings
+    # ----------------------------- #
+
+    niche_label = []
+    cell_type_label = []
+    all_cell_emb_list = []
+    all_neighborhood_emb_list = []
+    all_cell_gene_emb_dict = {}
+    all_neighborhood_gene_emb_dict = {}
+
     for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
         # Load cell neighborhood tokens and segmentation label to the specified
         # device
@@ -199,43 +213,109 @@ def evaluation(args: dict,
 
         # Load niche and cell type labels based on the length of udata and the
         # provided tokens
-        niche_label = udata[2]
-        cell_type = udata[3]
         if len(udata) == 4:
-            niche_label = udata[2]
-            cell_type_label = udata[3]
+            niche_label.extend(udata[2])
+            cell_type_label.extend(udata[3])
         elif len(udata) == 3:
             if args['data']['seq_len_cell'] > 0:
-                niche_label = None
-                cell_type_label = udata[2]
-            elif args['data']['seq_len_neighborhood'] > 1:
-                cell_type_label = None
-                niche_label = udata[2]
+                niche_label.extend(None * len(udata[0]))
+                cell_type_label.extend(udata[2])
+            elif args['data']['seq_len_neighborhood'] > 0:
+                cell_type_label.extend(None * len(udata[0]))
+                niche_label.extend(udata[2])
 
-        emb_list = target_encoder.module.return_multi_layer_emb(cell_neighborhood_tokens, seg_label)
-    #------------------#
-    
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16,
+                                     enabled=args['meta']['use_bfloat16']):
+            emb_list = target_encoder.module.return_multi_layer_emb(
+                cell_neighborhood_tokens, seg_label)
+        
+            if feature_norm:
+                # Normalize last layer like in training
+                emb_list[-1] = F.layer_norm(emb_list[-1],
+                                            (emb_list[-1].size(-1),))
 
-    # Extract features
-    target_encoder.eval()
-    all_features = []
-    all_obs = []
-    process_loader(target_encoder,
-                   train_loader,
-                   args,
-                   'train',
-                   all_features=all_features,
-                   all_obs=all_obs)
-    process_loader(target_encoder,
-                   test_loader,
-                   args,
-                   'test',
-                   all_features=all_features,
-                   all_obs=all_obs)
+        for i, emb in enumerate(emb_list):
+            cell_mask = torch.zeros_like(cell_neighborhood_tokens)
+            neighborhood_mask = torch.zeros_like(cell_neighborhood_tokens)
 
-    # Save and return adata with results
-    adata = create_and_save_anndata(all_features,
-                                    all_obs,
-                                    output_file=feature_path)
+            # Keep elements relevant to cell embedding
+            if agg_type == "average":
+                cell_mask[:, (1 if has_cls else 0):
+                             (1 if has_cls else 0) + seq_len_cell] = 1
+                neighborhood_mask[:, (1 if has_cls else 0) + seq_len_cell:] = 1
+
+            elif agg_type == "cls": # at the moment there is only 1 <cls> token
+                cell_mask[: 0] = 1       
+                neighborhood_mask[: 0] = 1
+
+            cell_mask = cell_mask.unsqueeze(-1) # broadcast mask
+            cell_emb_selection = emb * cell_mask
+            cell_emb = cell_emb_selection.sum(dim=1) / cell_mask.sum(dim=1)
+            neighborhood_mask = neighborhood_mask.unsqueeze(-1) # broadcast mask
+            neighborhood_emb_selection = emb * neighborhood_mask
+            neighborhood_emb = (neighborhood_emb_selection.sum(dim=1) /
+                                neighborhood_mask.sum(dim=1))
+
+            # Concat layer-specific embeddings across batches
+            if itr == 0:
+                all_cell_emb_list.append([cell_emb])
+                all_neighborhood_emb_list.append([neighborhood_emb])
+            else:
+                all_cell_emb_list[i].append(cell_emb) 
+                all_neighborhood_emb_list[i].append(neighborhood_emb)
+
+            # Store cell and neighborhood gene embeddings of last layer
+            if i == (len(emb_list) - 1):
+                for gene_id in cell_gene_ids:
+                    gene_emb = retrieve_gene_emb_from_cell_emb(
+                        cell_neighborhood_tokens=cell_neighborhood_tokens,
+                        cell_emb=emb,
+                        gene_id=gene_id,
+                        gene_type="cell",
+                        has_cls=has_cls,
+                        seq_len_cell=seq_len_cell)
+                    if itr == 0:
+                        all_cell_gene_emb_dict[gene_id] = [gene_emb]
+                    else:
+                        all_cell_gene_emb_dict[gene_id].append(gene_emb)
+                for gene_id in neighborhood_gene_ids:
+                    gene_emb = retrieve_gene_emb_from_cell_emb(
+                        cell_neighborhood_tokens=cell_neighborhood_tokens,
+                        cell_emb=emb,
+                        gene_id=gene_id,
+                        gene_type="neighborhood",
+                        has_cls=has_cls,
+                        seq_len_cell=seq_len_cell)
+                    if itr == 0:
+                        all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
+                    else:
+                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                    
+                    
+    adata = anndata.AnnData(
+        obs=pd.DataFrame({
+            'niche': niche_label,
+            'cell_type': cell_type_label},
+        index=range(len(niche_label))))
+
+    # Store cell and neighborhood embeddings of all observations across layers  
+    for i in range(len(all_cell_emb_list)):
+        print(np.array(torch.cat(
+            all_cell_emb_list[i],
+            dim=0).cpu()).shape)
+        adata.obsm[f"cell_emb_layer_{i}"] = np.array(torch.cat(
+            all_cell_emb_list[i],
+            dim=0).cpu())
+        adata.obsm[f"neighborhood_emb_layer_{i}"] = np.array(torch.cat(
+            all_neighborhood_emb_list[i],
+            dim=0).cpu())
+
+    for gene_id in cell_gene_ids:
+        adata.obsm[f"cell_emb_gene{gene_id}"] = np.array(torch.cat(
+            all_cell_gene_emb_dict[gene_id],
+            dim=0).cpu())
+    for gene_id in neighborhood_gene_ids:
+        adata.obsm[f"neighborhood_emb_gene{gene_id}"] = np.array(torch.cat(
+            all_neighborhood_gene_emb_dict[gene_id],
+            dim=0).cpu())
 
     return adata
