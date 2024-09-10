@@ -36,12 +36,27 @@ logger = logging.getLogger()
 
 
 def evaluation(args: dict,
-               train_dataset,
-               test_dataset,
+               train_dataset: CellNeighborhoodDataset,
+               test_dataset: CellNeighborhoodDataset,
                resume_preempt: bool=False):
     """
+    Evaluate the model.
+
+    Parameters
+    -----------
+    args:
+        Dictionary containing the hyperparams from the config file.
+    train_dataset:
+        Train split CellNeighborhoodDataset.
+    test_dataset:
+        Test split CellNeighborhoodDataset.
+    resume_preempt:
     """
-    # -- META
+    # ----------------------------- #
+    #  Load params from config file
+    # ----------------------------- #
+
+    # Load meta params
     use_bfloat16 = args['meta']['use_bfloat16']
     model_name = args['meta']['model_name']
     r_file = args['meta']['read_checkpoint']
@@ -50,7 +65,7 @@ def evaluation(args: dict,
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
 
-    # -- DATA
+    # Load data params
     batch_size = args['data']['batch_size']
     vocab_size = args['data']['vocab_size']
     pin_mem = args['data']['pin_mem']
@@ -59,11 +74,9 @@ def evaluation(args: dict,
     num_epochs = args['optimization']['epochs']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
-    incl_cell_seq = args['data']['incl_cell_seq']
-    incl_neighborhood_seq = args['data']['incl_neighborhood_seq']
     has_cls = args['data']['has_cls']
 
-    # -- OPTIMIZATION
+    # Load optimization params
     learnable = args['optimization']['learnable']
 
     # -- MASK
@@ -82,8 +95,7 @@ def evaluation(args: dict,
         torch.cuda.set_device(device)
     
     # Compute seq_len based on config
-    seq_len = (1 if has_cls else 0) + seq_len_cell + seq_len_neighborhood
-  
+    seq_len = seq_len_cell + seq_len_neighborhood
 
     # Set the folder for saving extracted features
     folder = (f"logs/{data_set_name}_"
@@ -117,16 +129,16 @@ def evaluation(args: dict,
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
         device=device,
+        vocab_size=vocab_size,
         seq_len=seq_len,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
-        vocab_size=vocab_size,
+        pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
         pos_learnable=learnable,
-        pred_emb_dim=pred_emb_dim,
-        model_name=model_name,
         has_cls=has_cls)
     target_encoder = copy.deepcopy(encoder)
+
     encoder = DistributedDataParallel(encoder, static_graph=True)
     predictor = DistributedDataParallel(predictor, static_graph=True)
     target_encoder = DistributedDataParallel(target_encoder)
@@ -155,32 +167,32 @@ def evaluation(args: dict,
         batch_size=batch_size,
         data=train_dataset,
         vocab_size=vocab_size,
-        seq_len=seq_len,
         collator=mask_collator,
         pin_mem=pin_mem,
         num_workers=num_workers,
-        incl_cell_seq=incl_cell_seq,
-        incl_neighborhood_seq=incl_neighborhood_seq,
+        world_size=world_size,
+        rank=rank,
+        drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         has_cls=has_cls,
         distributed=False)
     _, test_loader = make_cell_neighborhood_dataset(
         batch_size=batch_size,
-        data=test_dataset,
+        data=train_dataset,
         vocab_size=vocab_size,
-        seq_len=seq_len,
         collator=mask_collator,
         pin_mem=pin_mem,
         num_workers=num_workers,
-        incl_cell_seq=incl_cell_seq,
-        incl_neighborhood_seq=incl_neighborhood_seq,
+        world_size=world_size,
+        rank=rank,
+        drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         has_cls=has_cls,
         distributed=False)
     
-    _,_, target_encoder,_,_, start_epoch = load_checkpoint(
+    _, _, target_encoder, _, _, start_epoch = load_checkpoint(
             device=device,
             r_path=load_path,
             encoder=encoder,
@@ -188,6 +200,33 @@ def evaluation(args: dict,
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
+            
+    #---------NEW------#
+    @torch.no_grad()
+    for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
+        # Load cell neighborhood tokens and segmentation label to the specified
+        # device
+        cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
+        seg_label = udata[1].to(device, non_blocking=True)
+
+        # Load niche and cell type labels based on the length of udata and the
+        # provided tokens
+        niche_label = udata[2]
+        cell_type = udata[3]
+        if len(udata) == 4:
+            niche_label = udata[2]
+            cell_type_label = udata[3]
+        elif len(udata) == 3:
+            if args['data']['seq_len_cell'] > 0:
+                niche_label = None
+                cell_type_label = udata[2]
+            elif args['data']['seq_len_neighborhood'] > 1:
+                cell_type_label = None
+                niche_label = udata[2]
+
+        emb_list = target_encoder.module.return_multi_layer_emb(cell_neighborhood_tokens, seg_label)
+    #------------------#
+    
 
     # Extract features
     target_encoder.eval()

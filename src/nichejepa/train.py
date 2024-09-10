@@ -35,19 +35,20 @@ from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
-from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset
-from .helper import (load_checkpoint,
-                     init_model,
-                     init_opt)
+from .datasets.cell_neighborhood_dataset import (CellNeighborhoodDataset,
+                                                 make_cell_neighborhood_dataset)
+from .helper import (init_model,
+                     init_opt,
+                     load_checkpoint)
 from .masks.multigene import MaskCollator
 from .masks.segment_masking  import SegmentMaskCollator
 from .masks.utils import apply_masks
-from .utils.distributed import (init_distributed,
-                                AllReduce)
-from .utils.logging import (CSVLogger,
+from .utils.distributed import (AllReduce,
+                                init_distributed)
+from .utils.logging import (AverageMeter,
+                            CSVLogger,
                             gpu_timer,
-                            grad_logger,
-                            AverageMeter)
+                            grad_logger)
 from .utils.tensors import repeat_interleave_batch
 
 
@@ -66,18 +67,29 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-def train(args,
-          train_dataset,
-          test_dataset,
-          resume_preempt=False):
-    
+def train(args: dict,
+          train_dataset: CellNeighborhoodDataset,
+          test_dataset: CellNeighborhoodDataset,
+          resume_preempt: bool=False):
+    """
+    Train the model.
+
+    Parameters
+    -----------
+    args:
+        Dictionary containing the hyperparams from the config file.
+    train_dataset:
+        Train split CellNeighborhoodDataset.
+    test_dataset:
+        Test split CellNeighborhoodDataset.
+    resume_preempt:
+    """
     # ----------------------------- #
     #  Load params from config file
     # ----------------------------- #
 
     # Load meta params
     use_bfloat16 = args['meta']['use_bfloat16']
-    model_name = args['meta']['model_name']
     load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
     enc_depth = args['meta']['enc_depth'] 
@@ -116,7 +128,7 @@ def train(args,
     else:
        ema = [args['optimization']['ema'], 1]
     learnable = args['optimization']['learnable']
-    ipe_scale = args['optimization']['ipe_scale']  # scheduler scale factor (def: 1.0)
+    ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
     num_epochs = args['optimization']['epochs']
@@ -125,9 +137,9 @@ def train(args,
     lr = args['optimization']['lr']
     final_lr = args['optimization']['final_lr']
 
-    seq_len = (1 if has_cls else 0) + seq_len_cell + seq_len_neighborhood
+    seq_len = seq_len_cell + seq_len_neighborhood
 
-    # -- LOGGING
+    # Create folder to store artifacts
     folder = (f"logs/{data_set_name}_"
                f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
                f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
@@ -139,7 +151,7 @@ def train(args,
     # Append subset name based on specific_cell_types
     specific_cell_types = args['data'].get('specific_cell_types')
     if len(specific_cell_types)!=0:
-       subset_name = "_".join(specific_cell_types)  # Create a subset name from specific cell types
+       subset_name = "_".join(specific_cell_types)
        folder += f"_subset_{subset_name}"
     else:
        folder += "_total"
@@ -150,6 +162,7 @@ def train(args,
     dump = os.path.join(folder, 'params-nichejepa.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
+
     # ----------------------------- #
     
     try:
@@ -169,7 +182,8 @@ def train(args,
     latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
     load_path = None
     if load_model:
-        load_path = os.path.join(folder, r_file) if r_file is not None else latest_path
+        load_path = os.path.join(
+            folder, r_file) if r_file is not None else latest_path
 
     # Initialize csv logger
     csv_logger = CSVLogger(log_file,
@@ -183,14 +197,13 @@ def train(args,
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
         device=device,
+        vocab_size=vocab_size,
         seq_len=seq_len,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
-        vocab_size=vocab_size,
+        pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
         pos_learnable=learnable,
-        pred_emb_dim=pred_emb_dim,
-        model_name=model_name,
         has_cls=has_cls)
     target_encoder = copy.deepcopy(encoder)
 
@@ -214,39 +227,33 @@ def train(args,
             has_cls=has_cls)
     
     # Initialize dataloader and -sampler
-    _, train_loader, train__sampler = make_cell_neighborhood_dataset(
-            batch_size=batch_size,
-            data=train_dataset,
-            vocab_size=vocab_size,
-            seq_len=seq_len,
-            collator=mask_collator,
-            pin_mem=pin_mem,
-            num_workers=num_workers,
-            world_size=world_size,
-            rank=rank,
-            drop_last=False,
-            incl_cell_seq=incl_cell_seq,
-            incl_neighborhood_seq=incl_neighborhood_seq,
-            seq_len_cell = seq_len_cell,
-            seq_len_neighborhood = seq_len_neighborhood,
-            has_cls = has_cls)
+    _, train_loader, train_sampler = make_cell_neighborhood_dataset(
+        batch_size=batch_size,
+        data=train_dataset,
+        vocab_size=vocab_size,
+        collator=mask_collator,
+        pin_mem=pin_mem,
+        num_workers=num_workers,
+        world_size=world_size,
+        rank=rank,
+        drop_last=False,
+        seq_len_cell=seq_len_cell,
+        seq_len_neighborhood=seq_len_neighborhood,
+        has_cls=has_cls)
 
-    _, test_loader, test__sampler = make_cell_neighborhood_dataset(
-            batch_size=batch_size,
-            data=test_dataset,
-            vocab_size=vocab_size,
-            seq_len=seq_len,
-            collator=mask_collator,
-            pin_mem=pin_mem,
-            num_workers=num_workers,
-            world_size=world_size,
-            rank=rank,
-            drop_last=False,
-            incl_cell_seq=incl_cell_seq,
-            incl_neighborhood_seq=incl_neighborhood_seq,
-            seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls)
+    _, test_loader, test_sampler = make_cell_neighborhood_dataset(
+        batch_size=batch_size,
+        data=test_dataset,
+        vocab_size=vocab_size,
+        collator=mask_collator,
+        pin_mem=pin_mem,
+        num_workers=num_workers,
+        world_size=world_size,
+        rank=rank,
+        drop_last=False,
+        seq_len_cell=seq_len_cell,
+        seq_len_neighborhood=seq_len_neighborhood,
+        has_cls=has_cls)
 
     ipe = len(train_loader)
 
@@ -309,14 +316,12 @@ def train(args,
             if (epoch + 1) % checkpoint_freq == 0:
                 torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
 
-    # Initialize wandb project
-
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
         logger.info(f"Epoch {epoch + 1}")
 
         # Update distributed dataloader epoch
-        train__sampler.set_epoch(epoch)
+        train_sampler.set_epoch(epoch)
 
         loss_meter = AverageMeter()
         maskA_meter = AverageMeter()
@@ -326,7 +331,8 @@ def train(args,
         for itr, (udata, masks_enc, masks_pred) in enumerate(train_loader):
             def load_cell_neighborhoods():
                 # -- unsupervised imgs
-                cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
+                cell_neighborhood_tokens = udata[0].to(device,
+                                                       non_blocking=True)
                 seg_label = udata[1].to(device, non_blocking=True)                 
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                 masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
@@ -342,20 +348,42 @@ def train(args,
                 def forward_target():
                     with torch.no_grad(): # no backward pass for target encoder
                         # Encode all cell neighborhood tokens
-                        h = target_encoder(cell_neighborhood_tokens, seg_label) # output (B, seq_len, emb_size)
+                        h = target_encoder(
+                            cell_neighborhood_tokens,
+                            seg_label) # output (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
+                                       # if no <cls> token (BATCH_SIZE,
+                                       # SEQ_LEN+1, EMBED_DIM) otherwise
                         # Normalize over feature dim
-                        h = F.layer_norm(h, (h.size(-1),)) # output (B, seq_len, emb_size)
+                        h = F.layer_norm(h, (h.size(-1),))
                         # Only keep encoded targets (masked genes of h)
-                        h = apply_masks(h, masks_pred) # output (B * n_targets, target_size, emb_size)
+                        h = apply_masks(
+                            h,
+                            masks_pred) # output (BATCH_SIZE * N_TARGETS,
+                                        # TARGET_MASK_SIZE, EMB_SIZE)
                         B = len(h)
                         # Repeat targets if multiple contexts
-                        h = repeat_interleave_batch(h, B, repeat=len(masks_enc)) # output (B * n_targets * n_contexts, target_size, emb_size)
+                        h = repeat_interleave_batch(
+                            h,
+                            B,
+                            repeat=len(masks_enc)) # output (BATCH_SIZE *
+                            #                        N_TARGETS * N_CONTEXTS,
+                            #                        TARGET_MASK_SIZE, EMB_DIM)
                         return h
 
                 def forward_context():
                     # Encode only context cell neighborhood tokens
-                    z = encoder(cell_neighborhood_tokens, seg_label, masks_enc) # output (B, min_context_size, emb_size) where min_context size is minmum context size in the batch after removal of overlapping targets
-                    z = predictor(z, masks_enc, masks_pred) # output (B * n_targets, target_size, emb_size)
+                    z = encoder(
+                        cell_neighborhood_tokens,
+                        seg_label,
+                        masks_enc) # output (BATCH_SIZE, MIN_CONTEXT_SIZE,
+                                   # EMB_DIM) where MIN_CONTEXT_SIZE is minmum
+                                   # context size in the batch after removal of
+                                   # overlapping targets
+                    z = predictor(
+                        z,
+                        masks_enc,
+                        masks_pred) # output (BATCH_SIZE * N_TARGETS *
+                                    # N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     return z
 
                 def loss_fn(z, h):
@@ -364,7 +392,8 @@ def train(args,
                     return loss
 
                 # Step 1: forward pass
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
+                with torch.cuda.amp.autocast(dtype=torch.bfloat16,
+                                             enabled=use_bfloat16):
                     h = forward_target()
                     z = forward_context()
                     loss = loss_fn(z, h)
@@ -383,7 +412,8 @@ def train(args,
                 # Step 3: momentum update of target encoder
                 with torch.no_grad():
                     m = next(momentum_scheduler)
-                    for param_q, param_k in zip(encoder.parameters(), target_encoder.parameters()):
+                    for param_q, param_k in zip(encoder.parameters(),
+                                                target_encoder.parameters()):
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
                 return (float(loss), _new_lr, _new_wd, grad_stats)
@@ -393,7 +423,12 @@ def train(args,
 
             # -- Logging
             def log_stats():
-                csv_logger.log(epoch + 1, itr, loss, maskA_meter.val, maskB_meter.val, etime)
+                csv_logger.log(epoch + 1,
+                               itr,
+                               loss,
+                               maskA_meter.val,
+                               maskB_meter.val,
+                               etime)
                 if (itr % log_freq == 0) or np.isnan(loss) or np.isinf(loss):
                     logger.info('[%d, %5d] loss: %.3f '
                                 'masks: %.1f %.1f '
@@ -410,12 +445,13 @@ def train(args,
                                    time_meter.avg))
 
                     if grad_stats is not None:
-                        logger.info('[%d, %5d] grad_stats: [%.2e %.2e] (%.2e, %.2e)'
-                                    % (epoch + 1, itr,
-                                       grad_stats.first_layer,
-                                       grad_stats.last_layer,
-                                       grad_stats.min,
-                                       grad_stats.max))
+                        logger.info(
+                            '[%d, %5d] grad_stats: [%.2e %.2e] (%.2e, %.2e)'
+                            % (epoch + 1, itr,
+                            grad_stats.first_layer,
+                            grad_stats.last_layer,
+                            grad_stats.min,
+                            grad_stats.max))
             log_stats()
             assert not np.isnan(loss), 'loss is nan'
 

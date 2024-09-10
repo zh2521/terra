@@ -79,19 +79,19 @@ def load_checkpoint(
 
         epoch = checkpoint['epoch']
 
-        # Load encoder
+        # Load state into context encoder
         pretrained_dict = checkpoint['encoder']
         msg = encoder.load_state_dict(pretrained_dict)
         logger.info(
             f'Loaded pretrained encoder from epoch {epoch} with msg: {msg}.')
 
-        # Load predictor
+        # Load state into predictor
         pretrained_dict = checkpoint['predictor']
         msg = predictor.load_state_dict(pretrained_dict)
         logger.info(
             f'loaded pretrained predictor from epoch {epoch} with msg: {msg}.')
 
-        # Load target encoder
+        # Load state into target encoder
         if target_encoder is not None:
             print(list(checkpoint.keys()))
             pretrained_dict = checkpoint['target_encoder']
@@ -100,7 +100,7 @@ def load_checkpoint(
                 f'Loaded pretrained target encoder from epoch {epoch} with msg:'
                 f' {msg}.')
 
-        # Load optimizer
+        # Load state into optimizer
         opt.load_state_dict(checkpoint['opt'])
         if scaler is not None:
             scaler.load_state_dict(checkpoint['scaler'])
@@ -116,50 +116,61 @@ def load_checkpoint(
 
 
 def init_model(device: str,
+               vocab_size: int,
                seq_len: int,
-               enc_emb_dim: int=192, 
-               enc_depth: int=12, 
-               model_name: str="gt_base",
-               pred_depth: int=6,
-               pos_learnable=1,
-               vocab_size: int=6033,
+               enc_emb_dim: int=768, 
+               enc_depth: int=12,
                pred_emb_dim: int=384,
-               has_cls: bool=True) -> Tuple[gt.GeneTransformerEncoder,
-                                            gt.GeneTransformerPredictor]:
+               pred_depth: int=6,
+               pos_learnable: bool=False,
+               has_cls: bool=False) -> Tuple[gt.GeneTransformerEncoder,
+                                             gt.GeneTransformerPredictor]:
     """
     Initialize model.
 
     Parameters
     -----------
     device:
-    seq_len:
-    enc_emb_dim:
-    enc_depth:
-    model_name:
-    pred_depth:
-    pos_learnable:
+        Device on which the model will be initialized.
     vocab_size:
+        Size of the token vocabulary. Includes <pad> token.
+    seq_len:
+        Length of the token sequences (w/o <cls> token).
+    enc_emb_dim:
+        Dimension of the encoder embedding.
+    enc_depth:
+        Number of transformer blocks in the encoder.
     pred_emb_dim:
+        Dimension of the predictor embedding.        
+    pred_depth:
+        Number of transformer blocks in the predictor.
+    pos_learnable:
+        If 'True', positional embeddings are learnable, otherwise use sin cos
+        positional embeddings.
     has_cls:
+        If 'True', sequences include a <cls> token at the start.
 
     Returns
-    -----------  
+    -----------
+    encoder:
+        Initialized GeneTransformerEncoder module.
+    predictor:
+        Initialized GeneTransformerPredictor module.
     """
-    encoder = gt.__dict__[model_name](
-        seq_len=seq_len,
-        embed_dim=enc_emb_dim,
-        pos_learnable=pos_learnable,
-        depth=enc_depth,
+    encoder = gt.__dict__["gt_encoder"](
         vocab_size=vocab_size,
-        has_cls=True)
-    predictor = gt.__dict__["gt_predictor"](
         seq_len=seq_len,
-        embed_dim=encoder.embed_dim,
+        has_cls=has_cls,
+        pos_learnable=pos_learnable,
+        embed_dim=enc_emb_dim,
+        depth=enc_depth)
+    predictor = gt.__dict__["gt_predictor"](
+        embed_dim=enc_emb_dim,
+        seq_len=seq_len,
+        has_cls=has_cls,
         pos_learnable=pos_learnable,
         predictor_embed_dim=pred_emb_dim,
-        depth=pred_depth,
-        num_heads=encoder.num_heads,
-        has_cls=True)
+        depth=pred_depth)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):
