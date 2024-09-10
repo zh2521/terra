@@ -20,7 +20,8 @@ class CellNeighborhoodDataset(Dataset):
                  vocab_size: int,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
-                 has_cls: bool=True):
+                 has_cls: bool=True
+                 ):
         """
         Torch CellNeighborhoodDataset class.
 
@@ -67,10 +68,10 @@ class CellNeighborhoodDataset(Dataset):
                 # consider it for segment labels
                 tokens = [self.vocab_size] + tokens
                 # Create segment labels: 1 for cell tokens and <cls> token and 2
-                # for neighborhood tokens
+                # for neighborhood tokens (maybe this needs to be changed)
                 labels = torch.cat(
                     (torch.ones(self.seq_len_cell + 1),
-                    torch.ones(self.seq_len_neighborhood) * 2)).int()
+                     torch.ones(self.seq_len_neighborhood) * 2)).int()
             else:
                 # Create segment labels: 1 for cell tokens, 2 for neighborhood
                 # tokens
@@ -103,7 +104,7 @@ class CellNeighborhoodDataset(Dataset):
                 # consider it for segment labels  
                 tokens = [self.vocab_size] + tokens
                 # Create segment labels: 2 for neighborhood tokens and <cls>
-                # token
+                # token (maybe this needs to be changed)
                 labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
             else:
                 # Create segment labels: 2 for neighborhood tokens
@@ -129,10 +130,10 @@ def make_cell_neighborhood_dataset(
     seq_len_cell: int=0,
     seq_len_neighborhood: int=0,
     has_cls: bool=True,
-    distributed: bool=True) -> Tuple[
-        CellNeighborhoodDataset,
-        torch.utils.data.DataLoader,
-        Optional[torch.utils.data.distributed.DistributedSampler]]:
+    distributed: bool=True
+    ) -> Tuple[CellNeighborhoodDataset,
+               torch.utils.data.DataLoader,
+               Optional[torch.utils.data.distributed.DistributedSampler]]:
     """
     Convert Huggingface dataset into a torch CellNeighborhoodDataset object and
     create corresponding data loader.
@@ -146,8 +147,6 @@ def make_cell_neighborhood_dataset(
         labels.
     vocab_size:
         Size of the vocabulary.
-    seq_len:
-        Sequence length of all tokens.
     collator:
         See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
     pin_mem:
@@ -199,6 +198,7 @@ def make_cell_neighborhood_dataset(
                                                   num_workers=num_workers,
                                                   persistent_workers=False)
         logger.info('Data loader created.')
+
         return dataset, data_loader, dist_sampler
     else:
         data_loader = torch.utils.data.DataLoader(dataset,
@@ -209,4 +209,5 @@ def make_cell_neighborhood_dataset(
                                                   num_workers=num_workers,
                                                   persistent_workers=False)
         logger.info('Data loader created.')
+        
         return dataset, data_loader

@@ -1,16 +1,19 @@
 import random
-from typing import Tuple
+from typing import Tuple, Union
 
 import datasets
 from datasets import load_from_disk
 from sklearn.model_selection import train_test_split
 
 
-def prepare_dataset(args,
-                    split_dataset: bool=True):
+def prepare_dataset(args: dict,
+                    split_dataset: bool=True
+                    ) -> Union[Tuple[datasets.arrow_dataset.Dataset,
+                                     datasets.arrow_dataset.Dataset],
+                               datasets.arrow_dataset.Dataset]:
     """
-    Prepare the dataset by loading it, determining sample size, and splitting it into
-    training and testing sets based on the provided configuration parameters.
+    Prepare the dataset by loading it, determining sample size, and splitting it
+    into training and test sets based on the provided configuration parameters.
 
     Parameters
     -----------
@@ -27,10 +30,16 @@ def prepare_dataset(args,
 
     Returns
     -----------
+    1)
     train_dataset:
         The training portion of the dataset.
     test_dataset:
-        The testing portion of the dataset.
+        The test portion of the dataset.
+    
+    2)
+    dataset:
+        The combined training and test portion of the dataset with a 'split'
+        label.
     """
 
     # Load dataset from the specified path
@@ -39,9 +48,10 @@ def prepare_dataset(args,
 
     # Filter dataset to include only specific cell types
     specific_cell_types = args['data']['specific_cell_types']
-    if len(specific_cell_types) !=0:
-       specific_cell_types = args['data']['specific_cell_types']  # List of cell types to keep
-       dataset = dataset.filter(lambda x: x['cell_types'] in specific_cell_types)
+    if len(specific_cell_types) != 0: # list of cell types to keep
+       specific_cell_types = args['data']['specific_cell_types']
+       dataset = dataset.filter(lambda x:
+                                x['cell_types'] in specific_cell_types)
 
     # Sample subset if specified
     if args['data']['sample_subset']:
@@ -80,3 +90,4 @@ def prepare_dataset(args,
             dataset = dataset.map(add_split_label, with_indices=True)
 
             return dataset
+            
