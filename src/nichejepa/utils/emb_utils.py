@@ -6,21 +6,23 @@ import pandas as pd
 import torch
 
 
-def compute_weight_based_ranks(tokens):
+def compute_weight_based_ranks(tokens: torch.Tensor) -> torch.Tensor:
     """
     Compute rank-based weights for a 2D tensor of tokens.
 
-    Parameters:
+    Parameters
+    -----------
     tokens (torch.Tensor): A 2D tensor where each row represents a sequence of tokens. The tokens are gene_id of cell or neighborhood
 
-    Returns:
+    Returns
+    -----------
     torch.Tensor: A 2D tensor of the same shape as `tokens` containing the computed weights.
     """
     # Create a mask where each element is True (1) if the corresponding token is non-zero, and False (0) if it is zero (padding token)
     mask = tokens != 0
 
-    # Compute cumulative sum along the sequence dimension (dim=1), which gives ranks for non-zero tokens
-    # Each token's rank is incremented based on its position in the sequence, with padding tokens maintaining a rank of 0
+    # Compute cumulative sum along the sequence dimension (dim=1), which gives
+    # ranks for non-zero tokens. Each token's rank is incremented based on its position in the sequence, with padding tokens maintaining a rank of 0
     ranks = mask.cumsum(dim=1).float() * mask.float()
 
     # Find the maximum rank in each sequence, keeping the dimension for broadcasting
@@ -125,9 +127,13 @@ def mean_nonpadding_embs(embs, mask, dim=1):
     return mean_embs, mask.sum(dim)
 
 
-def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, args, top_k=None,
-                          just_cell=False, just_neighborhood=False,
-                          mask_large_than_k=False, retrieve_label=None):
+def create_selection(cell_neighborhood_tokens,
+                     label_name,
+                     seq_len_cell,
+                     args,
+                     top_k=None,
+                     mask_large_than_k=False,
+                     retrieve_label=None):
     """
     Create a selection mask for cell index tokens or neighborhood tokens based on various conditions.
 
@@ -155,12 +161,12 @@ def create_selection(cell_neighborhood_tokens, label_name, seq_len_cell, args, t
     # Ensure that if either just_neighborhood or just_cell is False, 
     # retrieve_label cannot be 'retrieve_niche' because 'retrieve_niche' is only meaningful 
     # when the data contains both cell and neighborhood sequences.
-    assert not ((not just_neighborhood or not just_cell) and retrieve_label == 'retrieve_niche'), \
+    assert not ((not args['data']['just_neighborhood'] or not args['data']['just_cell']) and retrieve_label == 'retrieve_niche'), \
         "retrieve_label cannot be 'retrieve_niche' when just_neighborhood or just_cell is False as it has meaning when data has trained on sequence contain both of them"
 
     # Ensure that if just_cell is False, retrieve_label cannot be 'retrieve_cell'
     # This condition enforces that 'retrieve_cell' is only valid when 'just_cell' is True.
-    assert not (not just_cell and retrieve_label == 'retrieve_cell'), \
+    assert not (not args['data']['just_cell'] and retrieve_label == 'retrieve_cell'), \
         "retrieve_label cannot be 'retrieve_cell' when just_cell is False."
 
     # Assert that if the model has not been trained on CLS tokens (`has_cls` is False),
@@ -233,7 +239,8 @@ def process_features(features_list: List,
     """
     Process features from the provided features and metadata to make it ready for anndata
 
-    Parameters:
+    Parameters
+    -----------
     features_list (list): The list of array of features to be stored in AnnData.
     split (str): The split of the dataset (e.g., train, test, validation).
     label_name (str): The name of the label associated with the data.
@@ -245,7 +252,8 @@ def process_features(features_list: List,
     Zero means from the first layer to the last layer of the transformer, indicating the depth of the transformer
     in case retrieve_position_emb is True it doesn't have any meaning.
 
-    Returns:
+    Returns
+    -----------
     obs: The obs data that should be stored in the obs of anndata
     features: the features that should store in obsm of the anndata
     """

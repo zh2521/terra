@@ -1,8 +1,5 @@
 import yaml
 import logging
-from datasets import load_from_disk
-from sklearn.model_selection import train_test_split
-import random
 
 
 def setup_batch_size(enc_pred_depth, is_training):
@@ -90,64 +87,6 @@ def create_params_from_YAML_wandb_config(YAML_file,
 
     # Return the updated params dictionary
     return params
-
-
-def prepare_dataset(args):
-    """
-    Prepare the dataset by loading it, determining sample size, and splitting it into
-    training and testing sets based on the provided configuration parameters.
-
-    Parameters:
-    - args (dict): A dictionary containing the configuration parameters, including:
-                   - data_path: The path to the dataset.
-                   - sample_size: The size of the dataset to sample.
-                   - sample_subset: Whether to sample a subset of the dataset.
-                   - split: The train-test split ratio.
-                   - stratify: Whether to stratify the dataset during the split.
-                   - random_state: The random seed for reproducibility.
-
-    Returns:
-    - train_dataset: The training portion of the dataset.
-    - test_dataset: The testing portion of the dataset.
-    """
-
-    # Load dataset from the specified path
-    data_path = args['data']['data_path']
-    dataset = load_from_disk(data_path)
-
-    # Filter dataset to include only specific cell types
-    specific_cell_types = args['data']['specific_cell_types']
-    if len(specific_cell_types) !=0:
-       specific_cell_types = args['data']['specific_cell_types']  # List of cell types to keep
-       dataset = dataset.filter(lambda x: x['cell_types'] in specific_cell_types)
-
-    # Sample subset if specified
-    if args['data']['sample_subset']:
-        total_size = len(dataset)
-        sample_size = min(args['data']['sample_size'], total_size)
-        rng = random.Random(args['data']['random_state'])
-        sampled_indices = rng.sample(range(total_size), sample_size)
-        dataset = dataset.select(sampled_indices)
-
-    # Prepare for dataset split
-    indices = list(range(len(dataset)))
-
-    # Prepare train-test split parameters
-    split_params = {
-        'test_size': args['data']['split'],
-        'random_state': args['data']['random_state']
-    }
-    if args['data']['stratify']:
-        split_params['stratify'] = dataset['cell_types']
-
-    # Split the dataset
-    train_indices, test_indices = train_test_split(indices, **split_params)
-
-    # Select the train and test subsets from the dataset
-    train_dataset = dataset.select(train_indices)
-    test_dataset = dataset.select(test_indices)
-
-    return train_dataset, test_dataset
 
 
 def generate_output_name(args):

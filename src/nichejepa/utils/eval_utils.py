@@ -23,9 +23,12 @@ def load_cell_neighborhoods(udata: List,
 
     Parameters
     -----------
-    udata (list): List containing data elements. Expected to be of length 3 or 4.
-    masks_enc (list): List of encoder masks.
-    masks_pred (list): List of predicted masks.
+    udata:
+        List containing data elements. Expected to be of length 3 or 4.
+    masks_enc:
+        List of encoder masks.
+    masks_pred:
+        List of predictor masks.
     device (torch.device): Device to load data onto (e.g., CPU or GPU).
     args (dict): Dictionary contains various items to guide label extraction.
 
@@ -131,9 +134,7 @@ def forward_context(model,
             # Create a selection mask to determine which embeddings to average
             selection = create_selection(
                 cell_neighborhood_tokens, label_name,
-                args['data']['seq_len_cell'], args, 
-                just_cell=args['data']['just_cell'], 
-                just_neighborhood=args['data']['just_neighborhood'],
+                args['data']['seq_len_cell'], args,
                 retrieve_label=retrieve_label
             )
             # Calculate the mean of the non-padding embeddings based on the selection
@@ -143,8 +144,6 @@ def forward_context(model,
            selection = create_selection(
                 cell_neighborhood_tokens, label_name,
                 args['data']['seq_len_cell'], args,
-                just_cell=args['data']['just_cell'],
-                just_neighborhood=args['data']['just_neighborhood']
             )
            # Calculate the mean of the non-padding embeddings based on the `selection` mask.
            # This operation will compute the mean embedding where `selection` is 1, which in this case is the first token.
@@ -171,11 +170,15 @@ def forward_context(model,
     return features, obs
 
 
-def eval_step(model, data_dict, split, args):
+def eval_step(model,
+              data_dict: dict,
+              split,
+              args):
     """
     Evaluate the model on the provided context dictionary.
 
-    Parameters:
+    Parameters
+    -----------
     model: The model to be used for evaluation.
     data_dict (dict): Dictionary containing cell neighborhood tokens, segmentation labels, niche labels, and cell types.
     split (str): The split of the dataset (e.g., train, test, validation).
@@ -213,16 +216,17 @@ def process_loader(model,
     Returns
     --------
     all_obs:
-        The list of all obs computed from different batches, which should be merged and stored in the final AnnData.
+        The list of all obs computed from different batches, which should be
+        merged and stored in the final adata.
     all_features:
-        The list of all features computed from different batches, which should be merged and stored in the final AnnData
-
+        The list of all features computed from different batches, which should
+        be merged and stored in the final adata.
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Iterate over the data loader with a progress bar
     for itr, (udata, masks_enc, masks_pred) in tqdm(enumerate(loader)):
-        # Load and preprocess the cell neighborhood data, moving it to the appropriate device (GPU or CPU)
+        # Load and preprocess the cell neighborhood data, moving it to the
+        # appropriate device (GPU or CPU)
         data_dict = load_cell_neighborhoods(udata,
                                             masks_enc,
                                             masks_pred,
@@ -336,3 +340,42 @@ def clustering_metrics(adata: anndata.AnnData,
     metrics = {'nmi': results['nmi'],
                'ari': results['ari']}
     return metrics
+
+
+def retrieve_gene_emb_from_cell_emb(cell_neighborhood_tokens: torch.Tensor,
+                                    cell_emb: torch.Tensor,
+                                    gene_id: int,
+                                    gene_type: Literal["cell", "neighborhood"],
+                                    has_cls: bool,
+                                    seq_len_cell: int):
+    """
+    Retrieve contextual gene embeddings from contextual cell embeddings based
+    on specified gene IDs and gene types.
+
+    Parameters
+    -----------
+    cell_neighborhood_tokens:
+    cell_emb:
+    gene_id:
+    gene_type:
+    has_cls:
+    seq_len_cell:
+
+    Returns
+    --------
+    gene_emb:
+    """
+    gene_mask = (cell_neighborhood_tokens == gene_id).int()
+    if gene_type == "cell":
+        gene_mask[:, (1 if has_cls else 0) + seq_len_cell:] = 0
+    elif gene_type == "neighborhood":
+        gene_mask[:, (1 if has_cls else 0):
+                     (1 if has_cls else 0) + seq_len_cell] = 0
+    gene_indices = gene_mask.argmax(dim=1) 
+    gene_emb_selection = cell_emb.gather(
+        1,
+        gene_indices.unsqueeze(-1).unsqueeze(-1).expand(
+            -1, -1, cell_emb.size(2)))
+    gene_emb = gene_emb_selection.squeeze(1)
+
+    return gene_emb
