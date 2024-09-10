@@ -447,7 +447,8 @@ class GeneTransformerEncoder(nn.Module):
                  drop_path_rate: float=0.0,
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
-                 **kwargs):
+                 **kwargs
+                 ):
         super().__init__()
         self.seq_len = seq_len
         self.has_cls = has_cls
@@ -756,7 +757,8 @@ class GeneTransformerPredictor(nn.Module):
                  drop_path_rate: float=0.0,
                  norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
-                 **kwargs):
+                 **kwargs
+                 ):
         super().__init__()
         self.init_std = init_std
 
@@ -848,7 +850,8 @@ class GeneTransformerPredictor(nn.Module):
     def forward(self,
                 x: torch.Tensor, 
                 masks_enc: Union[list, torch.Tensor],
-                masks_pred: Union[list, torch.Tensor]) -> torch.Tensor:
+                masks_pred: Union[list, torch.Tensor]
+                ) -> torch.Tensor:
         """
         Run predictor forward pass for a batch of input tokens.
 
@@ -952,3 +955,4 @@ def gt_predictor(**kwargs):
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
         **kwargs)
     return model
+    
