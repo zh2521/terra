@@ -17,6 +17,7 @@ from tqdm import tqdm
 from .datasets.cell_neighborhood_dataset import make_cell_neighborhood_dataset
 from .helper import load_checkpoint, init_model
 from .masks.multigene import MaskCollator
+from .masks.segment_masking  import SegmentMaskCollator
 from .utils.config_utils import generate_output_name
 from .utils.distributed import init_distributed
 from .utils.emb_utils import create_and_save_anndata
@@ -83,6 +84,8 @@ def evaluation(args: dict,
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
+    segment_masking = args['mask']['segment_masking']
+    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
 
     # Set device
     if not torch.cuda.is_available():
@@ -141,14 +144,23 @@ def evaluation(args: dict,
     target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
-    mask_collator = MaskCollator(
-        n_targets=n_targets,
-        n_contexts=n_contexts,
-        target_mask_size=target_mask_size,
-        context_mask_size=context_mask_size,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls)
+    if segment_masking:
+       mask_collator = SegmentMaskCollator(
+            n_targets=n_targets,
+            n_contexts=n_contexts,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
+            has_cls=has_cls,
+            per_segment_mask_ratio = per_segment_mask_ratio)
+    else:
+        mask_collator = MaskCollator(
+            n_targets=n_targets,
+            n_contexts=n_contexts,
+            target_mask_size=target_mask_size,
+            context_mask_size=context_mask_size,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
+            has_cls=has_cls)
 
     # Initialize dataloader and -sampler
     _, train_loader = make_cell_neighborhood_dataset(
