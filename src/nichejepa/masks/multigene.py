@@ -51,7 +51,8 @@ class MaskCollator:
                  context_mask_size: int=10,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
-                 has_cls: bool = False):
+                 has_cls: bool = False
+                 ):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
         self.target_mask_size = target_mask_size
@@ -85,9 +86,9 @@ class MaskCollator:
                           generator: torch.Generator,
                           mask_size: int,
                           mask_type: Literal['target', 'context'],
-                          valid_token_masks: Optional[list]=None) -> Tuple[
-                            torch.Tensor,
-                            torch.Tensor]:
+                          valid_token_masks: Optional[list]=None
+                          ) -> Tuple[torch.Tensor,
+                                     torch.Tensor]:
         """
         Sample context or target gene masks, considering both cell and
         neighborhood segments.
@@ -201,11 +202,9 @@ class MaskCollator:
 
         return mask, mask_complement
 
-    def __call__(
-        self,
-        batch: Tuple[torch.Tensor, torch.Tensor, str]) -> Tuple[torch.Tensor,
-                                                                torch.Tensor,
-                                                                torch.Tensor]:
+    def __call__(self,
+                 batch: Tuple[torch.Tensor, torch.Tensor, str]
+        ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Create context and target masks when collating cell neighborhoods into a
         batch.
@@ -310,4 +309,3 @@ class MaskCollator:
             collated_masks_context)
 
         return collated_batch, collated_masks_context, collated_masks_target
-
