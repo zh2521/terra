@@ -1,7 +1,9 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Adapted from Assran, M. et al. Self-supervised learning from images with a
+Joint-Embedding Predictive Architecture.
 Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/utils/distributed.py (05.06.2024).
+https://github.com/facebookresearch/ijepa/blob/main/src/utils/distributed.py
+(05.06.2024).
 """
 
 import os
@@ -10,6 +12,7 @@ import torch
 import torch.distributed as dist
 
 from logging import getLogger
+
 
 logger = getLogger()
 
@@ -55,7 +58,8 @@ class AllGather(torch.autograd.Function):
             and (dist.get_world_size() > 1)
         ):
             x = x.contiguous()
-            outputs = [torch.zeros_like(x) for _ in range(dist.get_world_size())]
+            outputs = [
+                torch.zeros_like(x) for _ in range(dist.get_world_size())]
             dist.all_gather(outputs, x)
             return torch.cat(outputs, 0)
         return x

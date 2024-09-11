@@ -1,14 +1,15 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Adapted from Assran, M. et al. Self-supervised learning from images with a
+Joint-Embedding Predictive Architecture.
 Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/utils/schedulers.py (05.06.2024).
+https://github.com/facebookresearch/ijepa/blob/main/src/utils/schedulers.py
+(05.06.2024).
 """
 
 import math
 
 
 class WarmupCosineSchedule(object):
-
     def __init__(
         self,
         optimizer,
@@ -45,7 +46,6 @@ class WarmupCosineSchedule(object):
 
 
 class CosineWDSchedule(object):
-
     def __init__(
         self,
         optimizer,

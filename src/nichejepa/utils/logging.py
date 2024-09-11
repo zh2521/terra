@@ -1,7 +1,9 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Adapted from Assran, M. et al. Self-supervised learning from images with a
+Joint-Embedding Predictive Architecture.
 Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py (05.06.2024).
+https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
+(05.06.2024).
 """
 
 import torch
@@ -28,7 +30,6 @@ def gpu_timer(closure, log_timings=True):
 
 
 class CSVLogger(object):
-
     def __init__(self, fname, *argv):
         self.fname = fname
         self.types = []
