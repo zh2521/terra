@@ -28,12 +28,13 @@ def load_checkpoint(
     predictor: gt.GeneTransformerPredictor,
     target_encoder: gt.GeneTransformerEncoder,
     opt: torch.optim.AdamW,
-    scaler: torch.cuda.amp.GradScaler) -> Tuple[gt.GeneTransformerEncoder,
-                                                gt.GeneTransformerPredictor,
-                                                gt.GeneTransformerEncoder,
-                                                torch.optim.AdamW,
-                                                torch.cuda.amp.GradScaler,
-                                                int]:
+    scaler: torch.cuda.amp.GradScaler
+    ) -> Tuple[gt.GeneTransformerEncoder,
+               gt.GeneTransformerPredictor,
+               gt.GeneTransformerEncoder,
+               torch.optim.AdamW,
+               torch.cuda.amp.GradScaler,
+               int]:
     """
     Load model checkpoint from stored file.
 
@@ -123,8 +124,9 @@ def init_model(device: str,
                pred_emb_dim: int=384,
                pred_depth: int=6,
                pos_learnable: bool=False,
-               has_cls: bool=False) -> Tuple[gt.GeneTransformerEncoder,
-                                             gt.GeneTransformerPredictor]:
+               has_cls: bool=False
+               ) -> Tuple[gt.GeneTransformerEncoder,
+                          gt.GeneTransformerPredictor]:
     """
     Initialize model.
 
@@ -205,10 +207,11 @@ def init_opt(encoder: gt.GeneTransformerEncoder,
              final_wd: float=1e-6,
              final_lr: float=0.0,
              use_bfloat16: bool=False,
-             ipe_scale: float=1.25) -> Tuple[torch.optim.AdamW,
-                                             torch.cuda.amp.GradScaler,
-                                             WarmupCosineSchedule,
-                                             CosineWDSchedule]:
+             ipe_scale: float=1.25
+             ) -> Tuple[torch.optim.AdamW,
+                        torch.cuda.amp.GradScaler,
+                        WarmupCosineSchedule,
+                        CosineWDSchedule]:
     """
     Initialize optimizer, learning rate scheduler, weight decay scheduler, and
     automatic mixed precision scaler.

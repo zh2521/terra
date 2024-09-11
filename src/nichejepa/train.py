@@ -69,7 +69,8 @@ logger = logging.getLogger()
 def train(args: dict,
           train_dataset: CellNeighborhoodDataset,
           test_dataset: CellNeighborhoodDataset,
-          resume_preempt: bool=False):
+          resume_preempt: bool=False
+          ):
     """
     Train the model.
 
@@ -352,8 +353,8 @@ def train(args: dict,
                             h,
                             B,
                             repeat=len(masks_enc)) # output (BATCH_SIZE *
-                            #                        N_TARGETS * N_CONTEXTS,
-                            #                        TARGET_MASK_SIZE, EMB_DIM)
+                                                   # N_TARGETS * N_CONTEXTS,
+                                                   # TARGET_MASK_SIZE, EMB_DIM)
                         return h
 
                 def forward_context():
