@@ -23,6 +23,7 @@ def filter_poor_quality_cells(adata: ad.AnnData) -> ad.AnnData:
         print("No 'filter_pass' column in 'adata.obs'; returning full adata.")
         return adata
     else:
-        filter_pass_idx = np.where([filter_pass == 1 for filter_pass in adata.obs["filter_pass"]])[0]
+        filter_pass_idx = np.where(
+            [filter_pass == 1 for filter_pass in adata.obs["filter_pass"]])[0]
         adata_passing = adata.copy()[filter_pass_idx]
         return adata_passing
