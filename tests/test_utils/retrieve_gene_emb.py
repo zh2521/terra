@@ -2,10 +2,10 @@ import unittest
 
 import torch
 
-from nichejepa.utils import retrieve_gene_emb_from_cell_emb
+from nichejepa.utils import retrieve_gene_emb
 
 
-class TestRetrieveGeneEmbFromCellEmb(unittest.TestCase):
+class TestRetrieveGeneEmb(unittest.TestCase):
     def test_basic_cell_case(self):
         tokens = torch.tensor([[1, 3, 0, 5, 4, 3],
                                [3, 5, 0, 2, 3, 0]])
@@ -15,7 +15,7 @@ class TestRetrieveGeneEmbFromCellEmb(unittest.TestCase):
         expected_emb = torch.tensor(
             [[0.3, 0.1],
              [0.4, 0.1]])
-        computed_emb = retrieve_gene_emb_from_cell_emb(
+        computed_emb = retrieve_gene_emb(
             tokens=tokens,
             seq_len_cell=3,
             has_cls=False,
