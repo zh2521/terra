@@ -3,7 +3,8 @@ import requests
 
 
 def get_ensembl_ids(gene_names: list,
-                    species: str="homo_sapiens") -> dict:
+                    species: str="homo_sapiens"
+                    ) -> dict:
     """
     Get gene Ensembl IDs based on gene names via Ensembl REST API.
 

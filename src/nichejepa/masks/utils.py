@@ -23,6 +23,7 @@ def apply_masks(x, masks):
 
     Returns
     ----------
+        Masked input tensor.
     """
     all_x = []
     for m in masks:

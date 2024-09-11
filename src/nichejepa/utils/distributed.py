@@ -1,20 +1,24 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a Joint-Embedding Predictive Architecture.
+Adapted from Assran, M. et al. Self-supervised learning from images with a
+Joint-Embedding Predictive Architecture.
 Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/utils/distributed.py (05.06.2024).
+https://github.com/facebookresearch/ijepa/blob/main/src/utils/distributed.py
+(05.06.2024).
 """
 
+import math
 import os
+from typing import Iterator, List, Optional
 
 import torch
 import torch.distributed as dist
-
-from logging import getLogger
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Dataset
-from typing import Iterator, List, Optional
-import math
 from transformers import BatchEncoding
+
+from logging import getLogger
+
+
 logger = getLogger()
 
 
@@ -59,7 +63,8 @@ class AllGather(torch.autograd.Function):
             and (dist.get_world_size() > 1)
         ):
             x = x.contiguous()
-            outputs = [torch.zeros_like(x) for _ in range(dist.get_world_size())]
+            outputs = [
+                torch.zeros_like(x) for _ in range(dist.get_world_size())]
             dist.all_gather(outputs, x)
             return torch.cat(outputs, 0)
         return x
@@ -115,10 +120,12 @@ class AllReduce(torch.autograd.Function):
         return grads
 
 class CustomDistributedLengthGroupedSampler(DistributedSampler):
-    r"""
-    Distributed Sampler that samples indices in a way that groups together features of the dataset of roughly the same
-    length while keeping a bit of randomness.
-    This class was adapted from https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py
+    """
+    Distributed Sampler that samples indices in a way that groups together
+    features of the dataset of roughly the same length while keeping a bit of
+    randomness.
+    This class was adapted from
+    https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py.
     """
 
     # Copied and adapted from PyTorch DistributedSampler.
@@ -126,23 +133,25 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         self,
         dataset: Dataset,
         batch_size: int,
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: Optional[int]=None,
+        rank: Optional[int]=None,
         seed: int = 0,
-        hugging_face_dataset: Optional[Dataset] = None,
-        drop_last: bool = False,
+        hugging_face_dataset: Optional[Dataset]=None,
+        drop_last: bool=False,
         incl_cell_seq: bool=False,
         incl_neighborhood_seq: bool=False,
-        lengths: Optional[List[int]] = None,
-        model_input_name: Optional[str] = None,
-    ):
+        lengths: Optional[List[int]]=None,
+        model_input_name: Optional[str]=None,
+        ):
         if num_replicas is None:
             if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
+                raise RuntimeError(
+                    "Requires distributed package to be available")
             num_replicas = dist.get_world_size()
         if rank is None:
             if not dist.is_available():
-                raise RuntimeError("Requires distributed package to be available")
+                raise RuntimeError(
+                    "Requires distributed package to be available")
             rank = dist.get_rank()
         self.dataset = dataset
         self.batch_size = batch_size
@@ -178,7 +187,9 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
 
-        indices = get_length_grouped_indices(self.lengths, self.batch_size, generator=g)
+        indices = get_length_grouped_indices(self.lengths,
+                                             self.batch_size,
+                                             generator=g)
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
@@ -195,20 +206,27 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         return iter(indices)
 
 
-def get_length_grouped_indices(
-    lengths, batch_size, mega_batch_mult=None, generator=None
-):
+def get_length_grouped_indices(lengths,
+                               batch_size,
+                               mega_batch_mult=None,
+                               generator=None
+                               ):
     """
-    Return a list of indices so that each slice of :obj:`batch_size` consecutive indices correspond to elements of
+    Return a list of indices so that each slice of :obj:`batch_size` consecutive
+    indices correspond to elements of
     similar lengths. To do this, the indices are:
     - randomly permuted
     - grouped in mega-batches of size :obj:`mega_batch_mult * batch_size`
     - sorted by length in each mega-batch
-    The result is the concatenation of all mega-batches, with the batch of :obj:`batch_size` containing the element of
-    maximum length placed first, so that an OOM happens sooner rather than later.
-    This class was adapted from https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py
+    The result is the concatenation of all mega-batches, with the batch of
+    :obj:`batch_size` containing the element of maximum length placed first, so
+    that an OOM happens sooner rather than later.
+    
+    This class was adapted from
+    https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py.
     """
-    # Default for mega_batch_mult: 50 or the number to get 4 megabatches, whichever is smaller.
+    # Default for mega_batch_mult: 50 or the number to get 4 megabatches,
+    # whichever is smaller.
     if mega_batch_mult is None:
         # mega_batch_mult = min(len(lengths) // (batch_size * 4), 50)
         mega_batch_mult = min(len(lengths) // (batch_size * 4), 1000)
@@ -216,7 +234,8 @@ def get_length_grouped_indices(
         if mega_batch_mult == 0:
             mega_batch_mult = 1
 
-    # We need to use torch for the random part as a distributed sampler will set the random seed for torch.
+    # We need to use torch for the random part as a distributed sampler will set
+    # the random seed for torch.
     indices = torch.randperm(len(lengths), generator=generator)
     megabatch_size = mega_batch_mult * batch_size
     megabatches = [
@@ -229,7 +248,8 @@ def get_length_grouped_indices(
     ]
 
     # The rest is to get the biggest batch first.
-    # Since each megabatch is sorted by descending length, the longest element is the first
+    # Since each megabatch is sorted by descending length, the longest element
+    # is the first
     megabatch_maximums = [lengths[megabatch[0]] for megabatch in megabatches]
     max_idx = torch.argmax(torch.tensor(megabatch_maximums)).item()
     # Switch to put the longest element in first position
@@ -239,4 +259,3 @@ def get_length_grouped_indices(
     )
 
     return [item for sublist in megabatches for item in sublist]
-

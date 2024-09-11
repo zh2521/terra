@@ -22,7 +22,8 @@ class CellNeighborhoodDataset(Dataset):
                  seq_len_neighborhood: int=0,
                  has_cls: bool=True,
                  sampling_strategy: Optional[str]=None,
-                 sampling_seed: Optional[int]=42):
+                 sampling_seed: Optional[int]=42
+                 ):
         """
         Torch CellNeighborhoodDataset class.
 
@@ -85,10 +86,10 @@ class CellNeighborhoodDataset(Dataset):
                 n_nonzero_tokens += 1
                 
                 # Create segment labels: 1 for cell tokens and <cls> token and 2
-                # for neighborhood tokens
+                # for neighborhood tokens (maybe this needs to be changed)
                 labels = torch.cat(
                     (torch.ones(self.seq_len_cell + 1),
-                    torch.ones(self.seq_len_neighborhood) * 2)).int()                
+                     torch.ones(self.seq_len_neighborhood) * 2)).int()
             else:
                 # Create segment labels: 1 for cell tokens, 2 for neighborhood tokens
                 labels = torch.cat(
@@ -152,7 +153,7 @@ class CellNeighborhoodDataset(Dataset):
                 n_nonzero_tokens += 1
                 
                 # Create segment labels: 2 for neighborhood tokens and <cls>
-                # token
+                # token (maybe this needs to be changed)
                 labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
             else:
                 # Create segment labels: 2 for neighborhood tokens
@@ -166,7 +167,8 @@ class CellNeighborhoodDataset(Dataset):
             raise ValueError("Neither cell nor neighborhood tokens included.")      
         
     def _get_cell_tokens(self, 
-                         item: int) -> Tuple[List, int]:
+                         item: int
+                         ) -> Tuple[List, int]:
         """
         Get cell tokens and number of nonzero cell tokens for a given cell.
 
@@ -180,30 +182,36 @@ class CellNeighborhoodDataset(Dataset):
         gene_tokens_cell:
             List of cell tokens.
         """
-        # If cell sequence length is greater than the number of cell tokens in the HF dataset, use all tokens
+        # If cell sequence length is greater than the number of cell tokens in
+        # the HF dataset, use all tokens
         if self.seq_len_cell >= len(self.dataset[item]["gene_tokens_cell"]):
             gene_tokens_cell = self.dataset[item]["gene_tokens_cell"]
             
         # Otherwise, use a subset of tokens
         else:
-            # If sampling strategy is not specified, use all tokens upto specified cell sequence lengths
+            # If sampling strategy is not specified, use all tokens up to
+            # specified cell sequence lengths
             if self.sampling_strategy is None:
-                gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]
+                gene_tokens_cell = self.dataset[item][
+                    "gene_tokens_cell"][:self.seq_len_cell]
                 
             # Otherwise, sample a subset of tokens based on the sampling strategy
             else:
-                gene_tokens_cell = self.create_sampled_token_sequence(self.dataset[item]["gene_tokens_cell"],
-                                                                    self.dataset[item]["n_nonzero_cell_tokens"],
-                                                                    self.seq_len_cell,
-                                                                    self.sampling_strategy,
-                                                                    self.sampling_seed)
+                gene_tokens_cell = self.create_sampled_token_sequence(
+                    self.dataset[item]["gene_tokens_cell"],
+                    self.dataset[item]["n_nonzero_cell_tokens"],
+                    self.seq_len_cell,
+                    self.sampling_strategy,
+                    self.sampling_seed)
                 
         return gene_tokens_cell
 
     def _get_neighborhood_tokens(self,
-                                item: int) -> Tuple[List, int]:
+                                item: int
+                                ) -> Tuple[List, int]:
         """ 
-        Get neighborhood tokens and number of nonzero neighborhood tokens for a given cell.
+        Get neighborhood tokens and number of nonzero neighborhood tokens for a
+        given cell.
         
         Parameters
         -----------
@@ -215,27 +223,31 @@ class CellNeighborhoodDataset(Dataset):
         gene_tokens_neighborhood:
             List of neighborhood tokens.
         """
-        # If neighborhood sequence length is greater than the number of neighborhood tokens in the HF dataset, use all tokens
+        # If neighborhood sequence length is greater than the number of
+        neighborhood tokens in the HF dataset, use all tokens
         if self.seq_len_neighborhood >= len(self.dataset[item]["gene_tokens_neighborhood"]):
             gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"]
             
         # Otherwise, use a subset of tokens
         else:
-            # If sampling strategy is not specified, use all tokens upto specified neighborhood sequence lengths
+            # If sampling strategy is not specified, use all tokens up to
+            # specified neighborhood sequence lengths
             if self.sampling_strategy is None:
                 gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
             # Otherwise, sample a subset of tokens based on the sampling strategy
             else:
-                gene_tokens_neighborhood = self.create_sampled_token_sequence(self.dataset[item]["gene_tokens_neighborhood"],
-                                                                            self.dataset[item]["n_nonzero_neighborhood_tokens"],
-                                                                            self.seq_len_neighborhood,
-                                                                            self.sampling_strategy,
-                                                                            self.sampling_seed)
+                gene_tokens_neighborhood = self.create_sampled_token_sequence(
+                    self.dataset[item]["gene_tokens_neighborhood"],
+                    self.dataset[item]["n_nonzero_neighborhood_tokens"],
+                    self.seq_len_neighborhood,
+                    self.sampling_strategy,
+                    self.sampling_seed)
         
         return gene_tokens_neighborhood
 
     def get_num_nonzero_cell_tokens(self,
-                                     item: int) -> int:
+                                    item: int
+                                    ) -> int:
         """
         Get the number of nonzero cell tokens for a given cell.
         
@@ -253,11 +265,14 @@ class CellNeighborhoodDataset(Dataset):
         # n_nonzero_cell_tokens -> self.dataset[item]["n_nonzero_cell_tokens"] if self.seq_len_cell >= len(self.dataset[item]["gene_tokens_cell"])
         # n_nonzero_cell_tokens -> self.dataset[item]["n_nonzero_cell_tokens"] if self.seq_len_cell >= self.dataset[item]["n_nonzero_cell_tokens"]
         # n_nonzero_cell_tokens -> self.seq_len_cell if self.seq_len_cell < self.dataset[item]["n_nonzero_cell_tokens"]
-        n_nonzero_cell_tokens = min(self.dataset[item]["n_nonzero_cell_tokens"], self.seq_len_cell)
+        n_nonzero_cell_tokens = min(
+            self.dataset[item]["n_nonzero_cell_tokens"],
+            self.seq_len_cell)
         return n_nonzero_cell_tokens
 
     def get_num_nonzero_neighborhood_tokens(self,
-                                            item: int) -> int:
+                                            item: int
+                                            ) -> int:
         """
         Get the number of nonzero neighborhood tokens for a given cell.
         
@@ -275,15 +290,19 @@ class CellNeighborhoodDataset(Dataset):
         # n_nonzero_neighborhood_tokens -> self.dataset[item]["n_nonzero_neighborhood_tokens"] if self.seq_len_neighborhood >= len(self.dataset[item]["gene_tokens_neighborhood"])
         # n_nonzero_neighborhood_tokens -> self.dataset[item]["n_nonzero_neighborhood_tokens"] if self.seq_len_neighborhood >= self.dataset[item]["n_nonzero_neighborhood_tokens"]
         # n_nonzero_neighborhood_tokens -> self.seq_len_neighborhood if self.seq_len_neighborhood < self.dataset[item]["n_nonzero_neighborhood_tokens"]
-        n_nonzero_neighborhood_tokens = min(self.dataset[item]["n_nonzero_neighborhood_tokens"], self.seq_len_neighborhood)
+        n_nonzero_neighborhood_tokens = min(
+            self.dataset[item]["n_nonzero_neighborhood_tokens"],
+            self.seq_len_neighborhood)
         return n_nonzero_neighborhood_tokens
             
-    def create_sampled_token_sequence(self, 
-                                        tokens: List,
-                                        n_nonzero_tokens: int,
-                                        size: int,
-                                        sampling_strategy: str = "normalized_count_rank_sampling",
-                                        seed: int = 42) -> List:
+    def create_sampled_token_sequence(
+        self,
+        tokens: List,
+        n_nonzero_tokens: int,
+        size: int,
+        sampling_strategy: str="normalized_count_rank_sampling",
+        seed: int=42
+        ) -> List:
         """
         Sample a subset of tokens based on the sampling strategy and seed.
 
@@ -323,18 +342,21 @@ class CellNeighborhoodDataset(Dataset):
             weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)]
             assert np.isclose(np.sum(weights), 1.0)
             
-            # Sample seq_cell_len or seq_neighborhood token indices based on weights
-            sampled_indices = np.random.choice(np.arange(n_nonzero_tokens),
-                                                size=size,
-                                                p=weights,
-                                                replace=False)
+            # Sample seq_cell_len or seq_neighborhood token indices based on
+            # weights
+            sampled_indices = np.random.choice(
+                np.arange(n_nonzero_tokens),
+                size=size,
+                p=weights,
+                replace=False)
             
             # Sort sampled indices to preserve rank order
             sampled_indices = np.sort(sampled_indices)
             sampled_tokens = [tokens[i] for i in sampled_indices]
             return sampled_tokens
         else:
-            raise ValueError(f"{sampling_strategy} is an invalid sub-sampling strategy.")
+            raise ValueError(
+                f"{sampling_strategy} is an invalid sub-sampling strategy.")
 
 def make_cell_neighborhood_dataset(
     batch_size: int,
@@ -349,10 +371,10 @@ def make_cell_neighborhood_dataset(
     seq_len_cell: int=0,
     seq_len_neighborhood: int=0,
     has_cls: bool=True,
-    distributed: bool=True) -> Tuple[
-        CellNeighborhoodDataset,
-        torch.utils.data.DataLoader,
-        Optional[torch.utils.data.distributed.DistributedSampler]]:
+    distributed: bool=True
+    ) -> Tuple[CellNeighborhoodDataset,
+               torch.utils.data.DataLoader,
+               Optional[torch.utils.data.distributed.DistributedSampler]]:
     """
     Convert Huggingface dataset into a torch CellNeighborhoodDataset object and
     create corresponding data loader.
@@ -366,8 +388,6 @@ def make_cell_neighborhood_dataset(
         labels.
     vocab_size:
         Size of the vocabulary.
-    seq_len:
-        Sequence length of all tokens.
     collator:
         See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
     pin_mem:
@@ -405,16 +425,14 @@ def make_cell_neighborhood_dataset(
                                       has_cls=has_cls)
     
     if distributed:
-        #dist_sampler = torch.utils.data.distributed.DistributedSampler(dataset=dataset,
-        #                                                               num_replicas=world_size,
-        #                                                               rank=rank)
-        dist_sampler = CustomDistributedLengthGroupedSampler(dataset,
-                                                             batch_size,
-                                                             hugging_face_dataset=data,
-                                                             num_replicas=world_size,
-                                                             incl_cell_seq=incl_cell_seq,
-                                                             incl_neighborhood_seq=incl_neighborhood_seq,
-                                                             rank=rank)
+        dist_sampler = CustomDistributedLengthGroupedSampler(
+            dataset,
+            batch_size,
+            hugging_face_dataset=data,
+            num_replicas=world_size,
+            incl_cell_seq=incl_cell_seq,
+            incl_neighborhood_seq=incl_neighborhood_seq,
+            rank=rank)
 
         data_loader = torch.utils.data.DataLoader(dataset,
                                                   collate_fn=collator,
@@ -425,6 +443,7 @@ def make_cell_neighborhood_dataset(
                                                   num_workers=num_workers,
                                                   persistent_workers=False)
         logger.info('Data loader created.')
+
         return dataset, data_loader, dist_sampler
     else:
         data_loader = torch.utils.data.DataLoader(dataset,
@@ -435,4 +454,5 @@ def make_cell_neighborhood_dataset(
                                                   num_workers=num_workers,
                                                   persistent_workers=False)
         logger.info('Data loader created.')
+        
         return dataset, data_loader
