@@ -220,18 +220,15 @@ def infer(args: dict,
         cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
 
-        # Load niche and cell type labels based on the length of udata and the
-        # provided tokens
-        if len(udata) == 4:
+        # Load niche and cell type labels based on specified sequence lengths
+        if (args['data']['seq_len_cell'] > 0) & (
+            args['data']['seq_len_neighborhood'] > 0):
+            cell_type_label.extend(udata[2])
+            niche_label.extend(udata[3])
+        elif args['data']['seq_len_cell'] > 0:
+            cell_type_label.extend(udata[2])
+        elif args['data']['seq_len_neighborhood'] > 0:
             niche_label.extend(udata[2])
-            cell_type_label.extend(udata[3])
-        elif len(udata) == 3:
-            if args['data']['seq_len_cell'] > 0:
-                niche_label.extend(None * len(udata[0]))
-                cell_type_label.extend(udata[2])
-            elif args['data']['seq_len_neighborhood'] > 0:
-                cell_type_label.extend(None * len(udata[0]))
-                niche_label.extend(udata[2])
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
@@ -273,7 +270,7 @@ def infer(args: dict,
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,
-                                                            cell_mask)
+                                                         cell_mask)
                     neighborhood_emb = compute_mean_unmasked_emb(
                         emb,
                         neighborhood_mask)
@@ -322,7 +319,7 @@ def infer(args: dict,
                     if itr == 0:
                         all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
                     else:
-                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                    
+                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                  
                     
     adata = anndata.AnnData(
         obs=pd.DataFrame({

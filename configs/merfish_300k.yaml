@@ -8,8 +8,8 @@ data:
   seq_len_cell: 411
   seq_len_neighborhood: 809
   has_cls: True
-  sample_size: 5000
-  sample_subset: True
+  sample_size: 300000
+  sample_subset: False
   random_state: 0
   stratify: False
   split: 0.2
