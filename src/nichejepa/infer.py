@@ -17,13 +17,13 @@ from tqdm import tqdm
 
 from .datasets.cell_neighborhood_dataset import (CellNeighborhoodDataset,
                                                  make_cell_neighborhood_dataset)
-from .helper import load_checkpoint, init_model
+from .helper import init_model, load_checkpoint
 from .masks.multigene import MaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
-                              compute_mean_nonpadding_emb,
-                              compute_rank_based_weights,
-                              retrieve_gene_emb_from_cell_emb)
+                              compute_mean_unmasked_emb,
+                              compute_unmasked_rank_based_weights,
+                              retrieve_gene_emb)
 from .utils.logging import CSVLogger
 
 
@@ -42,20 +42,28 @@ def infer(args: dict,
           dataset: CellNeighborhoodDataset,
           cell_gene_ids: list=[],
           neighborhood_gene_ids: list=[],
-          agg_type: Literal['avg', 'weighted_avg', 'cls']='avg',
+          agg_type: Literal['cls', 'avg', 'weighted_avg']='avg',
           feature_norm: bool=False
-          ):
+          ) -> anndata.AnnData:
     """
-    Evaluate the model.
+    Use a trained model for inference. Run forward pass on a given dataset and
+    return cell, neighborhood and (optionally) gene embeddings (cell and
+    neighborhood gene embeddings).
 
     Parameters
     -----------
     args:
-        Dictionary containing the hyperparams from the config file.
+        Dictionary containing the hyperparameters from the config file.
     dataset:
-        CellNeighborhoodDataset.
+        CellNeighborhoodDataset for which embeddings will be inferred.
+    cell_gene_ids:
+        List with gene IDs for which cell gene embeddings will be retrived.
+    neighborhood_gene_ids:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrived.
     agg_type:
-        Specifies how cell embeddings are retrieved from gene embeddings.
+        Specifies how (aggregated) cell and neighborhood embeddings are computed
+        from individual gene embeddings.
     feature_norm:
         If 'True', apply feature norm in the last embedding layer.
 
@@ -67,7 +75,6 @@ def infer(args: dict,
     # ----------------------------- #
     #  Load params from config file
     # ----------------------------- #
-
     # Load meta params
     use_bfloat16 = args['meta']['use_bfloat16']
     model_name = args['meta']['model_name']
@@ -83,24 +90,24 @@ def infer(args: dict,
     pin_mem = args['data']['pin_mem']
     num_workers = args['data']['num_workers']
     data_set_name = args['data']['data_set_name']
-    num_epochs = args['optimization']['epochs']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     has_cls = args['data']['has_cls']
 
     # Load optimization params
     learnable = args['optimization']['learnable']
+    num_epochs = args['optimization']['epochs']
 
     # Load mask params
     n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
-
-    # ----------------------------- #
-    #  Load model and data loader
     # ----------------------------- #
 
+    # ------------------------------------ #
+    #  Load model and initialize data loader
+    # ------------------------------------ #
     # Set device
     if not torch.cuda.is_available():
         device = torch.device('cpu')
@@ -135,13 +142,14 @@ def infer(args: dict,
 
     os.makedirs(save_folder, exist_ok=True)
     tag = args['logging']['write_tag']
-    dump = os.path.join(folder, f'params-ijepa.yaml')
+    dump = os.path.join(folder, f'params-nichejepa.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
     # Define checkpointing path
     latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
-    load_path = os.path.join(folder, r_file) if r_file is not None else latest_path
+    load_path = (os.path.join(folder, r_file) if r_file is not None else
+        latest_path)
 
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
@@ -194,11 +202,11 @@ def infer(args: dict,
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
+    # ------------------------------------ #
 
     # ----------------------------- #
     #  Retrieve embeddings
     # ----------------------------- #
-
     niche_label = []
     cell_type_label = []
     all_cell_emb_list = []
@@ -212,19 +220,17 @@ def infer(args: dict,
         cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
 
-        # Load niche and cell type labels based on the length of udata and the
-        # provided tokens
-        if len(udata) == 4:
+        # Load niche and cell type labels based on specified sequence lengths
+        if (args['data']['seq_len_cell'] > 0) & (
+            args['data']['seq_len_neighborhood'] > 0):
+            cell_type_label.extend(udata[2])
+            niche_label.extend(udata[3])
+        elif args['data']['seq_len_cell'] > 0:
+            cell_type_label.extend(udata[2])
+        elif args['data']['seq_len_neighborhood'] > 0:
             niche_label.extend(udata[2])
-            cell_type_label.extend(udata[3])
-        elif len(udata) == 3:
-            if args['data']['seq_len_cell'] > 0:
-                niche_label.extend(None * len(udata[0]))
-                cell_type_label.extend(udata[2])
-            elif args['data']['seq_len_neighborhood'] > 0:
-                cell_type_label.extend(None * len(udata[0]))
-                niche_label.extend(udata[2])
 
+        # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
             emb_list = target_encoder.module.return_multi_layer_emb(
@@ -235,6 +241,7 @@ def infer(args: dict,
                 emb_list[-1] = F.layer_norm(emb_list[-1],
                                             (emb_list[-1].size(-1),))
 
+        # Aggregate gene embeddings into cell and neighborhood embeddings
         for i, emb in enumerate(emb_list):
             # Keep only <cls> token; at the moment there is only 1 <cls> token
             if agg_type == "cls":
@@ -261,16 +268,23 @@ def infer(args: dict,
                     seq_len_cell=seq_len_cell,
                     has_cls=has_cls)
 
-                if agg_type == "weighted_avg":
-                    weights = compute_rank_based_weights(
-                        cell_neighborhood_tokens)
-                    emb = emb * weights.unsqueeze(-1)
-
-            cell_emb, _ = compute_mean_nonpadding_emb(emb,
-                                                      cell_mask)
-            neighborhood_emb, _ = compute_mean_nonpadding_emb(
-                emb,
-                neighborhood_mask)
+                if agg_type == 'avg':
+                    cell_emb = compute_mean_unmasked_emb(emb,
+                                                         cell_mask)
+                    neighborhood_emb = compute_mean_unmasked_emb(
+                        emb,
+                        neighborhood_mask)
+                elif agg_type == "weighted_avg":
+                    cell_weights = compute_unmasked_rank_based_weights(
+                        cell_neighborhood_tokens, cell_mask)
+                    cell_emb, _ = compute_mean_unmasked_emb(
+                        emb * cell_weights.unsqueeze(-1),
+                        cell_mask)
+                    neighborhood_weights = compute_unmasked_rank_based_weights(
+                        cell_neighborhood_tokens, neighborhood_mask)
+                    neighborhood_emb, _ = compute_mean_unmasked_emb(
+                        emb * neighborhood_weights.unsqueeze(-1),
+                        neighborhood_mask)
 
             # Concat layer-specific embeddings across batches
             if itr == 0:
@@ -283,9 +297,9 @@ def infer(args: dict,
             # Store cell and neighborhood gene embeddings of last layer
             if i == (len(emb_list) - 1):
                 for gene_id in cell_gene_ids:
-                    gene_emb = retrieve_gene_emb_from_cell_emb(
-                        cell_neighborhood_tokens=cell_neighborhood_tokens,
-                        cell_emb=emb,
+                    gene_emb = retrieve_gene_emb(
+                        tokens=cell_neighborhood_tokens,
+                        emb=emb,
                         gene_id=gene_id,
                         gene_type="cell",
                         has_cls=has_cls,
@@ -295,9 +309,9 @@ def infer(args: dict,
                     else:
                         all_cell_gene_emb_dict[gene_id].append(gene_emb)
                 for gene_id in neighborhood_gene_ids:
-                    gene_emb = retrieve_gene_emb_from_cell_emb(
-                        cell_neighborhood_tokens=cell_neighborhood_tokens,
-                        cell_emb=emb,
+                    gene_emb = retrieve_gene_emb(
+                        tokens=cell_neighborhood_tokens,
+                        emb=emb,
                         gene_id=gene_id,
                         gene_type="neighborhood",
                         has_cls=has_cls,
@@ -305,7 +319,7 @@ def infer(args: dict,
                     if itr == 0:
                         all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
                     else:
-                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                    
+                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                  
                     
     adata = anndata.AnnData(
         obs=pd.DataFrame({

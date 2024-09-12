@@ -54,7 +54,7 @@ from .utils.tensors import repeat_interleave_batch
 
 log_timings = True
 log_freq = 10
-checkpoint_freq = 50
+checkpoint_freq = 5
 
 
 _GLOBAL_SEED = 0
@@ -112,8 +112,6 @@ def train(args: dict,
     has_cls = args['data']['has_cls']
     data_set_name = args['data']['data_set_name']
     vocab_size = args['data']['vocab_size']
-    incl_cell_seq = args['data']['incl_cell_seq']
-    incl_neighborhood_seq = args['data']['incl_neighborhood_seq']
 
     # Load mask params
     n_targets = args['mask']['n_targets']

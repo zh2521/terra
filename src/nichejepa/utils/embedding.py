@@ -6,28 +6,29 @@ import pandas as pd
 import torch
 
 
-def compute_rank_based_weights(tokens: torch.Tensor) -> torch.Tensor:
+def compute_unmasked_rank_based_weights(tokens: torch.Tensor,
+                                        mask: torch.Tensor
+                                        ) -> torch.Tensor:
     """
-    Compute rank-based weights for a 2D tensor of tokens.
+    Compute unmasked rank-based weights for a 2D tensor of tokens.
 
     Parameters
     -----------
     tokens:
-        A 2D tensor where each row represents a sequence of tokens. The tokens
-        are gene_id of cell or neighborhood
+        A 2D tensor where each row represents a sequence of tokens. 
+    mask:
+        A 2D boolean mask tensor, indicating elements to be included in the
+        rank-based weighting.
 
     Returns
     -----------
-    A 2D tensor of the same shape as `tokens` containing the computed weights (
-    weights sum up to 1).
+    weights:
+        A 2D tensor of the same shape as `tokens`, containing the computed
+        weights for unmasked positions (weights sum up to 1).
     """
-    # Create a mask where each element is True (1) if the corresponding token is
-    # non-zero, and False (0) if it is zero (padding token)
-    mask = tokens != 0
-
     # Compute cumulative sum along the sequence dimension (dim=1), which gives
-    # ranks for non-zero tokens. Each token's rank is incremented based on its
-    # position in the sequence, with padding tokens maintaining a rank of 0
+    # ranks for selected tokens. Each token's rank is incremented based on its
+    # position in the sequence
     ranks = mask.cumsum(dim=1).float() * mask.float()
 
     # Find the maximum rank in each sequence, keeping the dimension for
@@ -43,74 +44,73 @@ def compute_rank_based_weights(tokens: torch.Tensor) -> torch.Tensor:
     # 1e-9 is added to avoid division by zero.
     weights = (rank_max - ranks + 1) / (rank_sum + 1e-9)
 
-    # Apply the mask to ensure that padding tokens receive a weight of 0
+    # Apply the mask to ensure that unselected tokens receive a weight of 0
     weights = weights * mask.float()
 
-    # Return the computed weights
     return weights
 
 
-def compute_mean_nonpadding_emb(embs: torch.Tensor,
-                                mask: torch.Tensor,
-                                dim=1):
+def compute_mean_unmasked_emb(emb: torch.Tensor,
+                              mask: torch.Tensor,
+                              ) -> torch.Tensor:
     """
-    Compute the mean of non-padding embeddings.
+    Compute the mean of unmasked embedding positions.
     
     Parameters
     -----------
-    embs (torch.Tensor): The input embeddings tensor (3D).
-    mask (torch.Tensor): A boolean mask tensor indicating the positions that mean should computed (same size as the relevant dimension of embs).
-    dim (int): The dimension along which to compute the mean.
+    emb:
+        The input embeddings tensor (3D).
+    mask:
+        A 2D boolean mask tensor indicating the sequence positions that mean
+        should be computed over.
     
     Returns
     -----------
-    torch.Tensor: The mean embeddings tensor.
-    torch.Tensor: Number of genes that used in computing average
+    mean_emb:
+        The mean embedding tensor.
 
-    Raises:
-    ValueError: If the items tensor is not 3D.
+    Raises
+    -----------
+    ValueError: If the emb tensor is not 3D.
     """
-    # Use broadcasting to sum embeddings across non-padding positions
-    if embs.dim() == 3:
-        # If the embeddings tensor has 3 dimensions (batch_size, sequence_length, embedding_dim),
-        # broadcast the mask to match the dimensions of embs.
-        # The mask tensor is initially (batch_size, sequence_length), so we unsqueeze to (batch_size, sequence_length, 1).
-        masked_embs = embs * mask.unsqueeze(2)  # Broadcasting the mask along the embedding dimension
+    # Use broadcasting to sum embeddings across unmasked positions
+    if emb.dim() == 3:
+        # If the embeddings tensor has 3 dimensions (batch_size,
+        # sequence_length, embedding_dim), broadcast the mask to match the
+        # dimensions of emb. The mask tensor is initially (batch_size,
+        # sequence_length), so we unsqueeze to (batch_size, sequence_length, 1)
+        masked_emb = emb * mask.unsqueeze(2) # broadcast the mask along the
+                                             # embedding dimension
 
-        # Sum the masked embeddings along the specified dimension
-        sum_embs = masked_embs.sum(dim)
+        # Sum the masked embeddings along the sequence dimension
+        sum_emb = masked_emb.sum(1)
 
-        # Calculate the mean by dividing the summed embeddings by the number of non-padding positions
-        # The mask is summed along the same dimension to count non-padding tokens, and view(-1, 1) ensures
-        # The resulting tensor has the correct dimensions for broadcasting during division.
-        # The + 1e-9 will handle the case that we are reterriving gene that may mask.sum(dim).view(-1, 1).float() be zero
-        # then we won't have INF value
-        mean_embs = sum_embs / (mask.sum(dim).view(-1, 1).float() + 1e-9)
+        # Calculate the mean by dividing the summed embeddings by the number of
+        # unmasked positions. The mask is summed to count unmasked tokens, and
+        # view(-1, 1) ensures the resulting tensor has the correct dimensions
+        # for broadcasting during division. The + 1e-9 will handle the case
+        # where we are retrieving a gene that may have
+        # mask.sum(dim).view(-1, 1).float() = 0
+        mean_emb = sum_emb / (mask.sum(1).view(-1, 1).float() + 1e-9)
 
     else:
-        # Raise an error if the input embeddings tensor is not 3D, as this function expects a 3D tensor
-        raise ValueError('Expected a 3D tensor for embs, but got a tensor with {} dimensions.'.format(embs.dim()))
+        raise ValueError('Expected a 3D tensor for emb, but got a tensor with'
+                         f'{emb.dim()} dimensions.')
 
-    # Return the calculated mean embeddings and the number of unmasked values for each row when the mask is computed for retrieve_gene.
-    # This value serves as a gene_id identifier, indicating the cells where the gene is present.
-    # A value of zero means that the gene is not present, while a value of one means that the sample contains the gene.
-    # This value in upper function could be used as gene_count
-
-    return mean_embs, mask.sum(dim)
+    return mean_emb
 
 
-def create_binary_selection_mask(
-    tokens: torch.Tensor,
-    seq_len_cell: int,
-    has_cls: bool,
-    selection_type: Literal['cls',
-                            'agg_cell',
-                            'agg_neighborhood',
-                            'gene_cell',
-                            'gene_neighborhood'],
-    top_k: Optional[int]=None,
-    gene_id: Optional[int]=None,
-    ) -> torch.Tensor:
+def create_binary_selection_mask(tokens: torch.Tensor,
+                                 seq_len_cell: int,
+                                 has_cls: bool,
+                                 selection_type: Literal['cls',
+                                                         'agg_cell',
+                                                         'agg_neighborhood',
+                                                         'gene_cell',
+                                                         'gene_neighborhood'],
+                                 top_k: Optional[int]=None,
+                                 gene_id: Optional[int]=None
+                                 ) -> torch.Tensor:
     """
     Create a selection mask for cell and neighborhood tokens based on
     specificiations.
@@ -118,12 +118,18 @@ def create_binary_selection_mask(
     Parameters
     -----------
     tokens:
-        2D input tokens to be masked.
+        A 2D tensor where each row represents a sequence of tokens.
     seq_len_cell:
+        The length of cell tokens in the sequence.
     has_cls:
+        If 'True', sequence contains a <cls> token at position 0.
     selection_type:
+        Defines the type of embedding, which is relevant for the mask creation.
     top_k:
+        If specified, only 'top_k' of the selected tokens are retrieved.
     gene_id:
+        The ID of the gene for which the embedding is retrieved. Only relevant
+        if 'selection_type' is 'gene_cell' or 'gene_neighborhood'.
 
     Returns
     -----------
@@ -171,42 +177,59 @@ def create_binary_selection_mask(
     return selection_mask
 
 
-def retrieve_gene_emb_from_cell_emb(cell_neighborhood_tokens: torch.Tensor,
-                                    cell_emb: torch.Tensor,
-                                    gene_id: int,
-                                    gene_type: Literal["cell", "neighborhood"],
-                                    has_cls: bool,
-                                    seq_len_cell: int
-                                    ) -> torch.Tensor:
+def retrieve_gene_emb(tokens: torch.Tensor,
+                      seq_len_cell: int,
+                      has_cls: bool,
+                      emb: torch.Tensor,
+                      gene_type: Literal["cell", "neighborhood"],
+                      gene_id: int,
+                      ) -> torch.Tensor:
     """
-    Retrieve contextual gene embeddings from contextual cell embeddings based
-    on specified gene IDs and gene types.
+    Retrieve contextual gene embeddings for a given gene based on a specified
+    gene ID and gene type.
 
     Parameters
     -----------
-    cell_neighborhood_tokens:
-    cell_emb:
-    gene_id:
-    gene_type:
-    has_cls:
+    tokens:
+        A 2D tensor where each row represents a sequence of tokens.
     seq_len_cell:
+        The length of cell tokens in the sequence.
+    has_cls:
+        If 'True', sequence contains a <cls> token at position 0.
+    emb:
+        A 3D tensor containg the embeddings of all genes.
+    gene_type:
+        Defines whether to retrieve the cell or neighborhood gene embedding for
+        the given gene ID.
+    gene_id:
+        Gene ID of the gene for which the embedding will be retrieved.
 
     Returns
     --------
     gene_emb:
+        The cell or neighborhood embedding of the gene with the given gene ID.
     """
     gene_mask = create_binary_selection_mask(
-        cell_neighborhood_tokens,
-        selection_type=f"gene_{gene_type}",
-        gene_id=gene_id,
+        tokens=tokens,
         seq_len_cell=seq_len_cell,
-        has_cls=has_cls)
+        has_cls=has_cls,
+        selection_type=f"gene_{gene_type}",
+        gene_id=gene_id)
 
-    gene_indices = gene_mask.argmax(dim=1) 
-    gene_emb_selection = cell_emb.gather(
+    gene_indices = torch.argmax(gene_mask.to(torch.int),
+                                dim=1,
+                                keepdim=True) # shape: (3, 1)
+
+    # Use gather to get the correct embeddings for each cell based on the
+    # indices (if gene is not present, the index will be wrong but is
+    # overwritten below)
+    gene_emb = torch.gather(
+        emb,
         1,
-        gene_indices.unsqueeze(-1).unsqueeze(-1).expand(
-            -1, -1, cell_emb.size(2)))
-    gene_emb = gene_emb_selection.squeeze(1)
+        gene_indices.unsqueeze(-1).expand(-1, -1, emb.size(2))).squeeze(1)
+
+    # For rows with no True values, set them to zero embeddings
+    gene_emb[gene_mask.sum(dim=1) == 0] = torch.zeros(emb.size(2)).to(
+        gene_emb.device)
 
     return gene_emb

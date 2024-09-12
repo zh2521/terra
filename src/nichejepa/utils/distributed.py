@@ -127,19 +127,18 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
     This class was adapted from
     https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py.
     """
-
     # Copied and adapted from PyTorch DistributedSampler.
     def __init__(
         self,
         dataset: Dataset,
         batch_size: int,
+        seq_len_cell: int,
+        seq_len_neighborhood: int,
         num_replicas: Optional[int]=None,
         rank: Optional[int]=None,
         seed: int = 0,
         hugging_face_dataset: Optional[Dataset]=None,
         drop_last: bool=False,
-        incl_cell_seq: bool=False,
-        incl_neighborhood_seq: bool=False,
         lengths: Optional[List[int]]=None,
         model_input_name: Optional[str]=None,
         ):
@@ -175,11 +174,11 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         self.model_input_name = (
             model_input_name if model_input_name is not None else "input_ids"
         )
-        if incl_neighborhood_seq and incl_cell_seq:
+        if (seq_len_cell > 0) and (seq_len_neighborhood > 0):
           self.lengths = hugging_face_dataset['n_nonzero_tokens']
-        elif incl_cell_seq:
+        elif (seq_len_cell > 0):
           self.lengths = hugging_face_dataset['n_nonzero_cell_tokens']
-        elif incl_neighborhood_seq:
+        elif (seq_len_neighborhood > 0):
           self.lengths = hugging_face_dataset['n_nonzero_neighborhood_tokens']
 
     def __iter__(self) -> Iterator:
