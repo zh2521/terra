@@ -229,6 +229,7 @@ def retrieve_gene_emb(tokens: torch.Tensor,
         gene_indices.unsqueeze(-1).expand(-1, -1, emb.size(2))).squeeze(1)
 
     # For rows with no True values, set them to zero embeddings
-    gene_emb[gene_mask.sum(dim=1) == 0] = torch.zeros(emb.size(2))
+    gene_emb[gene_mask.sum(dim=1) == 0] = torch.zeros(emb.size(2)).to(
+        gene_emb.device)
 
     return gene_emb

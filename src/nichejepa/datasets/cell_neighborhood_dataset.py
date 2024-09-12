@@ -429,9 +429,9 @@ def make_cell_neighborhood_dataset(
             dataset,
             batch_size,
             hugging_face_dataset=data,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
             num_replicas=world_size,
-            incl_cell_seq=incl_cell_seq,
-            incl_neighborhood_seq=incl_neighborhood_seq,
             rank=rank)
 
         data_loader = torch.utils.data.DataLoader(dataset,

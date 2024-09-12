@@ -272,9 +272,9 @@ def infer(args: dict,
                     has_cls=has_cls)
 
                 if agg_type == 'avg':
-                    cell_emb, _ = compute_mean_unmasked_emb(emb,
+                    cell_emb = compute_mean_unmasked_emb(emb,
                                                             cell_mask)
-                    neighborhood_emb, _ = compute_mean_unmasked_emb(
+                    neighborhood_emb = compute_mean_unmasked_emb(
                         emb,
                         neighborhood_mask)
                 elif agg_type == "weighted_avg":
