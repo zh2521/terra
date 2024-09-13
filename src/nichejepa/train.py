@@ -147,14 +147,6 @@ def train(args: dict,
                f"seq_len_cell_{seq_len_cell}_"
                f"seq_len_neighborhood_{seq_len_neighborhood}")
 
-    # Append subset name based on specific_cell_types
-    specific_cell_types = args['data'].get('specific_cell_types')
-    if len(specific_cell_types)!=0:
-       subset_name = "_".join(specific_cell_types)
-       folder += f"_subset_{subset_name}"
-    else:
-       folder += "_total"
-
     os.makedirs(folder, exist_ok=True)
     tag = args['logging']['write_tag']
 

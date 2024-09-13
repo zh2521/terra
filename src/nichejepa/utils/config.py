@@ -106,8 +106,8 @@ def create_params_from_YAML_wandb_config(YAML_file:str,
         params['optimization']['learnable'] = sweep_config.learnable
 
     # Set batch size
-    params['data']['batch_size'] = setup_batch_size(
-        params['meta']['enc_pred_depth'], is_training)
+    # params['data']['batch_size'] = setup_batch_size(
+    #    params['meta']['enc_pred_depth'], is_training)
 
     # Return the updated params dictionary
     return params
