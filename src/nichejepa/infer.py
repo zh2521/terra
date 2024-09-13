@@ -128,13 +128,9 @@ def infer(args: dict,
               f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
               f"enc_depth_{enc_depth}_n_targets_{n_targets}_"
               f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
-              f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}")
-    if args['data']['seq_len_cell'] > 0:
-       folder += "_incl_cell_seq"
-    if args['data']['seq_len_neighborhood'] > 0:
-       folder += "_incl_neighborhood_seq"
-    else:
-       folder += "_total"
+              f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}_"
+              f"seq_len_cell_{seq_len_cell}_"
+              f"seq_len_neighborhood_{seq_len_neighborhood}")
     save_folder = f"{folder}/extracted_features"
     feature_path = f"{save_folder}/"
 
@@ -148,8 +144,6 @@ def infer(args: dict,
     latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
     load_path = (os.path.join(folder, r_file) if r_file is not None else
         latest_path)
-
-    print(load_path)
 
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(

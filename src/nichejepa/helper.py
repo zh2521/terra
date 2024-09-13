@@ -102,10 +102,13 @@ def load_checkpoint(
                 f' {msg}.')
 
         # Load state into optimizer
-        opt.load_state_dict(checkpoint['opt'])
+        if opt is not None:
+            opt.load_state_dict(checkpoint['opt'])
+            logger.info(f'Loaded optimizer from epoch {epoch}.')
         if scaler is not None:
             scaler.load_state_dict(checkpoint['scaler'])
-        logger.info(f'Loaded optimizer from epoch {epoch}.')
+            logger.info(f'Loaded scaler from epoch {epoch}.')
+        
         logger.info(f'Finished loading checkpoint with read path: {r_path}.')
         del checkpoint
 
