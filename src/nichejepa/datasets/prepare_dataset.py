@@ -41,17 +41,9 @@ def prepare_dataset(args: dict,
         The combined training and test portion of the dataset with a 'split'
         label.
     """
-
     # Load dataset from the specified path
     data_path = args['data']['data_path']
     dataset = load_from_disk(data_path)
-
-    # Filter dataset to include only specific cell types
-    specific_cell_types = args['data']['specific_cell_types']
-    if len(specific_cell_types) != 0: # list of cell types to keep
-       specific_cell_types = args['data']['specific_cell_types']
-       dataset = dataset.filter(lambda x:
-                                x['cell_types'] in specific_cell_types)
 
     # Sample subset if specified
     if args['data']['sample_subset']:

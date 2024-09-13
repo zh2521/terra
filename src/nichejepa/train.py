@@ -97,6 +97,8 @@ def train(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    pos_learnable = args['meta']['pos_learnable']
+    seg_learnable = args['meta']['seg_learnable']
     if not torch.cuda.is_available():
         device = torch.device('cpu')
     else:
@@ -126,9 +128,6 @@ def train(args: dict,
        ema = args['optimization']['ema']
     else:
        ema = [args['optimization']['ema'], 1]
-    pos_learnable = args['optimization']['pos_learnable']
-    seg_learnable = args['optimization']['seg_learnable']
-
     ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
@@ -143,32 +142,20 @@ def train(args: dict,
     # Create folder to store artifacts
     # -- LOGGING
     folder = (f"logs/{data_set_name}_"
-               f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
-               f"enc_depth_{enc_depth}_enc_emb_dim_{enc_emb_dim}_n_targets_{n_targets}_"
-               f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
-               f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}_"
-               f"seq_len_cell_{seq_len_cell}_"
-               f"pos_learnable_{pos_learnable}_"
-               f"seg_learnable_{seg_learnable}_"
-               f"ratio_{per_segment_mask_ratio}_"
-               f"seq_len_neighborhood_{seq_len_neighborhood}")
-    if args['data']['seq_len_cell'] > 0:
-       folder += "_incl_cell_seq"
-    if args['data']['seq_len_neighborhood'] > 0:
-       folder += "_incl_neighborhood_seq"
-
-    # Append subset name based on specific_cell_types
-    specific_cell_types = args['data'].get('specific_cell_types')
-    if len(specific_cell_types)!=0:
-       subset_name = "_".join(specific_cell_types)
-       folder += f"_subset_{subset_name}"
-    else:
-       folder += "_total"
+              f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
+              f"enc_depth_{enc_depth}_enc_emb_dim_{enc_emb_dim}_n_targets_{n_targets}_"
+              f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
+              f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}_"
+              f"seq_len_cell_{seq_len_cell}_"
+              f"seq_len_neighborhood_{seq_len_neighborhood}_"
+              f"pos_learnable_{pos_learnable}_"
+              f"seg_learnable_{seg_learnable}_"
+              f"ratio_{per_segment_mask_ratio}")
 
     os.makedirs(folder, exist_ok=True)
     tag = args['logging']['write_tag']
 
-    dump = os.path.join(folder, 'params-nichejepa.yaml')
+    dump = os.path.join(folder, 'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
