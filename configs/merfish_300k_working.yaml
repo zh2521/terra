@@ -20,7 +20,7 @@ mask:
   n_contexts: 1
   n_targets: 9 # This is equivalent to n_segment in segment_masking.
   per_segment_mask_ratio: 0.2
-  segment_masking: True
+  segment_masking: False
 meta:
   enc_depth: 3
   load_checkpoint: false
