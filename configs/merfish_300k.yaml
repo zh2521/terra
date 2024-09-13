@@ -1,6 +1,8 @@
 data:
   batch_size: 10
   data_path: /lustre/scratch126/cellgen/team361/am84/NicheJEPA/datasets/am84/st_data/gold/cell-neighborhood-tokenizer/merfish_mouse_brain_300k/16-shards/merfish_mouse_brain_300k_4_False_read_depth_shifted_log_2170.dataset
+  split: 0.2
+  stratify: False
   data_set_name: 'merfish_300k'
   num_workers: 0
   pin_mem: true
@@ -9,19 +11,7 @@ data:
   seq_len_neighborhood: 809
   has_cls: True
   random_state: 0
-  stratify: False
-  split: 0.2
-  specific_cell_types: []
-emb:
-  weighted_average: False
-  average: True
-  cls: False
-  select_topk: False
-  gene_id: 332
-  retrieve_position_emb: False
-  retrieve_emb_from_layer: 2 # This indicates that we should retrieve embeddings from the layer specified by #retrieve_emb_from_layer and upwards its value should be between zero and #enc_depth-1
 logging:
-  folder: logs/merfish_300
   write_tag: jepa
 mask:
   context_mask_size: 1240 # This doesn't have meaning in segment_masking.
@@ -30,12 +20,9 @@ mask:
   n_targets: 9 # This is equivalent to n_segment in segment_masking.
   per_segment_mask_ratio: 0.2
   segment_masking: True
-
 meta:
-  copy_data: false
   enc_depth: 3
   load_checkpoint: false
-  model_name: gt_base
   pred_depth: 1
   pred_emb_dim: 768
   enc_emb_dim: 768
@@ -43,16 +30,16 @@ meta:
   top_k: 127
   read_checkpoint: null
   use_bfloat16: True
+  pos_learnable: False
 optimization:
+  epochs: 40
+  warmup: 5
   ema:
   - 0.9764319982153814
   - 1.0
-  learnable: False
-  epochs: 40
+  start_lr: 5.0e-05
+  lr: 0.000001
   final_lr: 1.0e-06
+  weight_decay: 0.04
   final_weight_decay: 0.4
   ipe_scale: 1.0
-  lr: 0.000001
-  start_lr: 5.0e-05
-  warmup: 5
-  weight_decay: 0.04

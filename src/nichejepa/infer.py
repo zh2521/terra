@@ -19,6 +19,7 @@ from .datasets.cell_neighborhood_dataset import (CellNeighborhoodDataset,
                                                  make_cell_neighborhood_dataset)
 from .helper import init_model, load_checkpoint
 from .masks.multigene import MaskCollator
+from .masks.segment_masking  import SegmentMaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -77,12 +78,12 @@ def infer(args: dict,
     # ----------------------------- #
     # Load meta params
     use_bfloat16 = args['meta']['use_bfloat16']
-    model_name = args['meta']['model_name']
     r_file = args['meta']['read_checkpoint']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
+    pos_learnable = args['meta']['pos_learnable']
 
     # Load data params
     batch_size = args['data']['batch_size']
@@ -95,7 +96,6 @@ def infer(args: dict,
     has_cls = args['data']['has_cls']
 
     # Load optimization params
-    learnable = args['optimization']['learnable']
     num_epochs = args['optimization']['epochs']
 
     # Load mask params
@@ -103,6 +103,8 @@ def infer(args: dict,
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
     context_mask_size = args['mask']['context_mask_size']
+    segment_masking = args['mask']['segment_masking']
+    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
     # ----------------------------- #
 
     # ------------------------------------ #
@@ -131,10 +133,6 @@ def infer(args: dict,
        folder += "_incl_cell_seq"
     if args['data']['seq_len_neighborhood'] > 0:
        folder += "_incl_neighborhood_seq"
-    specific_cell_types = args['data'].get('specific_cell_types')
-    if len(specific_cell_types) != 0:
-       subset_name = "_".join(specific_cell_types)
-       folder += f"_subset_{subset_name}"
     else:
        folder += "_total"
     save_folder = f"{folder}/extracted_features"
@@ -160,7 +158,7 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        pos_learnable=learnable,
+        pos_learnable=pos_learnable,
         has_cls=has_cls)
     target_encoder = copy.deepcopy(encoder)
 

@@ -97,6 +97,7 @@ def train(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    pos_learnable = args['meta']['pos_learnable']
     if not torch.cuda.is_available():
         device = torch.device('cpu')
     else:
@@ -126,7 +127,6 @@ def train(args: dict,
        ema = args['optimization']['ema']
     else:
        ema = [args['optimization']['ema'], 1]
-    learnable = args['optimization']['learnable']
     ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
@@ -158,7 +158,7 @@ def train(args: dict,
     os.makedirs(folder, exist_ok=True)
     tag = args['logging']['write_tag']
 
-    dump = os.path.join(folder, 'params-nichejepa.yaml')
+    dump = os.path.join(folder, 'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
@@ -202,7 +202,7 @@ def train(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        pos_learnable=learnable,
+        pos_learnable=pos_learnable,
         has_cls=has_cls)
     target_encoder = copy.deepcopy(encoder)
 
