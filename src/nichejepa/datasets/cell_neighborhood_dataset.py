@@ -96,7 +96,7 @@ class CellNeighborhoodDataset(Dataset):
                     (torch.ones(self.seq_len_cell),
                     torch.ones(self.seq_len_neighborhood) * 2)).int()
                 
-            return torch.tensor(tokens), labels, niche_types, cell_types, n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens, n_nonzero_tokens
+            return torch.tensor(tokens), labels, cell_types, niche_types, n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens, n_nonzero_tokens
         
         # Case 2: only cell tokens are included
         elif self.seq_len_cell > 0:

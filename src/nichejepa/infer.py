@@ -149,6 +149,8 @@ def infer(args: dict,
     load_path = (os.path.join(folder, r_file) if r_file is not None else
         latest_path)
 
+    print(load_path)
+
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
         device=device,
