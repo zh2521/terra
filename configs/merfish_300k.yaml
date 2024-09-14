@@ -4,7 +4,7 @@ data:
   split: 0.2
   stratify: False
   data_set_name: 'merfish_300k'
-  num_workers: 0
+  num_workers: 18
   pin_mem: true
   vocab_size: 1087
   seq_len_cell: 411
@@ -15,7 +15,7 @@ data:
 logging:
   write_tag: jepa
 mask:
-  context_mask_size: 1240 # This doesn't have meaning in segment_masking.
+  context_mask_size: 1220 # This doesn't have meaning in segment_masking.
   target_mask_size: 10 # This doesn't have meaning in segment_masking.
   n_contexts: 1
   n_targets: 9 # This is equivalent to n_segment in segment_masking.
@@ -25,13 +25,14 @@ meta:
   enc_depth: 3
   load_checkpoint: false
   pred_depth: 1
-  pred_emb_dim: 768
-  enc_emb_dim: 768
+  pred_emb_dim: 192
+  enc_emb_dim: 384
   enc_pred_depth: 31
   top_k: 127
   read_checkpoint: null
   use_bfloat16: True
   pos_learnable: False
+  seg_learnable: False
 optimization:
   epochs: 40
   warmup: 5

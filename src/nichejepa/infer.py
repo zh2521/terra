@@ -215,6 +215,8 @@ def infer(args: dict,
     # ----------------------------- #
     #  Retrieve embeddings
     # ----------------------------- #
+    target_encoder.eval()
+
     niche_label = []
     cell_type_label = []
     all_cell_emb_list = []
