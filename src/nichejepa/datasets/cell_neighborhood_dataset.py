@@ -197,12 +197,15 @@ class CellNeighborhoodDataset(Dataset):
                 
             # Otherwise, sample a subset of tokens based on the sampling strategy
             else:
-                gene_tokens_cell = self.create_sampled_token_sequence(
-                    self.dataset[item]["gene_tokens_cell"],
-                    self.dataset[item]["n_nonzero_cell_tokens"],
-                    self.seq_len_cell,
-                    self.sampling_strategy,
-                    self.sampling_seed)
+                if self.seq_len_cell >= self.dataset[item]["n_nonzero_cell_tokens"]:
+                    gene_tokens_cell = self.dataset[item]["gene_tokens_cell"][:self.seq_len_cell]
+                else:
+                    gene_tokens_cell = self.create_sampled_token_sequence(
+                        self.dataset[item]["gene_tokens_cell"],
+                        self.dataset[item]["n_nonzero_cell_tokens"],
+                        self.seq_len_cell,
+                        self.sampling_strategy,
+                        self.sampling_seed)
                 
         return gene_tokens_cell
 
@@ -236,12 +239,15 @@ class CellNeighborhoodDataset(Dataset):
                 gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
             # Otherwise, sample a subset of tokens based on the sampling strategy
             else:
-                gene_tokens_neighborhood = self.create_sampled_token_sequence(
-                    self.dataset[item]["gene_tokens_neighborhood"],
-                    self.dataset[item]["n_nonzero_neighborhood_tokens"],
-                    self.seq_len_neighborhood,
-                    self.sampling_strategy,
-                    self.sampling_seed)
+                if self.seq_len_neighborhood >= self.dataset[item]["n_nonzero_neighborhood_tokens"]:
+                    gene_tokens_neighborhood = self.dataset[item]["gene_tokens_neighborhood"][:self.seq_len_neighborhood]
+                else:
+                    gene_tokens_neighborhood = self.create_sampled_token_sequence(
+                        self.dataset[item]["gene_tokens_neighborhood"],
+                        self.dataset[item]["n_nonzero_neighborhood_tokens"],
+                        self.seq_len_neighborhood,
+                        self.sampling_strategy,
+                        self.sampling_seed)
         
         return gene_tokens_neighborhood
 
