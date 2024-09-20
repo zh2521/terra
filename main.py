@@ -81,11 +81,11 @@ def process_main(rank, args, world_size, devices, is_training=True):
             [train_data, test_data], axis=0) # concat along the obs (cells)
         cell_type_nmi_ari = clustering_metrics(
             adata_combined,
-            emb_key=f'cell_emb_layer_{params['meta']['enc_depth'] - 1}',
+            emb_key=f"cell_emb_layer_{params['meta']['enc_depth'] - 1}",
             label_col='cell_type')
         niche_nmi_ari = clustering_metrics(
             adata_combined,
-            emb_key=f'neighborhood_emb_layer_{params['meta']['enc_depth'] - 1}',
+            emb_key=f"neighborhood_emb_layer_{params['meta']['enc_depth'] - 1}",
             label_col='niche')
         wandb.log(
             {"niche_nmi": niche_nmi_ari['nmi'],
