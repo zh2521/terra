@@ -9,7 +9,6 @@ pip install -e .
 ```
 
 ## Repository Structure
-It contains most important files.
 1. **`main.py`**  
    The main entry point for the project, which supports running training and evaluation sweeps. It includes command-line arguments for customization and handles multi-GPU setups.
 
@@ -56,8 +55,6 @@ To start training with multiple GPUs, use the following command:
 ```shell
 python -m pdb main.py --fname configs/$DATASET.yaml --devices cuda:0 cuda:1
 ```
-
-### Training with Sweep
 
 To perform a sweep during training, use:
 
