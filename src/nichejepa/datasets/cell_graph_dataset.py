@@ -15,30 +15,27 @@ _GLOBAL_SEED = 0
 logger = getLogger()
 
 
-class CellNeighborhoodDataset(Dataset):
+class CellGraphDataset(Dataset):
     def __init__(self,
                  data: datasets.Dataset,
                  vocab_size: int,
                  seq_len_cell: int=0,
-                 seq_len_neighborhood: int=0,
                  has_cls: bool=True,
                  sampling_strategy: Optional[str]=None,
                  sampling_seed: Optional[int]=42
                  ):
         """
-        Torch CellNeighborhoodDataset class.
+        Torch CellGraphDataset class.
 
         Parameters
         -----------
         data:
-            Huggingface dataset with cell and neighborhood tokens and cell-level
-            metadata.
+            Huggingface dataset with (index) cell and neighbor cell tokens and
+            cell-level metadata.
         vocab_size:
             Size of the vocabulary.
         seq_len_cell:
             Sequence length of the cell tokens.
-        seq_len_neighborhood:
-            Sequence length of the neighborhood tokens.
         has_cls:
             If 'True', a <cls> token is included for each cell at position 0.
         sampling_strategy:
@@ -50,8 +47,7 @@ class CellNeighborhoodDataset(Dataset):
         self.len = len(self.dataset)
         self.vocab_size = vocab_size
         self.seq_len_cell = seq_len_cell
-        self.seq_len_neighborhood = seq_len_neighborhood
-        self.seq_len = seq_len_cell + seq_len_neighborhood
+        self.seq_len
         self.has_cls = has_cls
         self.sampling_strategy = sampling_strategy
         self.sampling_seed = sampling_seed
@@ -61,29 +57,20 @@ class CellNeighborhoodDataset(Dataset):
          
     def __getitem__(self, item):
         # Case 1: both cell and neighborhood tokens are included
-        if self.seq_len_cell > 0 and self.seq_len_neighborhood > 0:
             # Get gene tokens for cell and neighborhood
             gene_tokens_cell = self._get_cell_tokens(item)
-            gene_tokens_neighborhood = self._get_neighborhood_tokens(item)
-
-            # Set tokens as the concatenation of cell and neighborhood tokens
-            tokens = gene_tokens_cell + gene_tokens_neighborhood
 
             # Set the total number of nonzero tokens as the sum of nonzero cell
             # and neighborhood tokens
-            n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)
-            n_nonzero_neighborhood_tokens = self.get_num_nonzero_neighborhood_tokens(item)
-            n_nonzero_tokens = n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens            
+            n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)           
             
             # Set cell-level labels
             metadata = {}
             for key in self.dataset[item].keys():
-                if key not in ["gene_tokens_cell",
-                               "gene_tokens_neighborhood",
-                               "input_ids",
-                               "n_nonzero_cell_tokens",
-                               "n_nonzero_neighborhood_tokens",
-                               "n_nonzero_tokens"]:
+                if key not in ["gene_tokens",
+                               "cell_pos_tokens",
+                               "gene_pos_tokens",
+                               "input_ids"]:
                     metadata[key] = self.dataset[item][key]
             
             if self.has_cls:
@@ -93,102 +80,10 @@ class CellNeighborhoodDataset(Dataset):
                 
                 # Set total number of nonzero tokens to include <cls> token
                 n_nonzero_tokens += 1
-                
-                # Create segment labels: 1 for cell tokens and <cls> token and 2
-                # for neighborhood tokens (maybe this needs to be changed)
-                labels = torch.cat(
-                    (torch.ones(self.seq_len_cell + 1),
-                     torch.ones(self.seq_len_neighborhood) * 2)).int()
-            else:
-                # Create segment labels: 1 for cell tokens, 2 for neighborhood
-                # tokens
-                labels = torch.cat(
-                    (torch.ones(self.seq_len_cell),
-                    torch.ones(self.seq_len_neighborhood) * 2)).int()
-                
-            return torch.tensor(tokens), labels, metadata, n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens, n_nonzero_tokens
-        
-        # Case 2: only cell tokens are included
-        elif self.seq_len_cell > 0:
-            # Get gene tokens for cell
-            gene_tokens_cell = self._get_cell_tokens(item)
-            
-            # Set cell tokens as tokens
-            tokens = gene_tokens_cell
-            
-            # Set the total number of nonzero tokens as the number of nonzero cell tokens
-            n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)
-            n_nonzero_tokens = n_nonzero_cell_tokens
-                
-            # Set cell-level labels
-            metadata = {}
-            for key in self.dataset[item].keys():
-                if key not in ["gene_tokens_cell",
-                               "gene_tokens_neighborhood",
-                               "input_ids",
-                               "n_nonzero_cell_tokens",
-                               "n_nonzero_tokens"]:
-                    metadata[key] = self.dataset[item][key]
-            
-            if self.has_cls:
-                # If a <cls> token is used, prepend it to the tokens and
-                # consider it for segment labels  
-                tokens = [self.vocab_size] + tokens
 
-                # Set total number of nonzero tokens to include <cls> token
-                n_nonzero_tokens += 1
+            labels = self.dataset[item]["cell_pos_tokens"]
                 
-                # Create segment labels: 1 for cell tokens and <cls> token
-                labels = torch.ones(self.seq_len_cell + 1).int()
-            else:
-                # Create segment labels: 1 for cell tokens
-                labels = torch.ones(self.seq_len_cell).int()
-                
-            return torch.tensor(tokens), labels, metadata, n_nonzero_cell_tokens, n_nonzero_tokens
-        
-        # Case 3: only neighborhood tokens are included
-        elif self.seq_len_neighborhood > 0:
-            # Get gene tokens for neighborhood
-            gene_tokens_neighborhood = self._get_neighborhood_tokens(item)
-            
-            # Set neighborhood tokens as tokens
-            tokens = gene_tokens_neighborhood
-            
-            # Set the total number of nonzero tokens as the number of nonzero neighborhood tokens
-            n_nonzero_neighborhood_tokens = self.get_num_nonzero_neighborhood_tokens(item)
-            n_nonzero_tokens = n_nonzero_neighborhood_tokens
-
-            # Set cell-level labels
-            metadata = {}
-            for key in self.dataset[item].keys():
-                if key not in ["gene_tokens_cell",
-                               "gene_tokens_neighborhood",
-                               "input_ids",
-                               "n_nonzero_neighborhood_tokens",
-                               "n_nonzero_tokens"]:
-                    metadata[key] = self.dataset[item][key]
-
-            if self.has_cls:
-                # If a <cls> token is used, prepend it to the tokens and
-                # consider it for segment labels  
-                tokens = [self.vocab_size] + tokens
-
-                # Set total number of nonzero tokens to include <cls> token
-                n_nonzero_tokens += 1
-                
-                # Create segment labels: 2 for neighborhood tokens and <cls>
-                # token (maybe this needs to be changed)
-                labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
-            else:
-                # Create segment labels: 2 for neighborhood tokens
-                labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
-
-            return torch.tensor(tokens), labels, metadata, n_nonzero_neighborhood_tokens, n_nonzero_tokens
-        
-        # Case 4: neither cell nor neighborhood tokens are included, which is an
-        # invalid state
-        else:
-            raise ValueError("Neither cell nor neighborhood tokens included.")      
+            return torch.tensor(tokens), torch.tensor(labels), metadata, n_nonzero_cell_tokens  
         
     def _get_cell_tokens(self, 
                          item: int

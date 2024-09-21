@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 import yaml
+from collections import defaultdict
 from typing import Literal
 
 import anndata
@@ -217,8 +218,7 @@ def infer(args: dict,
     # ----------------------------- #
     target_encoder.eval()
 
-    niche_label = []
-    cell_type_label = []
+    metadata = defaultdict(list)
     all_cell_emb_list = []
     all_neighborhood_emb_list = []
     all_cell_gene_emb_dict = {}
@@ -231,15 +231,9 @@ def infer(args: dict,
         seg_label = udata[1].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
-        # Load niche and cell type labels based on specified sequence lengths
-        if (args['data']['seq_len_cell'] > 0) & (
-            args['data']['seq_len_neighborhood'] > 0):
-            cell_type_label.extend(udata[2])
-            niche_label.extend(udata[3])
-        elif args['data']['seq_len_cell'] > 0:
-            cell_type_label.extend(udata[2])
-        elif args['data']['seq_len_neighborhood'] > 0:
-            niche_label.extend(udata[2])
+        # Update metadata
+        for key, value in udata[2].items():
+            metadata[key].extend(value)
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
@@ -333,11 +327,9 @@ def infer(args: dict,
                         all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                  
                     
     adata = anndata.AnnData(
-        obs=pd.DataFrame({
-            'niche': niche_label,
-            'cell_type': cell_type_label},
-        index=range(len(niche_label))))
-
+        obs=pd.DataFrame(metadata,
+        index=range(len(list(metadata.values())[0]))))
+   
     # Store cell and neighborhood embeddings of all observations across layers  
     for i in range(len(all_cell_emb_list)):
         print(np.array(torch.cat(
