@@ -959,17 +959,17 @@ class GeneTransformerPredictor(nn.Module):
 
         # Create positional embeddings for tokens from target masks
         pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
-        seg_labels = self.seg_embed(seg_label)
+        seg_embs = self.seg_embed(seg_label)
         pos_embs = apply_masks(pos_embs, masks_pred) # only keep pos from
                                                      # predictor masks
-        seg_labels = apply_masks(seg_labels, masks_pred) # only keep seg from
+        seg_embs = apply_masks(seg_embs, masks_pred) # only keep seg from
                                                          # predictor masks
         pos_embs = repeat_interleave_batch(
             pos_embs,
             B,
             repeat=len(masks_enc)) # repeat pos embeddings for all encoder masks
-        seg_labels = repeat_interleave_batch(
-            seg_labels,
+        seg_embs = repeat_interleave_batch(
+            seg_embs,
             B,
             repeat=len(masks_enc)) # repeat seg embeddings for all encoder masks
 
@@ -980,7 +980,7 @@ class GeneTransformerPredictor(nn.Module):
             pos_embs.size(1), # TARGET_MASK_SIZE
             1)
                                              
-        pred_tokens += pos_embs + seg_labels # add positional embeddings to mask tokens
+        pred_tokens += pos_embs + seg_embs # add positional embeddings to mask tokens
 
         # Repeat context embeddings for all target masks
         x = x.repeat(len(masks_pred), 1, 1)
