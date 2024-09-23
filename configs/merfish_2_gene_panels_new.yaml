@@ -24,7 +24,7 @@ mask:
 meta:
   enc_depth: 3 # 3
   load_checkpoint: false
-  load_timestamp: '22092024_202630_532'
+  load_timestamp: '22092024_202626_308'
   pred_depth: 1 # 1
   pred_emb_dim: 768
   enc_emb_dim: 768
@@ -34,7 +34,7 @@ meta:
   use_bfloat16: True
   pos_learnable: False
   seg_learnable: False
-  gene_panel_size: 0
+  gene_panel_size: 2
 optimization:
   epochs: 20 
   warmup: 5
