@@ -111,6 +111,7 @@ def train(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    gene_panel_size = args['meta']['gene_panel_size']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
     if not torch.cuda.is_available():
@@ -343,12 +344,17 @@ def train(args: dict,
                 # -- unsupervised imgs
                 cell_neighborhood_tokens = udata[0].to(device,
                                                        non_blocking=True)
-                seg_label = udata[1].to(device, non_blocking=True)                 
+                seg_label = udata[1].to(device, non_blocking=True)
+                if gene_panel_size > 0:
+                    panel_label = udata[2]['dataset_id'].to(
+                        device, non_blocking=True)
+                else:
+                    panel_label = None
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                 masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
                 masks_3 = masks_attention.to(device, non_blocking=True)
-                return (cell_neighborhood_tokens, seg_label,  masks_1, masks_2, masks_3)
-            cell_neighborhood_tokens, seg_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
+                return (cell_neighborhood_tokens, seg_label, panel_label, masks_1, masks_2, masks_3)
+            cell_neighborhood_tokens, seg_label, panel_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -395,6 +401,7 @@ def train(args: dict,
                     z = predictor(
                         z,
                         seg_label,
+                        panel_label if gene_panel_size > 0 else None,
                         masks_enc,
                         masks_pred) # output (BATCH_SIZE * N_TARGETS *
                                     # N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)

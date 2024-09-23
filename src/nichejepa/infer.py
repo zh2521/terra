@@ -247,13 +247,11 @@ def infer(args: dict,
                 cell_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
-                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     has_cls=has_cls)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
-                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     has_cls=has_cls)
             # Keep elements relevant to cell embedding
@@ -261,11 +259,13 @@ def infer(args: dict,
                 cell_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_cell",
+                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     has_cls=has_cls)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_neighborhood",
+                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     has_cls=has_cls)
 

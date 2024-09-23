@@ -150,9 +150,12 @@ def create_binary_selection_mask(tokens: torch.Tensor,
         selection_mask[:, (1 if has_cls else 0):
                           (1 if has_cls else 0) + seq_len_cell] = True
         selection_mask[tokens == 0] = False # exclude padding tokens
+        print(excluded_tokens)
         if excluded_tokens: # exclude other excluded tokens
+            print(selection_mask.sum())
             selection_mask[
                 torch.isin(tokens, torch.tensor(excluded_tokens))] = False
+            print(selection_mask.sum())
         if top_k:
             # Exclude tokens beyond the top_k positions in the cell segment
             selection_mask[:, (1 if has_cls else 0) + top_k:] = False
