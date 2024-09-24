@@ -21,7 +21,8 @@ from ..utils.tensors import (repeat_interleave_batch,
 
 def get_1d_sincos_pos_embed(embed_dim: int,
                             seq_len: int,
-                            cls_token: bool=False
+                            cls_token: bool=False,
+                            gene_panel_token: bool=False
                             ) -> np.ndarray:
     """
     Retrieve 1D sin cos positional embedding based on number of positions and
@@ -47,6 +48,9 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     pos = np.arange(seq_len, dtype=float)
     pos_embed = get_1d_sincos_pos_embed_from_pos(embed_dim, pos)
     if cls_token:
+        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed],
+                                   axis=0)
+    if gene_panel_token:
         pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed],
                                    axis=0)
 
@@ -396,6 +400,7 @@ class GeneTransformerEncoder(nn.Module):
         Length of the token sequences (w/o <cls> token).
     has_cls:
         If 'True', sequences include a <cls> token at the start.
+    gene_panel_size:
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
         positional embeddings.
@@ -435,6 +440,7 @@ class GeneTransformerEncoder(nn.Module):
                  vocab_size: int,
                  seq_len: int,
                  has_cls: bool=True,
+                 gene_panel_size: int=0,
                  pos_learnable: bool=False,
                  seg_learnable: bool=False,
                  embed_dim: int=768,
@@ -455,6 +461,7 @@ class GeneTransformerEncoder(nn.Module):
         super().__init__()
         self.seq_len = seq_len
         self.has_cls = has_cls
+        self.gene_panel_size = gene_panel_size
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
@@ -466,15 +473,16 @@ class GeneTransformerEncoder(nn.Module):
             padding_idx=0)
 
         # Initialize gene panel embeddings
-        self.panel_embed = nn.Embedding(gene_panel_size,
-                                        embed_dim)
+        if gene_panel_size > 0:
+            self.panel_embed = nn.Embedding(gene_panel_size,
+                                            embed_dim)
                                           
         # Initialize segment embeddings (to differentiate cell and neighborhood
         # gene tokens)
         if seg_learnable:
           self.seg_embed = nn.Embedding(2 + 1, # incl. <pad>
-                                      embed_dim,
-                                      padding_idx=0)
+                                        embed_dim,
+                                        padding_idx=0)
         else:
             # If not learnable, initialize nn.Embedding with predefined values
             self.seg_embed = nn.Embedding(2+1, embed_dim, padding_idx=0)
@@ -492,23 +500,30 @@ class GeneTransformerEncoder(nn.Module):
         # Retrieve positional embeddings
         if pos_learnable:
             self.pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
+                torch.zeros(1,
+                            seq_len + (1 if has_cls else 0) + (
+                                1 if gene_panel_size > 0 else 0),
+                            embed_dim),
                 requires_grad=True)
             trunc_normal_(self.pos_embed, std=self.init_std)
             if has_cls:
                 self.pos_embed.data[0, 0, :] = 0
                 if gene_panel_size > 0:
                     self.pos_embed.data[0, 1, :] = 0
-            else:
-                if gene_panel_size > 0:
-                    self.pos_embed.data[0, 0, :] = 0
+            elif gene_panel_size > 0:
+                self.pos_embed.data[0, 0, :] = 0
         else:
             self.pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
+                torch.zeros(1,
+                            seq_len + (1 if has_cls else 0) + (
+                                1 if gene_panel_size > 0 else 0),
+                            embed_dim),
                 requires_grad=False)
-            pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1],
-                                                self.seq_len,
-                                                cls_token=has_cls)
+            pos_embed = get_1d_sincos_pos_embed(
+                self.pos_embed.shape[-1],
+                self.seq_len,
+                cls_token=has_cls,
+                gene_panel_token=(True if gene_panel_size > 0 else 0))
             self.pos_embed.data.copy_(
                 torch.from_numpy(pos_embed).float().unsqueeze(0))
 
@@ -564,6 +579,7 @@ class GeneTransformerEncoder(nn.Module):
     def forward(self,
                 x: torch.Tensor,
                 seg_label: torch.Tensor,
+                panel_label: Optional[torch.Tensor],
                 masks: Optional[Union[list, torch.Tensor]]=None,
                 masks_attention: Optional[torch.Tensor]=None 
                 ) -> torch.Tensor:
@@ -581,6 +597,7 @@ class GeneTransformerEncoder(nn.Module):
             Tensor containing segment labels to differentiate between cell and
             neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN) if no
             <cls> token is included and (BATCH_SIZE, SEQ_LEN+1) otherwise.
+        panel_label:
         masks:
             List of N_MASKS tensors containing indices (within the sequence) of
             tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
@@ -600,8 +617,10 @@ class GeneTransformerEncoder(nn.Module):
 
         # Get gene embeddings for sequence of gene tokens
         x = self.gene_embed(x)
-        B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN (+1 if <cls>),
-                          # D: EMBED_DIM
+        panel_emb = self.panel_embed(panel_label)
+        x = torch.cat([panel_emb, x], dim=1) # across sequence dimension
+        B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN (+1 if <cls> +1 if gene
+                          # panel token), D: EMBED_DIM
         
         # Add positional and segment embeddings to gene embedding
         x = x + self.pos_embed + self.seg_embed(seg_label)
@@ -675,6 +694,7 @@ class GeneTransformerEncoder(nn.Module):
     def return_multi_layer_emb(self,
                                x: torch.Tensor,
                                seg_label: torch.Tensor,
+                               panel_label: Optional[torch.Tensor],
                                masks: Optional[Union[list, torch.Tensor]]=None,
                                masks_attention: Optional[torch.Tensor]=None 
                                ) -> list:
@@ -712,6 +732,8 @@ class GeneTransformerEncoder(nn.Module):
 
         # Get gene embeddings for sequence of gene tokens
         x = self.gene_embed(x)
+        panel_emb = self.panel_embed(panel_label)
+        x = torch.cat([panel_emb, x], dim=1) # across sequence dimension
         B, N, D = x.shape
 
         # Add positional and segment embeddings to gene embedding
@@ -749,9 +771,7 @@ class GeneTransformerPredictor(nn.Module):
         Length of the token sequences (w/o <cls> token).
     has_cls:
         If 'True', sequences include a <cls> token at the start.
-    gene_panel_size:
-        If '0', no gene panel embedding will be created, otherwise embedding
-        of size 'gene_panel_size' will be created.
+    has_gene_panel:
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
         positional embeddings.
@@ -787,7 +807,7 @@ class GeneTransformerPredictor(nn.Module):
                  embed_dim: int,
                  seq_len: int,
                  has_cls: bool=True,
-                 gene_panel_size: int=0,
+                 has_gene_panel: bool=True,
                  pos_learnable: bool=False,
                  seg_learnable: bool=False,
                  predictor_embed_dim: int=384,
@@ -805,7 +825,6 @@ class GeneTransformerPredictor(nn.Module):
                  ):
         super().__init__()
         self.init_std = init_std
-        self.gene_panel_size = gene_panel_size
 
         # Initialize layer to project from encoder to predictor embed dim
         self.predictor_embed = nn.Linear(embed_dim,
@@ -817,11 +836,6 @@ class GeneTransformerPredictor(nn.Module):
 
         # Define decaying drop path rate (higher drop rate in deeper blocks)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-
-        if self.gene_panel_size > 0:
-            self.panel_embed = nn.Embedding(
-                gene_panel_size,
-                predictor_embed_dim)
 
         # Initialize segment embeddings (to differentiate cell and neighborhood
         # gene tokens)
@@ -847,21 +861,28 @@ class GeneTransformerPredictor(nn.Module):
         if pos_learnable:
             self.predictor_pos_embed = nn.Parameter(
                 torch.zeros(1,
-                            seq_len + (1 if has_cls else 0),
+                            seq_len + (1 if has_cls else 0) + (
+                                1 if has_gene_panel else 0),
                             predictor_embed_dim),
                 requires_grad=True)
             trunc_normal_(self.predictor_pos_embed, std=self.init_std)
-            if has_cls:
+            if has_cls and has_gene_panel:
+                self.predictor_pos_embed.data[0, 0, :] = 0
+                self.predictor_pos_embed.data[0, 1, :] = 0
+            if has_cls or has_gene_panel:
                 self.predictor_pos_embed.data[0, 0, :] = 0
         else:
             self.predictor_pos_embed = nn.Parameter(
-                torch.zeros(1, seq_len + (1 if has_cls else 0),
-                predictor_embed_dim),
-                requires_grad=False)
+                torch.zeros(1,
+                            seq_len + (1 if has_cls else 0) + (
+                                1 if has_gene_panel else 0),
+                            predictor_embed_dim),
+                            requires_grad=False)
             predictor_pos_embed = get_1d_sincos_pos_embed(
                 self.predictor_pos_embed.shape[-1],
                 seq_len,
-                cls_token=has_cls)
+                cls_token=has_cls,
+                gene_panel_token=has_gene_panel)
             self.predictor_pos_embed.data.copy_(
                 torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
         
@@ -920,7 +941,6 @@ class GeneTransformerPredictor(nn.Module):
     def forward(self,
                 x: torch.Tensor, 
                 seg_label: torch.Tensor,
-                panel_label: Optional[torch.Tensor],
                 masks_enc: Union[list, torch.Tensor],
                 masks_pred: Union[list, torch.Tensor]
                 ) -> torch.Tensor:
@@ -936,8 +956,6 @@ class GeneTransformerPredictor(nn.Module):
             Tensor containing segment labels to differentiate between cell and
             neighborhood gene tokens with shape (BATCH_SIZE, SEQ_LEN) if no
             <cls> token is included and (BATCH_SIZE, SEQ_LEN+1) otherwise.
-        panel_label:
-            Tensor containing gene panel labels.
         masks_enc:
             List of N_CONTEXT_MASKS tensors containing indices (within the
             sequence) of tokens to keep with shape (BATCH_SIZE,
@@ -1005,16 +1023,6 @@ class GeneTransformerPredictor(nn.Module):
             1)
                                              
         pred_tokens += pos_embs + seg_embs # add positional embeddings to mask tokens
-
-        if self.gene_panel_size > 0:
-            panel_embs = self.panel_embed(panel_label)
-            panel_embs = apply_masks(panel_embs, masks_pred) # only keep panel from
-                                                             # predictor masks
-            panel_embs = repeat_interleave_batch(
-                panel_embs,
-                B,
-                repeat=len(masks_enc)) # repeat panel embeddings for all encoder masks
-            pred_tokens += panel_embs
 
         # Repeat context embeddings for all target masks
         x = x.repeat(len(masks_pred), 1, 1)

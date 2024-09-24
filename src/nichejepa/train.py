@@ -153,6 +153,7 @@ def train(args: dict,
     final_lr = args['optimization']['final_lr']
 
     seq_len = seq_len_cell + seq_len_neighborhood
+    has_gene_panel = True if gene_panel_size > 0 else False
 
     # Create folder to store artifacts
     if not save_folder_path:
@@ -227,6 +228,7 @@ def train(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             has_cls=has_cls,
+            has_gene_panel=has_gene_panel,
             per_segment_mask_ratio = per_segment_mask_ratio)
     else:
         mask_collator = MaskCollator(
@@ -236,7 +238,8 @@ def train(args: dict,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls)
+            has_cls=has_cls,
+            has_gene_panel=has_gene_panel)
     
     # Initialize dataloader and -sampler
     _, train_loader, train_sampler = make_cell_neighborhood_dataset(
@@ -251,7 +254,8 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls)
+        has_cls=has_cls,
+        has_gene_panel=has_gene_panel)
 
     _, test_loader, test_sampler = make_cell_neighborhood_dataset(
         batch_size=batch_size,
@@ -265,7 +269,8 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls)
+        has_cls=has_cls,
+        has_gene_panel=has_gene_panel)
 
     ipe = len(train_loader)
 
@@ -340,7 +345,7 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred,  masks_attention) in enumerate(train_loader):
+        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
             def load_cell_neighborhoods():
                 # -- unsupervised imgs
                 cell_neighborhood_tokens = udata[0].to(device,
@@ -348,9 +353,9 @@ def train(args: dict,
                 seg_label = udata[1].to(device, non_blocking=True)
                 if gene_panel_size > 0:
                     panel_label = torch.tensor(
-                        [int(dataset_id) for dataset_id in udata[2][
+                        [[int(dataset_id)] for dataset_id in udata[2][
                             'dataset_id']]).to(device, non_blocking=True
-                            ).unsqueeze(1).repeat(1, seg_label.shape[1])
+                            )
                 else:
                     panel_label = None
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
@@ -371,6 +376,7 @@ def train(args: dict,
                         h = target_encoder(
                             cell_neighborhood_tokens,
                             seg_label,
+                            panel_label,
                             masks_attention=masks_attention) # output (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                                        # if no <cls> token (BATCH_SIZE,
                                        # SEQ_LEN+1, EMBED_DIM) otherwise
@@ -397,6 +403,7 @@ def train(args: dict,
                     z = encoder(
                         cell_neighborhood_tokens,
                         seg_label,
+                        panel_label,
                         masks_enc) # output (BATCH_SIZE, MIN_CONTEXT_SIZE,
                                    # EMB_DIM) where MIN_CONTEXT_SIZE is minmum
                                    # context size in the batch after removal of
@@ -404,7 +411,6 @@ def train(args: dict,
                     z = predictor(
                         z,
                         seg_label,
-                        panel_label if gene_panel_size > 0 else None,
                         masks_enc,
                         masks_pred) # output (BATCH_SIZE * N_TARGETS *
                                     # N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
