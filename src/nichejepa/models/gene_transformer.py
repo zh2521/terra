@@ -812,7 +812,7 @@ class GeneTransformerPredictor(nn.Module):
         if self.gene_panel_size > 0:
             self.panel_embed = nn.Embedding(
                 gene_panel_size,
-                embed_dim)
+                predictor_embed_dim)
 
         # Initialize segment embeddings (to differentiate cell and neighborhood
         # gene tokens)

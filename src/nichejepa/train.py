@@ -213,6 +213,7 @@ def train(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
+        gene_panel_size=gene_panel_size,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         has_cls=has_cls)
@@ -346,8 +347,10 @@ def train(args: dict,
                                                        non_blocking=True)
                 seg_label = udata[1].to(device, non_blocking=True)
                 if gene_panel_size > 0:
-                    panel_label = udata[2]['dataset_id'].to(
-                        device, non_blocking=True)
+                    panel_label = torch.tensor(
+                        [int(dataset_id) for dataset_id in udata[2][
+                            'dataset_id']]).to(device, non_blocking=True
+                            ).unsqueeze(1).repeat(1, seg_label.shape[1])
                 else:
                     panel_label = None
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
