@@ -47,3 +47,5 @@ optimization:
   weight_decay: 0.04
   final_weight_decay: 0.04
   ipe_scale: 1.0
+embedding:
+  agg_type: 'avg'
