@@ -127,8 +127,9 @@ def infer(args: dict,
     # Initialize torch distributed backend
     world_size, rank = init_distributed()
     
-    # Compute seq_len based on config
+    # Compute seq_len and define gene panel token
     seq_len = seq_len_cell + seq_len_neighborhood
+    has_gene_panel = True if gene_panel_size > 0 else False
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
@@ -154,6 +155,7 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
+        gene_panel_size=gene_panel_size,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         has_cls=has_cls)
@@ -171,6 +173,7 @@ def infer(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             has_cls=has_cls,
+            has_gene_panel=has_gene_panel,
             per_segment_mask_ratio = per_segment_mask_ratio)
     else:
         mask_collator = MaskCollator(
@@ -180,7 +183,8 @@ def infer(args: dict,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls)
+            has_cls=has_cls,
+            has_gene_panel=has_gene_panel)
 
     # Initialize dataloader
     _, loader = make_cell_neighborhood_dataset(
@@ -224,13 +228,6 @@ def infer(args: dict,
         # device
         cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
-        if gene_panel_size > 0:
-            panel_label = torch.tensor(
-                [[int(dataset_id)] for dataset_id in udata[2][
-                    'dataset_id']]).to(device, non_blocking=True
-                    )
-        else:
-            panel_label = None
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Update metadata
@@ -240,10 +237,10 @@ def infer(args: dict,
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
+
             emb_list = target_encoder.module.return_multi_layer_emb(
                 cell_neighborhood_tokens,
                 seg_label,
-                panel_label,
                 masks_attention=masks_attention)
         
             if feature_norm:
@@ -259,12 +256,14 @@ def infer(args: dict,
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
             # Keep elements relevant to cell embedding
             elif (agg_type == "avg") or (agg_type == "weighted_avg"):
                 cell_mask = create_binary_selection_mask(
@@ -272,13 +271,15 @@ def infer(args: dict,
                     selection_type="agg_cell",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_neighborhood",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,

@@ -204,14 +204,7 @@ class SegmentMaskCollator:
             # Append the masks for the current observation to the collated lists
             collated_masks_target.append(masks_target)
             collated_masks_context.append(masks_context)
-
-            if self.has_gene_panel:
-                mask_attention = torch.cat(
-                    (torch.tensor([True]), (batch[i][0] != 0))).int()
-            else:
-                mask_attention = (batch[i][0] != 0).int()
-
-            collated_masks_attention.append(mask_attention)
+            collated_masks_attention.append((batch[i][0] != 0).int())
 
         # Trim masks to the minimum size across the batch and collate them
         collated_masks_target = [[cm[:keep_tokens_target] for cm in cm_list] for cm_list in collated_masks_target]

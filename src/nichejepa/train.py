@@ -351,18 +351,11 @@ def train(args: dict,
                 cell_neighborhood_tokens = udata[0].to(device,
                                                        non_blocking=True)
                 seg_label = udata[1].to(device, non_blocking=True)
-                if gene_panel_size > 0:
-                    panel_label = torch.tensor(
-                        [[int(dataset_id)] for dataset_id in udata[2][
-                            'dataset_id']]).to(device, non_blocking=True
-                            )
-                else:
-                    panel_label = None
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                 masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
                 masks_3 = masks_attention.to(device, non_blocking=True)
-                return (cell_neighborhood_tokens, seg_label, panel_label, masks_1, masks_2, masks_3)
-            cell_neighborhood_tokens, seg_label, panel_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
+                return (cell_neighborhood_tokens, seg_label, masks_1, masks_2, masks_3)
+            cell_neighborhood_tokens, seg_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -376,7 +369,6 @@ def train(args: dict,
                         h = target_encoder(
                             cell_neighborhood_tokens,
                             seg_label,
-                            panel_label,
                             masks_attention=masks_attention) # output (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                                        # if no <cls> token (BATCH_SIZE,
                                        # SEQ_LEN+1, EMBED_DIM) otherwise
@@ -403,7 +395,6 @@ def train(args: dict,
                     z = encoder(
                         cell_neighborhood_tokens,
                         seg_label,
-                        panel_label,
                         masks_enc) # output (BATCH_SIZE, MIN_CONTEXT_SIZE,
                                    # EMB_DIM) where MIN_CONTEXT_SIZE is minmum
                                    # context size in the batch after removal of
