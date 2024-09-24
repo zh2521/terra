@@ -92,8 +92,8 @@ class CellNeighborhoodDataset(Dataset):
             if self.has_gene_panel:
                 # If a <gene_panel> token is used, prepend it to the tokens and
                 # consider it for segment labels
-                tokens = [self.vocab_size - 
-                          (0 if self.has_cls else 1) + 
+                tokens = [self.vocab_size +
+                          (1 if self.has_cls else 0) + 
                           int(metadata['dataset_id'])] + tokens
 
                 n_nonzero_tokens += 1
@@ -142,8 +142,8 @@ class CellNeighborhoodDataset(Dataset):
             if self.has_gene_panel:
                             # If a <gene_panel> token is used, prepend it to the tokens and
                             # consider it for segment labels
-                            tokens = [self.vocab_size - 
-                                      (0 if self.has_cls else 1) + 
+                            tokens = [self.vocab_size + 
+                                      (1 if self.has_cls else 0) + 
                                       int(metadata['dataset_id'])] + tokens
 
                             n_nonzero_tokens += 1
@@ -190,8 +190,8 @@ class CellNeighborhoodDataset(Dataset):
             if self.has_gene_panel:
                 # If a <gene_panel> token is used, prepend it to the tokens and
                 # consider it for segment labels
-                tokens = [self.vocab_size - 
-                          (0 if self.has_cls else 1) + 
+                tokens = [self.vocab_size + 
+                          (1 if self.has_cls else 0) + 
                           int(metadata['dataset_id'])] + tokens
 
                 n_nonzero_tokens += 1
