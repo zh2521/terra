@@ -833,8 +833,8 @@ class GeneTransformerPredictor(nn.Module):
         # gene tokens)
         if seg_learnable:
             self.seg_embed = nn.Embedding(2 + 1, # incl. <pad>
-                                        predictor_embed_dim,
-                                        padding_idx=0)
+                                          predictor_embed_dim,
+                                          padding_idx=0)
         else:
             # If not learnable, initialize nn.Embedding with predefined values
             self.seg_embed = nn.Embedding(2+1, predictor_embed_dim, padding_idx=0)

@@ -12,6 +12,7 @@ data:
   has_cls: True
   random_state: 0
   sample_subset: False
+  sampling_strategy: null # 'random_sampling'
 logging:
   write_tag: jepa
 mask:
