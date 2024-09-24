@@ -493,6 +493,11 @@ class GeneTransformerEncoder(nn.Module):
             trunc_normal_(self.pos_embed, std=self.init_std)
             if has_cls:
                 self.pos_embed.data[0, 0, :] = 0
+                if gene_panel_size > 0:
+                    self.pos_embed.data[0, 1, :] = 0
+            else:
+                if gene_panel_size > 0:
+                    self.pos_embed.data[0, 0, :] = 0
         else:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, seq_len + (1 if has_cls else 0), embed_dim),
