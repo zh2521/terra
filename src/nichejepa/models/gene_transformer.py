@@ -464,6 +464,10 @@ class GeneTransformerEncoder(nn.Module):
             vocab_size + (1 if self.has_cls else 0), # vocab_size incl. <pad>
             embed_dim,
             padding_idx=0)
+
+        # Initialize gene panel embeddings
+        self.panel_embed = nn.Embedding(gene_panel_size,
+                                        embed_dim)
                                           
         # Initialize segment embeddings (to differentiate cell and neighborhood
         # gene tokens)
