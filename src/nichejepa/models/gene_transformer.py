@@ -694,7 +694,7 @@ class GeneTransformerEncoder(nn.Module):
     def return_multi_layer_emb(self,
                                x: torch.Tensor,
                                seg_label: torch.Tensor,
-                               panel_label: Optional[torch.Tensor],
+                               panel_label: torch.Tensor,
                                masks: Optional[Union[list, torch.Tensor]]=None,
                                masks_attention: Optional[torch.Tensor]=None 
                                ) -> list:

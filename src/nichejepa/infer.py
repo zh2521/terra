@@ -88,6 +88,7 @@ def infer(args: dict,
     pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
+    gene_panel_size = args['meta']['gene_panel_size']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
 
@@ -223,6 +224,13 @@ def infer(args: dict,
         # device
         cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
+        if gene_panel_size > 0:
+            panel_label = torch.tensor(
+                [[int(dataset_id)] for dataset_id in udata[2][
+                    'dataset_id']]).to(device, non_blocking=True
+                    )
+        else:
+            panel_label = None
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Update metadata
@@ -233,7 +241,10 @@ def infer(args: dict,
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
             emb_list = target_encoder.module.return_multi_layer_emb(
-                cell_neighborhood_tokens, seg_label, masks_attention=masks_attention)
+                cell_neighborhood_tokens,
+                seg_label,
+                panel_label,
+                masks_attention=masks_attention)
         
             if feature_norm:
                 # Normalize last layer like in training
