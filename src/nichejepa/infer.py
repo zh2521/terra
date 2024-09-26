@@ -200,6 +200,7 @@ def infer(args: dict,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         has_cls=has_cls,
+        has_gene_panel=has_gene_panel,
         distributed=False)
     
     _, _, target_encoder, _, _, start_epoch = load_checkpoint(
