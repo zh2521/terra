@@ -21,7 +21,8 @@ class CellNeighborhoodDataset(Dataset):
                  vocab_size: int,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
-                 special_tokens: list=['cls', 'assay', 'species', 'tissue', ''],
+                 special_tokens: list=[
+                    'cls', 'assay', 'species', 'tissue', 'gene_panel', 'batch'],
                  species_token: bool=False,
                  batch_token: bool=True,
                  gene_panel_token: bool=True,
@@ -83,11 +84,20 @@ class CellNeighborhoodDataset(Dataset):
              torch.ones(self.seq_len_cell),
              torch.ones(self.seq_len_neighborhood) * 2)).int()
 
-        if self.cls_token:
+        # Add special tokens
+        if 'cls' in special_tokens:
             tokens = self.dataset[item]["cls_tokens"] + tokens
-        if self.assay_token:
+        if 'assay' in special_tokens:
             tokens = self.dataset[item]["assay_token"] + tokens
-            
+        if 'species' in special_tokens:
+            tokens = self.dataset[item]["species_token"] + tokens
+        if 'tissue' in special_tokens:
+            tokens = self.dataset[item]["tissue_token"] + tokens
+        if 'gene_panel' in special_tokens:
+            tokens = self.dataset[item]["gene_panel_token"] + tokens
+        if 'batch' in special_tokens:
+            tokens = self.dataset[item]["batch_token"] + tokens
+
         return (torch.tensor(tokens), seg_labels, n_nonzero_cell_tokens,
                 n_nonzero_neighborhood_tokens, n_nonzero_tokens)
         
