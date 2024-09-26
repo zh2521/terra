@@ -392,8 +392,6 @@ class GeneTransformerEncoder(nn.Module):
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences (w/o <cls> token).
-    has_cls:
-        If 'True', sequences include a <cls> token at the start.
     gene_panel_size:
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
@@ -433,7 +431,6 @@ class GeneTransformerEncoder(nn.Module):
     def __init__(self,
                  vocab_size: int,
                  seq_len: int,
-                 has_cls: bool=True,
                  special_token_size: int=0,
                  pos_learnable: bool=False,
                  seg_learnable: bool=False,
@@ -454,12 +451,7 @@ class GeneTransformerEncoder(nn.Module):
                  ):
         super().__init__()
         self.seq_len = seq_len
-        self.has_cls = has_cls
-        self.gene_panel_size = gene_panel_size
-        if gene_panel_size > 0:
-            self.has_gene_panel = True
-        else:
-            self.has_gene_panel = False 
+        self.special_token_size = special_token_size
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
@@ -748,8 +740,6 @@ class GeneTransformerPredictor(nn.Module):
         Dimension of the input embedding.
     seq_len:
         Length of the token sequences (w/o <cls> token).
-    has_cls:
-        If 'True', sequences include a <cls> token at the start.
     has_gene_panel:
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
@@ -785,7 +775,6 @@ class GeneTransformerPredictor(nn.Module):
     def __init__(self,
                  embed_dim: int,
                  seq_len: int,
-                 has_cls: bool=True,
                  has_gene_panel: bool=True,
                  pos_learnable: bool=False,
                  seg_learnable: bool=False,
