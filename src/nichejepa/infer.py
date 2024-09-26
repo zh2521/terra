@@ -296,12 +296,12 @@ def infer(args: dict,
                 elif agg_type == "weighted_avg":
                     cell_weights = compute_unmasked_rank_based_weights(
                         cell_neighborhood_tokens, cell_mask)
-                    cell_emb, _ = compute_mean_unmasked_emb(
+                    cell_emb = compute_mean_unmasked_emb(
                         emb * cell_weights.unsqueeze(-1),
                         cell_mask)
                     neighborhood_weights = compute_unmasked_rank_based_weights(
                         cell_neighborhood_tokens, neighborhood_mask)
-                    neighborhood_emb, _ = compute_mean_unmasked_emb(
+                    neighborhood_emb = compute_mean_unmasked_emb(
                         emb * neighborhood_weights.unsqueeze(-1),
                         neighborhood_mask)
 
