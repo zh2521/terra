@@ -21,7 +21,10 @@ class CellNeighborhoodDataset(Dataset):
                  vocab_size: int,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
-                 has_cls: bool=True,
+                 special_tokens: list=['cls'],
+                 species_token: bool=False,
+                 batch_token: bool=True,
+                 gene_panel_token: bool=True,
                  has_gene_panel: bool=True,
                  sampling_strategy: Optional[str]=None,
                  sampling_seed: Optional[int]=42
@@ -77,12 +80,16 @@ class CellNeighborhoodDataset(Dataset):
         # Create segment labels
         seg_labels = torch.cat(
             (torch.zeros(self.n_special_tokens),
-                torch.ones(self.seq_len_cell),
-                torch.ones(self.seq_len_neighborhood) * 2)).int()
+             torch.ones(self.seq_len_cell),
+             torch.ones(self.seq_len_neighborhood) * 2)).int()
+
+        if self.cls_token:
+            tokens = self.dataset[item]["cls_tokens"] + tokens
+        if self.assay_token:
+            tokens = self.dataset[item]["assay_token"] + tokens
             
-        return (torch.tensor(tokens), seg_labels, metadata,
-                n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens,
-                n_nonzero_tokens)
+        return (torch.tensor(tokens), seg_labels, n_nonzero_cell_tokens,
+                n_nonzero_neighborhood_tokens, n_nonzero_tokens)
         
         # Case 2: only cell tokens are included
         elif self.seq_len_cell > 0:
