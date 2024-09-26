@@ -35,7 +35,7 @@ meta:
   use_bfloat16: True
   pos_learnable: False
   seg_learnable: False
-  gene_panel_size: 0
+  gene_panel_size: 2
 optimization:
   epochs: 20
   warmup: 3

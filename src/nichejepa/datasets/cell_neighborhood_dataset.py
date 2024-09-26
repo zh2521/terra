@@ -23,7 +23,6 @@ class CellNeighborhoodDataset(Dataset):
                  seq_len_neighborhood: int=0,
                  has_cls: bool=True,
                  has_gene_panel: bool=True,
-                 special_token_col: str='dataset_id',
                  sampling_strategy: Optional[str]=None,
                  sampling_seed: Optional[int]=42
                  ):
@@ -65,59 +64,25 @@ class CellNeighborhoodDataset(Dataset):
         return self.len
          
     def __getitem__(self, item):
-        # Case 1: both cell and neighborhood tokens are included
-        if self.seq_len_cell > 0 and self.seq_len_neighborhood > 0:
-            # Get gene tokens for cell and neighborhood
-            gene_tokens_cell = self._get_cell_tokens(item)
-            gene_tokens_neighborhood = self._get_neighborhood_tokens(item)
+        # Get gene tokens
+        gene_tokens_cell = self._get_cell_tokens(item)
+        gene_tokens_neighborhood = self._get_neighborhood_tokens(item)
+        tokens = gene_tokens_cell + gene_tokens_neighborhood
 
-            # Set tokens as the concatenation of cell and neighborhood tokens
-            tokens = gene_tokens_cell + gene_tokens_neighborhood
+        # Get number of non-zero gene tokens
+        n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)
+        n_nonzero_neighborhood_tokens = self.get_num_nonzero_neighborhood_tokens(item)
+        n_nonzero_tokens = n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens
 
-            # Set the total number of nonzero tokens as the sum of nonzero cell
-            # and neighborhood tokens
-            n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)
-            n_nonzero_neighborhood_tokens = self.get_num_nonzero_neighborhood_tokens(item)
-            n_nonzero_tokens = n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens            
+        # Create segment labels
+        seg_labels = torch.cat(
+            (torch.zeros(self.n_special_tokens),
+                torch.ones(self.seq_len_cell),
+                torch.ones(self.seq_len_neighborhood) * 2)).int()
             
-            # Set cell-level labels
-            metadata = {}
-            for key in self.dataset[item].keys():
-                if key not in ["gene_tokens_cell",
-                               "gene_tokens_neighborhood",
-                               "input_ids",
-                               "n_nonzero_cell_tokens",
-                               "n_nonzero_neighborhood_tokens",
-                               "n_nonzero_tokens"]:
-                    metadata[key] = self.dataset[item][key]
-
-            if self.has_gene_panel:
-                # If a <gene_panel> token is used, prepend it to the tokens and
-                # consider it for segment labels
-                tokens = [self.vocab_size +
-                          (1 if self.has_cls else 0) + 
-                          int(metadata[self.special_token_col])] + tokens
-
-                n_nonzero_tokens += 1
-            
-            if self.has_cls:
-                # If a <cls> token is used, prepend it to the tokens and
-                # consider it for segment labels
-                tokens = [self.vocab_size] + tokens
-                
-                # Set total number of nonzero tokens to include <cls> token
-                n_nonzero_tokens += 1
-
-            # Create segment labels: 0 for cls and gene panel token, 1 for cell
-            # tokens and 2 for neighborhood tokens
-            seg_labels = torch.cat(
-                (torch.zeros(self.has_cls + self.has_gene_panel),
-                 torch.ones(self.seq_len_cell),
-                 torch.ones(self.seq_len_neighborhood) * 2)).int()
-                
-            return (torch.tensor(tokens), seg_labels, metadata,
-                    n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens,
-                    n_nonzero_tokens)
+        return (torch.tensor(tokens), seg_labels, metadata,
+                n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens,
+                n_nonzero_tokens)
         
         # Case 2: only cell tokens are included
         elif self.seq_len_cell > 0:
@@ -142,13 +107,15 @@ class CellNeighborhoodDataset(Dataset):
                     metadata[key] = self.dataset[item][key]
             
             if self.has_gene_panel:
-                            # If a <gene_panel> token is used, prepend it to the tokens and
-                            # consider it for segment labels
-                            tokens = [self.vocab_size + 
-                                      (1 if self.has_cls else 0) + 
-                                      int(metadata[self.special_token_col])] + tokens
+                label_mapping = {}
+                # If a <gene_panel> token is used, prepend it to the tokens and
+                # consider it for segment labels
+                tokens = [
+                    self.vocab_size + 
+                    (1 if self.has_cls else 0) + 
+                    int(label_mapping.setdefault(metadata[self.special_token_col], len(label_mapping)))] + tokens
 
-                            n_nonzero_tokens += 1
+                n_nonzero_tokens += 1
             
             if self.has_cls:
                 # If a <cls> token is used, prepend it to the tokens and
@@ -192,10 +159,11 @@ class CellNeighborhoodDataset(Dataset):
             if self.has_gene_panel:
                 # If a <gene_panel> token is used, prepend it to the tokens and
                 # consider it for segment labels
-                tokens = [self.vocab_size + 
-                          (1 if self.has_cls else 0) + 
-                          int(metadata[self.special_token_col])] + tokens
-
+                label_mapping = {}
+                tokens = [
+                    self.vocab_size + 
+                    (1 if self.has_cls else 0) + 
+                    int(label_mapping.setdefault(metadata[self.special_token_col], len(label_mapping)))] + tokens
                 n_nonzero_tokens += 1
             
             if self.has_cls:
@@ -440,7 +408,7 @@ def make_cell_neighborhood_dataset(
     seq_len_neighborhood: int=0,
     has_cls: bool=True,
     has_gene_panel: bool=True,
-    special_token_col: str='dataset_id',
+    special_token_col: str='batch_id',
     distributed: bool=True,
     sampling_strategy: Optional[
         Literal['normalized_count_rank_sampling',
