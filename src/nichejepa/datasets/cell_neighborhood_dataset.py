@@ -57,7 +57,7 @@ class CellNeighborhoodDataset(Dataset):
         self.seq_len = seq_len_cell + seq_len_neighborhood
         self.has_cls = has_cls
         self.has_gene_panel = has_gene_panel
-        self.special_token_col
+        self.special_token_col = special_token_col
         self.sampling_strategy = sampling_strategy
         self.sampling_seed = sampling_seed
         
