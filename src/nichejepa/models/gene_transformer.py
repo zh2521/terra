@@ -392,7 +392,6 @@ class GeneTransformerEncoder(nn.Module):
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences (w/o <cls> token).
-    gene_panel_size:
     pos_learnable:
         If 'True', positional embeddings are learnable, otherwise use sin cos
         positional embeddings.
@@ -458,49 +457,50 @@ class GeneTransformerEncoder(nn.Module):
         
         # Initialize gene embeddings
         self.gene_embed = nn.Embedding(
-            vocab_size + special_token_size, # vocab_size includes <pad>
+            vocab_size + n_special_tokens, # vocab_size includes <pad>
             embed_dim,
             padding_idx=0)
                                           
         # Initialize segment embeddings (to differentiate cell and neighborhood
         # gene tokens)
         if seg_learnable:
-          self.seg_embed = nn.Embedding(2 + 1, # incl. <pad>
+          self.seg_embed = nn.Embedding(n_segments + 1, # incl. <pad>
                                         embed_dim,
                                         padding_idx=0)
         else:
             # If not learnable, initialize nn.Embedding with predefined values
-            self.seg_embed = nn.Embedding(2+1, embed_dim, padding_idx=0)
+            self.seg_embed = nn.Embedding(n_segments + 1, # incl. <pad>
+                                          embed_dim,
+                                          padding_idx=0)
             # Manually set the weights for the embeddings (first=0, second=1, third=2)
             with torch.no_grad():  # Prevent gradient updates to these fixed values
                 self.seg_embed.weight.copy_(
-                    torch.tensor([[0] * embed_dim,  # First embedding = 0
-                          [1] * embed_dim,  # Second embedding = 1
-                          [2] * embed_dim],  # Third embedding = 2
-                         dtype=torch.float32)
-                )
-            # Ensure the embedding is not learnable by freezing its weights
+                    torch.tensor(
+                        [[0] * embed_dim,
+                         [1] * embed_dim,
+                         [2] * embed_dim],
+                         dtype=torch.float32))
             self.seg_embed.weight.requires_grad = False
 
         # Retrieve positional embeddings
         if pos_learnable:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1,
-                            seq_len + special_token_len,
+                            seq_len,
                             embed_dim),
                 requires_grad=True)
             trunc_normal_(self.pos_embed, std=self.init_std)
-            if special_token_len > 0:
-                self.pos_embed.data[0, 0:special_token_len, :] = 0
+            if n_special_tokens > 0:
+                self.pos_embed.data[0, 0:n_special_tokens, :] = 0
         else:
             self.pos_embed = nn.Parameter(
                 torch.zeros(1,
-                            seq_len + special_token_len,
+                            seq_len,
                             embed_dim),
                 requires_grad=False)
             pos_embed = get_1d_sincos_pos_embed(
                 embed_dim=self.pos_embed.shape[-1],
-                n_zero_pos=special_token_len,
+                n_zero_pos=n_special_tokens,
                 n_sincos_pos=seq_len)
             self.pos_embed.data.copy_(
                 torch.from_numpy(pos_embed).float().unsqueeze(0))
@@ -812,23 +812,24 @@ class GeneTransformerPredictor(nn.Module):
                                           padding_idx=0)
         else:
             # If not learnable, initialize nn.Embedding with predefined values
-            self.seg_embed = nn.Embedding(2+1, predictor_embed_dim, padding_idx=0)
+            self.seg_embed = nn.Embedding(2 + 1,
+                                          predictor_embed_dim,
+                                          padding_idx=0)
             # Manually set the weights for the embeddings (first=0, second=1, third=2)
             with torch.no_grad():  # Prevent gradient updates to these fixed values
                 self.seg_embed.weight.copy_(
-                    torch.tensor([[0] * predictor_embed_dim,  # First embedding = 0
-                          [1] * predictor_embed_dim,  # Second embedding = 1
-                          [2] * predictor_embed_dim],  # Third embedding = 2
-                         dtype=torch.float32)
-                )
-            # Ensure the embedding is not learnable by freezing its weights
+                    torch.tensor(
+                        [[0] * predictor_embed_dim,  # First embedding = 0
+                         [1] * predictor_embed_dim,  # Second embedding = 1
+                         [2] * predictor_embed_dim],  # Third embedding = 2
+                         dtype=torch.float32))
             self.seg_embed.weight.requires_grad = False
 
         # Retrieve positional embedding
         if pos_learnable:
             self.predictor_pos_embed = nn.Parameter(
                 torch.zeros(1,
-                            seq_len + special_token_len,
+                            seq_len,
                             predictor_embed_dim),
                 requires_grad=True)
             trunc_normal_(self.predictor_pos_embed, std=self.init_std)
@@ -837,7 +838,7 @@ class GeneTransformerPredictor(nn.Module):
         else:
             self.predictor_pos_embed = nn.Parameter(
                 torch.zeros(1,
-                            seq_len + special_token_len,
+                            seq_len,
                             predictor_embed_dim),
                             requires_grad=False)
             predictor_pos_embed = get_1d_sincos_pos_embed(

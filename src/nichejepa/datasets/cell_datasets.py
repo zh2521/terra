@@ -8,6 +8,7 @@ import datasets
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from .cell_base_dataset import CellBaseDataset
 from ..utils.distributed import CustomDistributedLengthGroupedSampler
 
 
@@ -163,3 +164,113 @@ class CellBaseDataset(Dataset):
             sampled_tokens.extend([0] * (size - len(sampled_tokens)))
         
         return sampled_tokens
+
+
+class CellNeighborhoodDataset(CellBaseDataset):
+    def __init__(self,
+                 dataset: datasets.Dataset,
+                 vocab_size: int,
+                 seq_len_cell: int=0,
+                 seq_len_neighborhood: int=0,
+                 special_tokens: list=[
+                    'cls', 'assay', 'species', 'tissue', 'gene_panel', 'batch'],
+                 sampling_strategy: Optional[str]=None,
+                 ):
+        """
+        Torch CellNeighborhoodDataset class.
+
+        Parameters
+        -----------
+        dataset:
+            Huggingface dataset with gene and special tokens.
+        vocab_size:
+            Size of the vocabulary.
+        seq_len_cell:
+            Sequence length of the cell tokens.
+        seq_len_neighborhood:
+            Sequence length of the neighborhood tokens.
+        special_tokens:
+            Special tokens to be included in the sequence.
+        sampling_strategy:
+            Token sampling strategy.
+        """
+        self.dataset = dataset
+        self.len = len(self.dataset)
+        self.vocab_size = vocab_size
+        self.seq_len_cell = seq_len_cell
+        self.seq_len_neighborhood = seq_len_neighborhood
+        self.seq_len = seq_len_cell + seq_len_neighborhood
+        self.special_tokens = special_tokens
+        self.sampling_strategy = sampling_strategy
+         
+    def __getitem__(self, item):
+        # Get (sampled) gene tokens
+        gene_tokens_cell = self._get_gene_tokens_for_segment(
+            item=item,
+            segment_idx=1, # cell seg
+            segment_seq_len=self.seq_len_cell)
+        gene_tokens_neighborhood = self._get_gene_tokens_for_segment(
+            item=item,
+            segment_idx=2, # neighborhood seg
+            segment_seq_len=self.seq_len_neighborhood)
+        seq_tokens = gene_tokens_cell + gene_tokens_neighborhood
+
+        # Add special tokens to sequence and update segment tokens
+        if 'batch' in special_tokens:
+            seq_tokens = self.dataset[item]["batch_token"] + tokens
+        if 'gene_panel' in special_tokens:
+            seq_tokens = self.dataset[item]["gene_panel_token"] + tokens
+        if 'tissue' in special_tokens:
+            seq_tokens = self.dataset[item]["tissue_token"] + tokens
+        if 'species' in special_tokens:
+            seq_tokens = self.dataset[item]["species_token"] + tokens
+        if 'assay' in special_tokens:
+            seq_tokens = self.dataset[item]["assay_token"] + tokens
+        if 'cls' in special_tokens:
+            seq_tokens = self.dataset[item]["cls_tokens"] + tokens
+        seq_tokens = torch.tensor(seq_tokens)
+        n_special_tokens = len(special_tokens)
+        seg_tokens = torch.cat(
+            (torch.zeros(self.n_special_tokens),
+             torch.tensor(self.dataset[item]["seg_tokens"])))
+
+        return seq_tokens, seg_tokens
+
+
+class CellGraphDataset(CellBaseDataset):
+    def __init__(self,
+                 data: datasets.Dataset,
+                 vocab_size: int,
+                 seq_len: int=0,
+                 has_cls: bool=True,
+                 sampling_strategy: Optional[str]=None,
+                 sampling_seed: Optional[int]=42
+                 ):
+        """
+        Torch CellGraphDataset class.
+
+        Parameters
+        -----------
+        data:
+            Huggingface dataset with (index) cell and neighbor cell tokens and
+            cell-level metadata.
+        vocab_size:
+            Size of the vocabulary.
+        seq_len:
+            Sequence length (number of gene tokens).
+        has_cls:
+            If 'True', a <cls> token is included for each cell at position 0.
+        sampling_strategy:
+            Token sampling strategy.
+        sampling_seed:
+            Seed for token sampling.
+        """
+        self.dataset = data
+        self.len = len(self.dataset)
+        self.vocab_size = vocab_size
+        self.seq_len = seq_len
+        self.has_cls = has_cls
+        self.sampling_strategy = sampling_strategy
+        self.sampling_seed = sampling_seed
+
+    def __getitem__(self, item):

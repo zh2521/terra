@@ -1,4 +1,6 @@
+import json
 import random
+import requests
 from typing import Tuple, Union
 
 import datasets
@@ -6,7 +8,64 @@ from datasets import load_from_disk
 from sklearn.model_selection import train_test_split
 
 
-def init_dataloader_and_sampler():
+def get_ensembl_ids(gene_names: list,
+                    species: str="homo_sapiens"
+                    ) -> dict:
+    """
+    Get gene Ensembl IDs based on gene names via Ensembl REST API.
+
+    Parameters
+    ----------
+    gene_names:
+        List of gene names.
+    species:
+        Species, e.g. homo_sapiens or mus_musculus.
+
+    Returns
+    ----------
+    ensembl_ids:
+        Dictionary where keys are gene names and values are Ensembl IDs.
+    """
+    server = "https://rest.ensembl.org"
+    endpoint = f"/lookup/symbol/{species}"
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    data = {"symbols": gene_names}
+    response = requests.post(f"{server}{endpoint}", headers=headers, data=json.dumps(data))
+    
+    if response.ok:
+        ensembl_ids = {}
+        for key, value in response.json().items():
+            ensembl_ids[key] = value["id"]
+        if len(ensembl_ids.keys()) != len(gene_names):
+            missing_genes = [gene for gene in gene_names if gene not in ensembl_ids.keys()]
+            print(f"Could not find Ensembl IDs for genes: {missing_genes}.")
+        return ensembl_ids
+    else:
+        response.raise_for_status()
+
+
+def init_dataloader_and_sampler(batch_size: int,
+                                   data: datasets.Dataset,
+                                   vocab_size: int,
+                                   collator=None,
+                                   pin_mem: bool=True,
+                                   num_workers: int=8,
+                                   world_size: int=1,
+                                   rank: int=0,
+                                   drop_last: bool=True,
+                                   seq_len_cell: int=0,
+                                   seq_len_neighborhood: int=0,
+                                   special_tokens: list
+                                   distributed: bool=True,
+                                   sampling_strategy: Optional[Literal[
+                                       'norm_count_rank_sampling',
+                                       'norm_count_rank_sampling_rep',
+                                       'rand_sampling',
+                                       'rand_sampling_rep']]=None,
+    ) -> Tuple[CellNeighborhoodDataset,
+               torch.utils.data.DataLoader,
+               Optional[torch.utils.data.distributed.DistributedSampler]]:):
     """
     Convert huggingface Dataset into a torch CellNeighborhoodDataset object and
     create corresponding data loader.
@@ -158,4 +217,3 @@ def prepare_dataset(args: dict,
             dataset = dataset.map(add_split_label, with_indices=True)
 
             return dataset
-            

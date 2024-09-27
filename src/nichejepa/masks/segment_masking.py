@@ -1,8 +1,10 @@
-import numpy as np
-import torch
+from typing import List, Literal, Optional, Tuple
+
 from logging import getLogger
 from multiprocessing import Value
-from typing import List, Literal, Optional, Tuple
+
+import numpy as np
+import torch
 
 
 logger = getLogger()
