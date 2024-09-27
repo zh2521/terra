@@ -170,12 +170,7 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
             self.num_samples = math.ceil(len(self.dataset) / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
         self.seed = seed
-        if (seq_len_cell > 0) and (seq_len_neighborhood > 0):
-          self.lengths = hugging_face_dataset['n_nonzero_tokens']
-        elif (seq_len_cell > 0):
-          self.lengths = hugging_face_dataset['n_nonzero_cell_tokens']
-        elif (seq_len_neighborhood > 0):
-          self.lengths = hugging_face_dataset['n_nonzero_neighborhood_tokens']
+        self.lengths = hugging_face_dataset['n_nonzero_tokens']
 
     def __iter__(self) -> Iterator:
         # Deterministically shuffle based on epoch and seed

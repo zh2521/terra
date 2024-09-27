@@ -33,7 +33,7 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 import wandb
-from datasets import load_from_disk
+from datasets import dataset, load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
@@ -67,8 +67,8 @@ logger = logging.getLogger()
 
 
 def train(args: dict,
-          train_dataset: CellNeighborhoodDataset,
-          test_dataset: CellNeighborhoodDataset,
+          train_dataset: dataset,
+          test_dataset: dataset,
           resume_preempt: bool=False,
           save_folder_path: Optional[str]=None,
           ):
