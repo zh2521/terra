@@ -1,26 +1,16 @@
-import os
-import subprocess
-import time
-from logging import getLogger
-from typing import Optional, Tuple, List, Literal
+from typing import Optional, List, Literal
 
 import datasets
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from .cell_base_dataset import CellBaseDataset
-from ..utils.distributed import CustomDistributedLengthGroupedSampler
-
-
-_GLOBAL_SEED = 0
-logger = getLogger()
 
 
 class CellBaseDataset(Dataset):
     def __init__(self,
                  dataset: datasets.Dataset,
                  vocab_size: int,
-                 special_tokens: list=[
+                 special_tokens: List=[
                     'cls', 'assay', 'species', 'tissue', 'gene_panel', 'batch'],
                  sampling_strategy: Optional[
                     Literal['norm_count_rank_sampling',
@@ -34,11 +24,13 @@ class CellBaseDataset(Dataset):
         Parameters
         -----------
         dataset:
-            Huggingface dataset with gene and special tokens.
+            Huggingface dataset with sequences of gene tokens and special
+            tokens.
         vocab_size:
             Size of the vocabulary.
         special_tokens:
-            Special tokens to be included in the sequence.
+            Special tokens to be included in the sequence processed by the
+            model.
         sampling_strategy:
             Token sampling strategy.
         """
@@ -70,18 +62,18 @@ class CellBaseDataset(Dataset):
 
         Returns
         --------
-        seg_gene_tokens:
+        segment_gene_tokens:
             List of tokens for a given segment.
         """
         # Only keep gene tokens in specified segment
-        seg_gene_tokens = self.dataset[item]["gene_tokens"][
+        segment_gene_tokens = self.dataset[item]["gene_tokens"][
             self.dataset[item]["seg_tokens"] == segment_idx]
 
         # Validate that segment sequence length is specified correctly
         if 'rep' in self.sampling_strategy:
             pass
         else:
-            if segment_seq_len > len(seg_gene_tokens):
+            if segment_seq_len > len(segment_gene_tokens):
                 raise ValueError(
                     'Sequence length for a given segment cannot be larger than'
                     'segment size when not sampling with replacement.')
@@ -89,18 +81,19 @@ class CellBaseDataset(Dataset):
         # If no sampling strategy is specified, use all tokens up to specified
         # length
         if self.sampling_strategy is None:
-            seg_gene_tokens = seg_gene_tokens[:segment_seq_len]
+            segment_gene_tokens = segment_gene_tokens[:segment_seq_len]
         # Otherwise, sample a subset of tokens based on the sampling strategy
         else:
-            n_nonzero_tokens = sum(1 for token in seg_gene_tokens if token != 0)
+            segment_n_nonzero_tokens = sum(
+                1 for token in segment_gene_tokens if token != 0)
 
-            seg_gene_tokens = self._create_sampled_token_sequence(
-                tokens=seg_gene_tokens,
-                n_nonzero_tokens=n_nonzero_tokens,
+            segment_gene_tokens = self._create_sampled_token_sequence(
+                tokens=segment_gene_tokens,
+                n_nonzero_tokens=segment_n_nonzero_tokens,
                 size=segment_seq_len,
                 self.sampling_strategy)
                 
-        return seg_gene_tokens
+        return segment_gene_tokens
             
     def _create_sampled_token_sequence(self,
                                        tokens: List,
@@ -132,16 +125,18 @@ class CellBaseDataset(Dataset):
             List of sampled tokens.
         """
         if 'norm_count_rank_sampling' in sampling_strategy:
-            # Calculate weights based on rank and number of nonzero tokens
-            # Higher the rank, higher the weight
-            # a = [4, 1, 3, 2, 5, 0, 0, 0]
+            # Calculate weights based on rank and number of nonzero tokens: the
+            # higher the rank, the higher the weight
+            # seq = [4, 1, 3, 2, 5, 0, 0, 0]
             # n_nonzero_tokens = 5  
             # sum_rank = 5 * (5 + 1) / 2.0 = 15.0
-            # weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)] 
-            # = [0.3333333333333333, 0.26666666666666666, 0.2, 0.13333333333333333, 0.06666666666666667]
+            # weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
+            #     n_nonzero_tokens)] 
+            # = [0.333, 0.266, 0.2, 0.133, 0.066]
             # np.sum(weights) = 1.0
             sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
-            weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)]
+            weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
+                n_nonzero_tokens)]
             assert np.isclose(np.sum(weights), 1.0)
         elif 'rand_sampling' in sampling_strategy:
             weights = np.ones(n_nonzero_tokens) / n_nonzero_tokens
@@ -194,14 +189,10 @@ class CellNeighborhoodDataset(CellBaseDataset):
         sampling_strategy:
             Token sampling strategy.
         """
-        self.dataset = dataset
-        self.len = len(self.dataset)
-        self.vocab_size = vocab_size
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
-        self.seq_len = seq_len_cell + seq_len_neighborhood
-        self.special_tokens = special_tokens
-        self.sampling_strategy = sampling_strategy
+        self.seq_len = seq_len_cell + seq_len_neighborhood + len(special_tokens)
+        self.n_special_tokens = len(special_tokens)
          
     def __getitem__(self, item):
         # Get (sampled) gene tokens
@@ -229,7 +220,6 @@ class CellNeighborhoodDataset(CellBaseDataset):
         if 'cls' in special_tokens:
             seq_tokens = self.dataset[item]["cls_tokens"] + tokens
         seq_tokens = torch.tensor(seq_tokens)
-        n_special_tokens = len(special_tokens)
         seg_tokens = torch.cat(
             (torch.zeros(self.n_special_tokens),
              torch.tensor(self.dataset[item]["seg_tokens"])))
@@ -239,38 +229,73 @@ class CellNeighborhoodDataset(CellBaseDataset):
 
 class CellGraphDataset(CellBaseDataset):
     def __init__(self,
-                 data: datasets.Dataset,
+                 dataset: datasets.Dataset,
                  vocab_size: int,
-                 seq_len: int=0,
-                 has_cls: bool=True,
+                 seq_len_index_cell: int=0,
+                 seq_len_neighbor_cells: int=0,
+                 max_n_neighbor_cells: int=0,
+                 special_tokens: list=[
+                    'cls', 'assay', 'species', 'tissue', 'gene_panel', 'batch'],
                  sampling_strategy: Optional[str]=None,
-                 sampling_seed: Optional[int]=42
                  ):
         """
         Torch CellGraphDataset class.
 
         Parameters
         -----------
-        data:
-            Huggingface dataset with (index) cell and neighbor cell tokens and
-            cell-level metadata.
+        dataset:
+            Huggingface dataset with gene and special tokens.
         vocab_size:
             Size of the vocabulary.
-        seq_len:
-            Sequence length (number of gene tokens).
-        has_cls:
-            If 'True', a <cls> token is included for each cell at position 0.
+        seq_len_index_cell:
+            Sequence length of the index cell tokens.
+        seq_len_neighbor_cells:
+            Sequence length of the neighbor cell tokens.
+        max_n_neighbor_cells:
+            Maximum number of neighbor cells.
+        special_tokens:
+            Special tokens to be included in the sequence.
         sampling_strategy:
             Token sampling strategy.
-        sampling_seed:
-            Seed for token sampling.
         """
-        self.dataset = data
-        self.len = len(self.dataset)
-        self.vocab_size = vocab_size
-        self.seq_len = seq_len
-        self.has_cls = has_cls
-        self.sampling_strategy = sampling_strategy
-        self.sampling_seed = sampling_seed
-
+        self.seq_len_index_cell = seq_len_index_cell
+        self.seq_len_neighbor_cells = seq_len_neighbor_cells
+        self.seq_len = seq_len_index_cell + seq_len_neighbor_cells + len(
+            special_tokens)
+        self.n_special_tokens = len(special_tokens)
+         
     def __getitem__(self, item):
+        # Get (sampled) gene tokens
+        gene_tokens_index_cell = self._get_gene_tokens_for_segment(
+            item=item,
+            segment_idx=1, # cell seg
+            segment_seq_len=self.seq_len_index_cell)
+        gene_tokens_neighbor_cells = []
+        for segment_idx in np.unique(self.dataset[item]["seg_tokens"]):
+            if segment_idx != 1:
+                gene_tokens_neighbor_cells.extend(
+                    self._get_gene_tokens_for_segment(
+                        item=item,
+                        segment_idx=segment_idx, # neighborhood seg
+                        segment_seq_len=self.seq_len_neighbor_cells))
+        seq_tokens = gene_tokens_index_cell + gene_tokens_neighbor_cells
+
+        # Add special tokens to sequence and update segment tokens
+        if 'batch' in special_tokens:
+            seq_tokens = self.dataset[item]["batch_token"] + tokens
+        if 'gene_panel' in special_tokens:
+            seq_tokens = self.dataset[item]["gene_panel_token"] + tokens
+        if 'tissue' in special_tokens:
+            seq_tokens = self.dataset[item]["tissue_token"] + tokens
+        if 'species' in special_tokens:
+            seq_tokens = self.dataset[item]["species_token"] + tokens
+        if 'assay' in special_tokens:
+            seq_tokens = self.dataset[item]["assay_token"] + tokens
+        if 'cls' in special_tokens:
+            seq_tokens = self.dataset[item]["cls_tokens"] + tokens
+        seq_tokens = torch.tensor(seq_tokens)
+        seg_tokens = torch.cat(
+            (torch.zeros(self.n_special_tokens),
+             torch.tensor(self.dataset[item]["seg_tokens"])))
+
+        return seq_tokens, seg_tokens
