@@ -215,10 +215,8 @@ def train(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        gene_panel_size=gene_panel_size,
         pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
-        has_cls=has_cls)
+        seg_learnable=seg_learnable)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -228,8 +226,6 @@ def train(args: dict,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls,
-            has_gene_panel=has_gene_panel,
             per_segment_mask_ratio=per_segment_mask_ratio)
     else:
         mask_collator = MaskCollator(
@@ -239,10 +235,17 @@ def train(args: dict,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls,
             has_gene_panel=has_gene_panel)
     
-    # Initialize dataloader and -sampler
+    # Initialize dataset, dataloader and sampler
+    dataset = CellNeighborhoodDataset(data,
+                                      vocab_size,
+                                      seq_len_cell=seq_len_cell,
+                                      seq_len_neighborhood=seq_len_neighborhood,
+                                      special_tokens=special_tokens,
+                                      sampling_strategy=sampling_strategy)
+
+
     _, train_loader, train_sampler = make_cell_neighborhood_dataset(
         batch_size=batch_size,
         data=train_dataset,

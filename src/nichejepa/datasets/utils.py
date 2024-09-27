@@ -6,6 +6,82 @@ from datasets import load_from_disk
 from sklearn.model_selection import train_test_split
 
 
+def init_dataloader_and_sampler():
+    """
+    Convert huggingface Dataset into a torch CellNeighborhoodDataset object and
+    create corresponding data loader.
+
+    Parameters
+    -----------
+    batch_size:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
+    data:
+        Huggingface dataset with cell and neighborhood tokens and cell-level
+        labels.
+    vocab_size:
+        Size of the vocabulary.
+    collator:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
+    pin_mem:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
+    num_workers:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
+    world_size:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler.
+    rank:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.distributed.DistributedSampler.
+    drop_last:
+        See https://pytorch.org/docs/stable/data.html#torch.utils.data.DataLoader.
+    seq_len_cell:
+        Sequence length of the cell tokens.
+    seq_len_neighborhood:
+        Sequence length of the neighborhood tokens.
+    special_tokens:
+    distributed:
+        If 'True', use distributed mode.
+
+    Returns
+    --------
+    dataset:
+        Torch CellNeighborhoodDataset.
+    data_loader:
+        Torch data loader based on CellNeighborhoodDataset.
+    dist_sampler:
+        Torch distributed sampler based on CellNeighborhoodDataset.
+    """
+    if distributed:
+        dist_sampler = CustomDistributedLengthGroupedSampler(
+            dataset,
+            batch_size,
+            hugging_face_dataset=data,
+            num_replicas=world_size,
+            rank=rank,
+            seed=_GLOBAL_SEED)
+
+        data_loader = torch.utils.data.DataLoader(dataset,
+                                                  collate_fn=collator,
+                                                  sampler=dist_sampler,
+                                                  batch_size=batch_size,
+                                                  drop_last=drop_last,
+                                                  pin_memory=pin_mem,
+                                                  num_workers=num_workers,
+                                                  persistent_workers=False)
+        logger.info('Data loader created.')
+
+        return dataset, data_loader, dist_sampler
+    else:
+        data_loader = torch.utils.data.DataLoader(dataset,
+                                                  collate_fn=collator,
+                                                  batch_size=batch_size,
+                                                  drop_last=drop_last,
+                                                  pin_memory=pin_mem,
+                                                  num_workers=num_workers,
+                                                  persistent_workers=False)
+        logger.info('Data loader created.')
+        
+        return dataset, data_loader
+
+
 def prepare_dataset(args: dict,
                     split_dataset: bool=True
                     ) -> Union[Tuple[datasets.arrow_dataset.Dataset,
