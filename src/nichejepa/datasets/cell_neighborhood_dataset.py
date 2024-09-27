@@ -23,12 +23,7 @@ class CellNeighborhoodDataset(Dataset):
                  seq_len_neighborhood: int=0,
                  special_tokens: list=[
                     'cls', 'assay', 'species', 'tissue', 'gene_panel', 'batch'],
-                 species_token: bool=False,
-                 batch_token: bool=True,
-                 gene_panel_token: bool=True,
-                 has_gene_panel: bool=True,
                  sampling_strategy: Optional[str]=None,
-                 sampling_seed: Optional[int]=42
                  ):
         """
         Torch CellNeighborhoodDataset class.
@@ -65,10 +60,32 @@ class CellNeighborhoodDataset(Dataset):
         return self.len
          
     def __getitem__(self, item):
-        # Get gene tokens
-        gene_tokens_cell = self._get_cell_tokens(item)
-        gene_tokens_neighborhood = self._get_neighborhood_tokens(item)
+        # Get (sampled) gene tokens
+        gene_tokens_cell = self._get_seg_gene_tokens(
+            item=item:
+            segment_idx=1, # cell seg
+            segment_seq_len=self.seq_len_cell)
+        gene_tokens_neighborhood = self._get_seg_gene_tokens(
+            item=item:
+            segment_idx=2, # neighborhood seg
+            segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neighborhood
+
+        # Add special tokens
+        if 'batch' in special_tokens:
+            tokens = self.dataset[item]["batch_token"] + tokens
+        if 'gene_panel' in special_tokens:
+            tokens = self.dataset[item]["gene_panel_token"] + tokens
+        if 'tissue' in special_tokens:
+            tokens = self.dataset[item]["tissue_token"] + tokens
+        if 'species' in special_tokens:
+            tokens = self.dataset[item]["species_token"] + tokens
+        if 'assay' in special_tokens:
+            tokens = self.dataset[item]["assay_token"] + tokens
+        if 'cls' in special_tokens:
+            tokens = self.dataset[item]["cls_tokens"] + tokens
+
+        n_special_tokens = len(special_tokens)
 
         # Get number of non-zero gene tokens
         n_nonzero_cell_tokens = self.get_num_nonzero_cell_tokens(item)
@@ -80,19 +97,7 @@ class CellNeighborhoodDataset(Dataset):
             (torch.zeros(self.n_special_tokens),
              torch.tensor(self.dataset[item]["seg_tokens"])))
 
-        # Add special tokens
-        if 'cls' in special_tokens:
-            tokens = self.dataset[item]["cls_tokens"] + tokens
-        if 'assay' in special_tokens:
-            tokens = self.dataset[item]["assay_token"] + tokens
-        if 'species' in special_tokens:
-            tokens = self.dataset[item]["species_token"] + tokens
-        if 'tissue' in special_tokens:
-            tokens = self.dataset[item]["tissue_token"] + tokens
-        if 'gene_panel' in special_tokens:
-            tokens = self.dataset[item]["gene_panel_token"] + tokens
-        if 'batch' in special_tokens:
-            tokens = self.dataset[item]["batch_token"] + tokens
+
 
         return (torch.tensor(tokens), seg_labels, n_nonzero_cell_tokens,
                 n_nonzero_neighborhood_tokens, n_nonzero_tokens)
@@ -177,7 +182,7 @@ class CellNeighborhoodDataset(Dataset):
         sampled_tokens:
             List of sampled tokens.
         """
-        if sampling_strategy == 'normalized_count_rank_sampling':
+        if 'norm_count_rank_sampling' in sampling_strategy:
             # Calculate weights based on rank and number of nonzero tokens
             # Higher the rank, higher the weight
             # a = [4, 1, 3, 2, 5, 0, 0, 0]
@@ -189,21 +194,18 @@ class CellNeighborhoodDataset(Dataset):
             sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
             weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)]
             assert np.isclose(np.sum(weights), 1.0)
-        elif sampling_strategy == 'random_sampling':
-            np.random.seed(seed)
-
+        elif 'rand_sampling' in sampling_strategy:
             weights = np.ones(n_nonzero_tokens) / n_nonzero_tokens
         else:
             raise ValueError(
-                f"{sampling_strategy} is an invalid sampling strategy.")
+                f"'{sampling_strategy}' is an invalid sampling strategy.")
             
-        # Sample seq_cell_len or seq_neighborhood token indices based on
-        # weights
+        # Sample token indices based on weights
         sampled_indices = np.random.choice(
             np.arange(n_nonzero_tokens),
             size=min(size, n_nonzero_tokens),
             p=weights,
-            replace=False)
+            replace=(True if 'rep' in sampling_strategy else False)
             
         # Sort sampled indices to preserve rank order
         sampled_indices = np.sort(sampled_indices)
@@ -215,25 +217,24 @@ class CellNeighborhoodDataset(Dataset):
         return sampled_tokens
 
 
-def make_cell_neighborhood_dataset(
-    batch_size: int,
-    data: datasets.Dataset,
-    vocab_size: int,
-    collator=None,
-    pin_mem: bool=True,
-    num_workers: int=8,
-    world_size: int=1,
-    rank: int=0,
-    drop_last: bool=True,
-    seq_len_cell: int=0,
-    seq_len_neighborhood: int=0,
-    has_cls: bool=True,
-    has_gene_panel: bool=True,
-    special_token_col: str='batch_id',
-    distributed: bool=True,
-    sampling_strategy: Optional[
-        Literal['normalized_count_rank_sampling',
-                'random_sampling']]=None,
+def make_cell_neighborhood_dataset(batch_size: int,
+                                   data: datasets.Dataset,
+                                   vocab_size: int,
+                                   collator=None,
+                                   pin_mem: bool=True,
+                                   num_workers: int=8,
+                                   world_size: int=1,
+                                   rank: int=0,
+                                   drop_last: bool=True,
+                                   seq_len_cell: int=0,
+                                   seq_len_neighborhood: int=0,
+                                   special_tokens: list
+                                   distributed: bool=True,
+                                   sampling_strategy: Optional[Literal[
+                                       'norm_count_rank_sampling',
+                                       'norm_count_rank_sampling_rep',
+                                       'rand_sampling',
+                                       'rand_sampling_rep']]=None,
     ) -> Tuple[CellNeighborhoodDataset,
                torch.utils.data.DataLoader,
                Optional[torch.utils.data.distributed.DistributedSampler]]:
@@ -266,9 +267,7 @@ def make_cell_neighborhood_dataset(
         Sequence length of the cell tokens.
     seq_len_neighborhood:
         Sequence length of the neighborhood tokens.
-    has_cls:
-        If 'True', a <cls> token is included for each cell at position 0.
-    has_gene_panel:
+    special_tokens:
     distributed:
         If 'True', use distributed mode.
 
@@ -285,9 +284,7 @@ def make_cell_neighborhood_dataset(
                                       vocab_size,
                                       seq_len_cell=seq_len_cell,
                                       seq_len_neighborhood=seq_len_neighborhood,
-                                      has_cls=has_cls,
-                                      has_gene_panel=has_gene_panel,
-                                      special_token_col=special_token_col,
+                                      special_tokens=special_tokens,
                                       sampling_strategy=sampling_strategy)
     
     if distributed:

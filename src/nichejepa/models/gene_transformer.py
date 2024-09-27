@@ -842,7 +842,7 @@ class GeneTransformerPredictor(nn.Module):
                             requires_grad=False)
             predictor_pos_embed = get_1d_sincos_pos_embed(
                 embed_dim=self.predictor_pos_embed.shape[-1],
-                n_zero_pos=special_token_len
+                n_zero_pos=special_token_len,
                 n_sincos_pos=seq_len)
             self.predictor_pos_embed.data.copy_(
                 torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
