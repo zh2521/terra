@@ -62,11 +62,11 @@ class CellNeighborhoodDataset(Dataset):
     def __getitem__(self, item):
         # Get (sampled) gene tokens
         gene_tokens_cell = self._get_seg_gene_tokens(
-            item=item:
+            item=item,
             segment_idx=1, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neighborhood = self._get_seg_gene_tokens(
-            item=item:
+            item=item,
             segment_idx=2, # neighborhood seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neighborhood
@@ -205,7 +205,7 @@ class CellNeighborhoodDataset(Dataset):
             np.arange(n_nonzero_tokens),
             size=min(size, n_nonzero_tokens),
             p=weights,
-            replace=(True if 'rep' in sampling_strategy else False)
+            replace=(True if 'rep' in sampling_strategy else False))
             
         # Sort sampled indices to preserve rank order
         sampled_indices = np.sort(sampled_indices)
