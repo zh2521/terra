@@ -7,7 +7,7 @@ from typing import Optional, Tuple, List, Literal
 import datasets
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from .cell_base_dataset import CellBaseDataset
 from ..utils.distributed import CustomDistributedLengthGroupedSampler
 
 
@@ -15,7 +15,7 @@ _GLOBAL_SEED = 0
 logger = getLogger()
 
 
-class CellGraphDataset(Dataset):
+class CellGraphDataset(CellBaseDataset):
     def __init__(self,
                  data: datasets.Dataset,
                  vocab_size: int,
