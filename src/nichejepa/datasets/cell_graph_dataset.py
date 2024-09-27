@@ -217,7 +217,7 @@ class CellGraphDataset(Dataset):
                 f"{sampling_strategy} is an invalid sampling strategy.")
 
 
-def make_cell_neighborhood_dataset(
+def make_cell_graph_dataset(
     batch_size: int,
     data: datasets.Dataset,
     vocab_size: int,

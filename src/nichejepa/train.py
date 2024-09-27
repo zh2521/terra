@@ -255,8 +255,6 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls,
-        has_gene_panel=has_gene_panel,
         sampling_strategy=sampling_strategy)
 
     _, test_loader, test_sampler = make_cell_neighborhood_dataset(
@@ -271,8 +269,6 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls,
-        has_gene_panel=has_gene_panel,
         sampling_strategy=sampling_strategy)
 
     ipe = len(train_loader)
@@ -349,16 +345,11 @@ def train(args: dict,
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            def load_cell_neighborhoods():
-                # -- unsupervised imgs
-                cell_neighborhood_tokens = udata[0].to(device,
-                                                       non_blocking=True)
-                seg_label = udata[1].to(device, non_blocking=True)
-                masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
-                masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
-                masks_3 = masks_attention.to(device, non_blocking=True)
-                return (cell_neighborhood_tokens, seg_label, masks_1, masks_2, masks_3)
-            cell_neighborhood_tokens, seg_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
+            tokens = udata[0].to(device, non_blocking=True)
+            seg_label = udata[1].to(device, non_blocking=True)
+            masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
+            masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
+            masks_attention = masks_attention.to(device, non_blocking=True)
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -370,7 +361,7 @@ def train(args: dict,
                     with torch.no_grad(): # no backward pass for target encoder
                         # Encode all cell neighborhood tokens
                         h = target_encoder(
-                            cell_neighborhood_tokens,
+                            tokens,
                             seg_label,
                             masks_attention=masks_attention) # output (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                                        # if no <cls> token (BATCH_SIZE,

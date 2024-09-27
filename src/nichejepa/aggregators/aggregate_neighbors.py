@@ -5,7 +5,7 @@ import squidpy as sq
 
 
 def aggregate_neighbors(adata: ad.AnnData,
-                        radius: float
+                        radius=27.5: float
                         ) -> ad.AnnData:
     """
     Aggregate cell features by neighborhood radius.
@@ -32,7 +32,7 @@ def aggregate_neighbors(adata: ad.AnnData,
                             radius=radius,
                             set_diag=True)
 
-    adata.layers["X_neighborhood"] = (adata.obsp["spatial_connectivities"].T @
-                                      adata.X)
+    adata.layers["X_neighborhood"] = (
+        adata.obsp["spatial_connectivities"].T @ adata.X)
 
     return adata

@@ -28,10 +28,6 @@ class SegmentMaskCollator:
         The length of the token sequence representing the cell segment.
     seq_len_neighborhood: int
         The length of the token sequence representing the neighborhood segment.
-    has_cls: bool
-        If True, the sequence contains a <cls> token at the 0th index, included
-        in the masks.
-    has_gene_panel:
     per_segment_mask_ratio: float
         The ratio of elements to be masked in each segment.
     """
@@ -43,8 +39,6 @@ class SegmentMaskCollator:
                  context_mask_size: int=10,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
-                 has_cls: bool=False,
-                 has_gene_panel: bool=False,
                  per_segment_mask_ratio: float=0.3):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
@@ -53,15 +47,11 @@ class SegmentMaskCollator:
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len = self.seq_len_cell + self.seq_len_neighborhood
-        self.has_cls = has_cls
-        self.has_gene_panel = has_gene_panel
         self.per_segment_mask_ratio = per_segment_mask_ratio
 
         # Determine the valid start position for the mask based on the presence
-        # of a <cls> token and gene panel token
-        self.valid_min_start = 1 if self.has_cls else 0
-        if has_gene_panel:
-            self.valid_min_start += 1
+        # of a <cls> token
+        self.valid_min_start = 1
 
     def segment_masking(self,
                         sequence,
@@ -118,10 +108,7 @@ class SegmentMaskCollator:
                 masked_indices = segment_non_zero_indices[mask_indices].tolist()  # Convert to list
                 context_mask[masked_indices] = 0  # Set masked indices to 0 in the context mask
                 keep_tokens_target = min(keep_tokens_target, len(masked_indices))  # Update minimum tokens target
-                if self.has_cls and self.has_gene_panel: # add index of cls and gene panel
-                    masked_indices = [0, 1] + masked_indices
-                elif self.has_cls or self.has_gene_panel:
-                    masked_indices = [0] + masked_indices
+                masked_indices = [0] + masked_indices # include <cls> token
                 segment_masks.append(torch.tensor(masked_indices))  # Append the masked indices io the list
             else:
                 segment_masks.append(torch.tensor([]))  # If no elements to mask, append an empty list

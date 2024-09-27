@@ -17,7 +17,7 @@ logger = getLogger()
 
 class CellNeighborhoodDataset(Dataset):
     def __init__(self,
-                 data: datasets.Dataset,
+                 dataset: datasets.Dataset,
                  vocab_size: int,
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
@@ -30,30 +30,26 @@ class CellNeighborhoodDataset(Dataset):
 
         Parameters
         -----------
-        data:
-            Huggingface dataset with cell and neighborhood tokens and cell-level
-            metadata.
+        dataset:
+            Huggingface dataset with gene and special tokens.
         vocab_size:
             Size of the vocabulary.
         seq_len_cell:
             Sequence length of the cell tokens.
         seq_len_neighborhood:
             Sequence length of the neighborhood tokens.
-        has_cls:
-            If 'True', a <cls> token is included for each cell at position 0.
-        has_gene_panel:
+        special_tokens:
+            Special tokens to be included in the sequence.
         sampling_strategy:
             Token sampling strategy.
         """
-        self.dataset = data
+        self.dataset = huggingface_dataset
         self.len = len(self.dataset)
         self.vocab_size = vocab_size
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len = seq_len_cell + seq_len_neighborhood
-        self.has_cls = has_cls
-        self.has_gene_panel = has_gene_panel
-        self.special_token_col = special_token_col
+        self.special_tokens = special_tokens
         self.sampling_strategy = sampling_strategy
         
     def __len__(self):

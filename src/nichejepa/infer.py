@@ -225,22 +225,17 @@ def infer(args: dict,
     all_neighborhood_gene_emb_dict = {}
 
     for itr, (udata, masks_enc, masks_pred, masks_attention) in tqdm(enumerate(loader)):
-        # Load cell neighborhood tokens and segmentation label to the specified
-        # device
-        cell_neighborhood_tokens = udata[0].to(device, non_blocking=True)
+        # Load gene tokens and segmentation label to the specified device
+        tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
-
-        # Update metadata
-        for key, value in udata[2].items():
-            metadata[key].extend(value)
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
             emb_list = target_encoder.module.return_multi_layer_emb(
-                cell_neighborhood_tokens,
+                tokens,
                 seg_label,
                 masks_attention=masks_attention)
         
@@ -254,17 +249,13 @@ def infer(args: dict,
             # Keep only <cls> token; at the moment there is only 1 <cls> token
             if agg_type == "cls":
                 cell_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type=agg_type,
-                    seq_len_cell=seq_len_cell,
-                    has_cls=has_cls,
-                    has_gene_panel=has_gene_panel)
+                    seq_len_cell=seq_len_cell)
                 neighborhood_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type=agg_type,
-                    seq_len_cell=seq_len_cell,
-                    has_cls=has_cls,
-                    has_gene_panel=has_gene_panel)
+                    seq_len_cell=seq_len_cell)
 
                 cell_emb = compute_mean_unmasked_emb(emb,
                                                      cell_mask)
@@ -277,16 +268,12 @@ def infer(args: dict,
                     cell_neighborhood_tokens,
                     selection_type="agg_cell",
                     excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=seq_len_cell,
-                    has_cls=has_cls,
-                    has_gene_panel=has_gene_panel)
+                    seq_len_cell=seq_len_cell)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_neighborhood",
                     excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=seq_len_cell,
-                    has_cls=has_cls,
-                    has_gene_panel=has_gene_panel)
+                    seq_len_cell=seq_len_cell)
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,
