@@ -116,30 +116,26 @@ class CellNeighborhoodDataset(Dataset):
         gene_tokens_cell:
             List of cell tokens.
         """
-        # If cell sequence length is greater than the number of cell tokens in
-        # the huggingface dataset, use all tokens
+        # Remove neighborhood gene tokens
         gene_tokens_cell = self.dataset[item]["gene_tokens"][
             self.dataset[item]["seg_tokens"] == 1]
-        if self.seq_len_cell >= :
-            gene_tokens_cell = self.dataset[item]["gene_tokens_cell"]
+
+        # If sampling strategy is not specified, use all tokens up to specified
+        # cell sequence lengths
+        if self.sampling_strategy is None:
+            gene_tokens_cell = gene_tokens_cell[
+                :min(len(gene_tokens_cell), self.seq_len_cell)]
             
-        # Otherwise, use a subset of tokens
+        # Otherwise, sample a subset of tokens based on the sampling strategy
         else:
-            # If sampling strategy is not specified, use all tokens up to
-            # specified cell sequence lengths
-            if self.sampling_strategy is None:
-                gene_tokens_cell = gene_tokens_cell[
-                    :min(len(gene_tokens_cell), self.seq_len_cell)]
-                
-            # Otherwise, sample a subset of tokens based on the sampling
-            # strategy
-            else:
-                gene_tokens_cell = self.create_sampled_token_sequence(
-                    self.dataset[item]["gene_tokens_cell"],
-                    self.dataset[item]["n_nonzero_cell_tokens"],
-                    self.seq_len_cell,
-                    self.sampling_strategy,
-                    self.sampling_seed)
+            n_nonzero_cell_tokens = [gene_tokens_cell != 0]
+
+            gene_tokens_cell = self.create_sampled_token_sequence(
+                self.dataset[item]["gene_tokens_cell"],
+                self.dataset[item]["n_nonzero_cell_tokens"],
+                self.seq_len_cell,
+                self.sampling_strategy,
+                self.sampling_seed)
                 
         return gene_tokens_cell
 
