@@ -45,46 +45,8 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     return pos_embed
 
 
-def get_1d_sincos_pos_embed_from_pos(embed_dim: int,
-                                     pos: np.ndarray,
-                                     ) -> np.ndarray:
-    """
-    Retrieve 1D sin cos positional embedding from an array of positions/sequence
-    index.
-
-    Parameters
-    -----------
-    embed_dim:
-        Output dimension of the positional embedding (for each position). Has
-        to be divisible by 2.
-    pos:
-        An array containing the positions to be embedded.
-        
-    Returns
-    -----------
-    pos_emb:
-        The positional embedding with shape (len(pos), embed_dim).
-    """
-    assert embed_dim % 2 == 0
-    omega = np.arange(embed_dim // 2, dtype=float)
-    omega /= embed_dim / 2.
-    omega = 1. / 10000**omega # shape (EMBED_DIM/2,)
-
-    pos = pos.reshape(-1) # shape (SEQ_LEN,)
-    out = np.einsum('m,d->md', pos, omega) # shape (SEQ_LEN, EMBED_DIM/2);
-                                           # outer product
-
-    emb_sin = np.sin(out) # shape (SEQ_LEN, EMBED_DIM/2)
-    emb_cos = np.cos(out) # shape (SEQ_LEN, EMBED_DIM/2)
-
-    pos_emb = np.concatenate([emb_sin, emb_cos], axis=1) # shape (SEQ_LEN,
-                                                         # EMBED_DIM)
-
-    return pos_emb
-
-
 def drop_path(x: torch.Tensor,
-              drop_prob: float=0.,
+              drop_prob: float=0.0,
               training: bool=False,
               ) -> torch.Tensor:
     """
@@ -122,9 +84,65 @@ def drop_path(x: torch.Tensor,
     return output
 
 
+def repeat_interleave_batch(x, B, repeat):
+    N = len(x) // B
+    x = torch.cat(
+            [torch.cat([x[i*B:(i+1)*B] for _ in range(repeat)], dim=0)
+             for i in range(N)],
+            dim=0)
+
+    return x
+
+
+def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+    # type: (Tensor, float, float, float, float) -> Tensor
+    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+
+
+def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
+                                     pos: np.ndarray,
+                                     ) -> np.ndarray:
+    """
+    Retrieve 1D sin cos positional embedding from an array of positions/sequence
+    index.
+
+    Parameters
+    -----------
+    embed_dim:
+        Output dimension of the positional embedding (for each position). Has
+        to be divisible by 2.
+    pos:
+        An array containing the positions to be embedded.
+        
+    Returns
+    -----------
+    pos_emb:
+        The positional embedding with shape (len(pos), embed_dim).
+    """
+    assert embed_dim % 2 == 0
+    omega = np.arange(embed_dim // 2, dtype=float)
+    omega /= embed_dim / 2.
+    omega = 1. / 10000**omega # shape (EMBED_DIM/2,)
+
+    pos = pos.reshape(-1) # shape (SEQ_LEN,)
+    out = np.einsum('m,d->md', pos, omega) # shape (SEQ_LEN, EMBED_DIM/2);
+                                           # outer product
+
+    emb_sin = np.sin(out) # shape (SEQ_LEN, EMBED_DIM/2)
+    emb_cos = np.cos(out) # shape (SEQ_LEN, EMBED_DIM/2)
+
+    pos_emb = np.concatenate([emb_sin, emb_cos], axis=1) # shape (SEQ_LEN,
+                                                         # EMBED_DIM)
+
+    return pos_emb
+
+
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
-    # Cut & paste from PyTorch official master until it's in a few official releases - RW
-    # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
+    """
+    Cut & paste from PyTorch official master until it's in a few official
+    releases - RW Method based on
+    https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
+    """
     def norm_cdf(x):
         # Computes standard normal cumulative distribution function
         return (1. + math.erf(x / math.sqrt(2.))) / 2.
@@ -151,17 +169,3 @@ def _no_grad_trunc_normal_(tensor, mean, std, a, b):
         # Clamp to ensure it's in the proper range
         tensor.clamp_(min=a, max=b)
         return tensor
-
-
-def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
-    # type: (Tensor, float, float, float, float) -> Tensor
-    return _no_grad_trunc_normal_(tensor, mean, std, a, b)
-
-
-def repeat_interleave_batch(x, B, repeat):
-    N = len(x) // B
-    x = torch.cat([
-        torch.cat([x[i*B:(i+1)*B] for _ in range(repeat)], dim=0)
-        for i in range(N)
-    ], dim=0)
-    return x
