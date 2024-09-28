@@ -94,69 +94,69 @@ class CellBaseDataset(Dataset):
 
         return seq_tokens, seg_tokens
 
-def _create_sampled_token_seq(self,
-                              tokens: List,
-                              n_nonzero_tokens: int,
-                              size: int,
-                              ) -> List:
-        """
-        Sample a subset of tokens based on a sampling strategy.
+    def _create_sampled_token_seq(self,
+                                  tokens: List,
+                                  n_nonzero_tokens: int,
+                                  size: int,
+                                  ) -> List[int]:
+            """
+            Sample a subset of tokens based on a sampling strategy.
 
-        Parameters
-        -----------
-        tokens:
-            List of tokens.
-        n_nonzero_tokens:
-            Number of nonzero tokens in `tokens`.
-        size:
-            Size of the sampled subset.
-            
-        Returns
-        --------
-        sampled_tokens:
-            List of sampled tokens.
-        """
-        if 'norm_count_rank_sampling' in self.sampling_strategy:
-            # Calculate weights based on rank and number of nonzero tokens: the
-            # higher the rank, the higher the weight
-            # seq = [4, 1, 3, 2, 5, 0, 0, 0]
-            # n_nonzero_tokens = 5  
-            # sum_rank = 5 * (5 + 1) / 2.0 = 15.0
-            # weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
-            #     n_nonzero_tokens)] 
-            # = [0.333, 0.266, 0.2, 0.133, 0.066]
-            # np.sum(weights) = 1.0
-            sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
-            weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
-                n_nonzero_tokens)]
-            assert np.isclose(np.sum(weights), 1.0)
-        elif 'rand_sampling' in self.sampling_strategy:
-            weights = np.ones(n_nonzero_tokens) / n_nonzero_tokens
-        else:
-            raise ValueError(
-                f"'{self.sampling_strategy}' is an invalid sampling strategy.")
-            
-        # Sample token indices based on weights
-        sampled_indices = np.random.choice(
-            np.arange(n_nonzero_tokens),
-            size=min(size, n_nonzero_tokens),
-            p=weights,
-            replace=(True if 'rep' in self.sampling_strategy else False))
-            
-        # Sort sampled indices to preserve rank order
-        sampled_indices = np.sort(sampled_indices)
-        sampled_tokens = [tokens[i] for i in sampled_indices]
+            Parameters
+            -----------
+            tokens:
+                List of tokens.
+            n_nonzero_tokens:
+                Number of nonzero tokens in `tokens`.
+            size:
+                Size of the sampled subset.
+                
+            Returns
+            --------
+            sampled_tokens:
+                List of sampled tokens.
+            """
+            if 'norm_count_rank_sampling' in self.sampling_strategy:
+                # Calculate weights based on rank and number of nonzero tokens: the
+                # higher the rank, the higher the weight
+                # seq = [4, 1, 3, 2, 5, 0, 0, 0]
+                # n_nonzero_tokens = 5  
+                # sum_rank = 5 * (5 + 1) / 2.0 = 15.0
+                # weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
+                #     n_nonzero_tokens)] 
+                # = [0.333, 0.266, 0.2, 0.133, 0.066]
+                # np.sum(weights) = 1.0
+                sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
+                weights = [(n_nonzero_tokens - i)/sum_rank for i in range(
+                    n_nonzero_tokens)]
+                assert np.isclose(np.sum(weights), 1.0)
+            elif 'rand_sampling' in self.sampling_strategy:
+                weights = np.ones(n_nonzero_tokens) / n_nonzero_tokens
+            else:
+                raise ValueError(
+                    f"'{self.sampling_strategy}' is an invalid sampling strategy.")
+                
+            # Sample token indices based on weights
+            sampled_indices = np.random.choice(
+                np.arange(n_nonzero_tokens),
+                size=min(size, n_nonzero_tokens),
+                p=weights,
+                replace=(True if 'rep' in self.sampling_strategy else False))
+                
+            # Sort sampled indices to preserve rank order
+            sampled_indices = np.sort(sampled_indices)
+            sampled_tokens = [tokens[i] for i in sampled_indices]
 
-        if size > n_nonzero_tokens:
-            sampled_tokens.extend([0] * (size - len(sampled_tokens)))
-        
-        return sampled_tokens
+            if size > n_nonzero_tokens:
+                sampled_tokens.extend([0] * (size - len(sampled_tokens)))
+            
+            return sampled_tokens
          
     def _get_gene_tokens_for_segment(self, 
                                      item: int,
                                      segment_idx: int,
                                      segment_seq_len: int,
-                                     ) -> List:
+                                     ) -> List[int]:
         """
         Get gene tokens for a given segment based on sampling strategy.
 
@@ -204,38 +204,6 @@ def _create_sampled_token_seq(self,
         return segment_gene_tokens
 
 
-class CellNeighborhoodDataset(CellBaseDataset):
-    def __init__(self,
-                 **base_dataset_kwargs
-                 ):
-        """
-        Torch CellNeighborhoodDataset class.
-
-        Parameters
-        -----------
-        **base_dataset_kwargs:
-            Keyword arguments for the initialization of CellBaseDataset.
-        """
-        super().__init__(**base_dataset_kwargs)
-
-    def __getitem__(self, item):
-        # Get (sampled) gene tokens
-        gene_tokens_cell = self._get_gene_tokens_for_segment(
-            item=item,
-            segment_idx=1, # cell seg
-            segment_seq_len=self.seq_len_cell)
-        gene_tokens_neighborhood = self._get_gene_tokens_for_segment(
-            item=item,
-            segment_idx=2, # neighborhood seg
-            segment_seq_len=self.seq_len_neighborhood)
-        seq_tokens = gene_tokens_cell + gene_tokens_neighborhood
-
-        # Add special tokens
-        seq_tokens, seg_tokens = self._add_special_tokens_to_seq(
-            seq_tokens=seq_tokens,
-            item=item)
-
-
 class CellGraphDataset(CellBaseDataset):
     def __init__(self,
                  **base_dataset_kwargs
@@ -250,7 +218,9 @@ class CellGraphDataset(CellBaseDataset):
         """
         super().__init__(**base_dataset_kwargs)
          
-    def __getitem__(self, item):
+    def __getitem__(self,
+                    item: int
+                    ) -> Tuple[torch.Tensor, torch.Tensor]:
         # Get (sampled) gene tokens
         gene_tokens_index_cell = self._get_gene_tokens_for_segment(
             item=item,
@@ -272,6 +242,40 @@ class CellGraphDataset(CellBaseDataset):
             item=item)
 
         return seq_tokens, seg_tokens
+
+
+class CellNeighborhoodDataset(CellBaseDataset):
+    def __init__(self,
+                 **base_dataset_kwargs
+                 ):
+        """
+        Torch CellNeighborhoodDataset class.
+
+        Parameters
+        -----------
+        **base_dataset_kwargs:
+            Keyword arguments for the initialization of CellBaseDataset.
+        """
+        super().__init__(**base_dataset_kwargs)
+
+    def __getitem__(self,
+                    item: int
+                    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Get (sampled) gene tokens
+        gene_tokens_cell = self._get_gene_tokens_for_segment(
+            item=item,
+            segment_idx=1, # cell seg
+            segment_seq_len=self.seq_len_cell)
+        gene_tokens_neighborhood = self._get_gene_tokens_for_segment(
+            item=item,
+            segment_idx=2, # neighborhood seg
+            segment_seq_len=self.seq_len_neighborhood)
+        seq_tokens = gene_tokens_cell + gene_tokens_neighborhood
+
+        # Add special tokens
+        seq_tokens, seg_tokens = self._add_special_tokens_to_seq(
+            seq_tokens=seq_tokens,
+            item=item)
 
 
 def make_cell_dataset(tokenizer_type: Literal['cell_graph',

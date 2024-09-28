@@ -237,44 +237,46 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             has_gene_panel=has_gene_panel)
     
-    # Initialize dataset, dataloader and sampler
-    train_cell_dataset = make_cell_dataset(dataset=train_dataset,
-                                           vocab_size=vocab_size,
-                                           tokenizer_type=tokenizer_type)
-
-    test_cell_dataset = make_cell_dataset(dataset=test_dataset,
-                                           vocab_size=vocab_size,
-                                           tokenizer_type=tokenizer_type)
-
-    train_loader, train_sampler = init_dataloader_and_sampler()
-
-    _, train_loader, train_sampler = make_cell_neighborhood_dataset(
-        batch_size=batch_size,
-        data=train_dataset,
+    # Initialize train and test datasets, dataloaders and samplers
+    train_cell_dataset = make_cell_dataset(
+        dataset=train_dataset,
         vocab_size=vocab_size,
-        collator=mask_collator,
-        pin_mem=pin_mem,
-        num_workers=num_workers,
-        world_size=world_size,
-        rank=rank,
-        drop_last=False,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
+        tokenizer_type=tokenizer_type,
+        special_tokens=special_tokens,
         sampling_strategy=sampling_strategy)
 
-    _, test_loader, test_sampler = make_cell_neighborhood_dataset(
-        batch_size=batch_size,
-        data=test_dataset,
+    test_cell_dataset = make_cell_dataset(
+        dataset=test_dataset,
         vocab_size=vocab_size,
-        collator=mask_collator,
-        pin_mem=pin_mem,
-        num_workers=num_workers,
+        tokenizer_type=tokenizer_type,
+        special_tokens=special_tokens,
+        sampling_strategy=sampling_strategy)
+
+    train_loader, train_sampler = init_dataloader_and_sampler(
+        cell_dataset=train_cell_dataset,
+        batch_size=batch_size,
+        n_nonzero_tokens_per_cell=n_nonzero_tokens_per_cell,
+        distributed=True,
         world_size=world_size,
         rank=rank,
+        collator_fn=mask_collator
+        pin_memory=pin_memory,
+        num_workers=num_workers,
         drop_last=False,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
-        sampling_strategy=sampling_strategy)
+        persistent_workers=False)
+
+    test_loader, test_sampler = init_dataloader_and_sampler(
+        cell_dataset=test_cell_dataset,
+        batch_size=batch_size,
+        n_nonzero_tokens_per_cell=n_nonzero_tokens_per_cell,
+        distributed=True,
+        world_size=world_size,
+        rank=rank,
+        collator_fn=mask_collator
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        drop_last=False,
+        persistent_workers=False)
 
     ipe = len(train_loader)
 
