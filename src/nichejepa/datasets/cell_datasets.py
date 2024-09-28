@@ -42,6 +42,7 @@ class CellBaseDataset(Dataset):
         """
         self.dataset = dataset
         self.len = len(self.dataset)
+        self.n_nonzero_tokens = self.dataset["n_nonzero_tokens"]
         self.vocab_size = vocab_size
         self.seq_len_cell = self.seq_len_cell
         self.seq_len_neighborhood = self.seq_len_neighborhood

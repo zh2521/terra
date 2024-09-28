@@ -21,7 +21,6 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
                  num_replicas: Optional[int]=None,
                  rank: Optional[int]=None,
                  seed: int,
-                 n_nonzero_tokens_per_cell: List,
                  drop_last: bool=False,
                  lengths: Optional[List[int]]=None,
                  ):
@@ -74,7 +73,7 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
                 len(self.cell_dataset) / self.num_replicas)
         self.total_size = self.num_samples * self.num_replicas
         self.seed = seed
-        self.lengths = n_nonzero_tokens_per_cell
+        self.lengths = self.cell_dataset.n_nonzero_tokens
 
     def __iter__(self) -> Iterator:
         # Deterministically shuffle based on epoch and seed
@@ -145,7 +144,6 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
 
 def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
                                 batch_size: int,
-                                n_nonzero_tokens_per_cell: List[int],
                                 distributed: bool,
                                 world_size: int,
                                 rank: int,
@@ -161,8 +159,6 @@ def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
         CellGraphDataset or CellNeighborhoodDataset.
     batch_size:
         Batch size for the dataloader and -sampler.
-    n_nonzero_tokens_per_cell:
-        List with number of nonzero tokens per cell.
     distributed:
         If 'True', use distributed mode.
     world_size:
@@ -183,7 +179,6 @@ def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
         dist_sampler = CustomDistributedLengthGroupedSampler(
             cell_dataset=cell_dataset,
             batch_size=batch_size,
-            n_nonzero_tokens_per_cell=n_nonzero_tokens_per_cell,
             num_replicas=world_size,
             rank=rank,
             seed=_GLOBAL_SEED)

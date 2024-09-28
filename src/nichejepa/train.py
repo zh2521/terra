@@ -45,13 +45,13 @@ from .helper import (init_model,
 from .masks.multigene import MaskCollator
 from .masks.segment_masking  import SegmentMaskCollator
 from .masks.utils import apply_masks
+from models.utils import repeat_interleave_batch
 from .utils.distributed import (AllReduce,
                                 init_distributed)
 from .utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,
                             grad_logger)
-from .utils.tensors import repeat_interleave_batch
 
 
 log_timings = True
@@ -111,7 +111,7 @@ def train(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
-    gene_panel_size = args['meta']['gene_panel_size']
+    special_tokens = args['meta']['special_tokens']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
     if not torch.cuda.is_available():
@@ -155,6 +155,7 @@ def train(args: dict,
     final_lr = args['optimization']['final_lr']
 
     seq_len = seq_len_cell + seq_len_neighborhood
+    n_special_tokens = len(special_tokens)
 
     # Create folder to store artifacts
     if not save_folder_path:
@@ -211,6 +212,7 @@ def train(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        n_special_tokens=n_special_tokens,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
@@ -234,8 +236,7 @@ def train(args: dict,
             target_mask_size=target_mask_size,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood,
-            has_gene_panel=has_gene_panel)
+            seq_len_neighborhood=seq_len_neighborhood)
     
     # Initialize train and test datasets, dataloaders and samplers
     train_cell_dataset = make_cell_dataset(
@@ -255,7 +256,6 @@ def train(args: dict,
     train_loader, train_sampler = init_dataloader_and_sampler(
         cell_dataset=train_cell_dataset,
         batch_size=batch_size,
-        n_nonzero_tokens_per_cell=n_nonzero_tokens_per_cell,
         distributed=True,
         world_size=world_size,
         rank=rank,
@@ -268,7 +268,6 @@ def train(args: dict,
     test_loader, test_sampler = init_dataloader_and_sampler(
         cell_dataset=test_cell_dataset,
         batch_size=batch_size,
-        n_nonzero_tokens_per_cell=n_nonzero_tokens_per_cell,
         distributed=True,
         world_size=world_size,
         rank=rank,
