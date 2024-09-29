@@ -65,25 +65,21 @@ def train(args: dict,
           save_folder_path: Optional[str]=None,
           ):
     """
-    Train the model.
+    Train model.
 
     Parameters
     -----------
     args:
         Dictionary containing the hyperparams from the config file.
     train_dataset:
-        Train split CellNeighborhoodDataset.
+        Train split of huggingface dataset.
     test_dataset:
-        Test split CellNeighborhoodDataset.
+        Test split of huggingface dataset.
     resume_preempt:
     save_folder_path:
         Path for saving model artifacts.
     """
-
-    # ---------------- #
     # Set random seeds
-    # ----------------- #
-
     np.random.seed(_GLOBAL_SEED)
     torch.manual_seed(_GLOBAL_SEED)
     if torch.cuda.is_available():
@@ -91,11 +87,24 @@ def train(args: dict,
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    # ----------------------------- #
-    #  Load params from config file
-    # ----------------------------- #
+    # Set device
+    if not torch.cuda.is_available():
+        device = torch.device('cpu')
+    else:
+        device = torch.device('cuda:0')
+        torch.cuda.set_device(device)
 
-    # Load meta params
+    # Load params from config file
+    data_set_name = args['data']['dataset_name']
+    tokenizer_type = args['data']['tokenizer_type']
+    vocab_size = args['data']['vocab_size']
+    seq_len_cell = args['data']['seq_len_cell']
+    seq_len_neighborhood = args['data']['seq_len_neighborhood']
+    sampling_strategy = args['data']['sampling_strategy']
+    batch_size = args['data']['batch_size']
+    num_workers = args['data']['num_workers']
+    pin_mem = args['data']['pin_mem']
+
     use_bfloat16 = args['meta']['use_bfloat16']
     load_model = args['meta']['load_checkpoint'] or resume_preempt
     r_file = args['meta']['read_checkpoint']
@@ -108,25 +117,7 @@ def train(args: dict,
     special_tokens = args['meta']['special_tokens']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
-    if not torch.cuda.is_available():
-        device = torch.device('cpu')
-    else:
-        device = torch.device('cuda:0')
-        torch.cuda.set_device(device)
 
-    # Load data params
-    batch_size = args['data']['batch_size']
-    pin_mem = args['data']['pin_mem']
-    num_workers = args['data']['num_workers']
-    seq_len_cell = args['data']['seq_len_cell']
-    seq_len_neighborhood = args['data']['seq_len_neighborhood']
-    has_cls = args['data']['has_cls']
-    data_set_name = args['data']['data_set_name']
-    vocab_size = args['data']['vocab_size']
-    sampling_strategy = args['data']['sampling_strategy']
-    tokenizer_type = args['data']['tokenizer_type']
-
-    # Load mask params
     n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
     target_mask_size = args['mask']['target_mask_size']
@@ -134,7 +125,8 @@ def train(args: dict,
     segment_masking = args['mask']['segment_masking']
     per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
 
-    # Load optimization params
+    warmup = args['optimization']['warmup']
+    num_epochs = args['optimization']['epochs']
     if isinstance(args['optimization']['ema'], list):
        ema = args['optimization']['ema']
     else:
@@ -142,12 +134,13 @@ def train(args: dict,
     ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
-    num_epochs = args['optimization']['epochs']
-    warmup = args['optimization']['warmup']
     start_lr = args['optimization']['start_lr']
     lr = args['optimization']['lr']
     final_lr = args['optimization']['final_lr']
 
+    write_tag = args['logging']['write_tag']
+
+    # Get token sequence length and number of special tokens
     seq_len = seq_len_cell + seq_len_neighborhood
     n_special_tokens = len(special_tokens)
 
@@ -162,16 +155,14 @@ def train(args: dict,
         save_folder_path = os.path.join(artifact_folder_path,
                                         data_set_name,
                                         current_timestamp)
-
     os.makedirs(save_folder_path, exist_ok=True)
-    tag = args['logging']['write_tag']
 
+    # Store config file with model
     dump = os.path.join(save_folder_path, 'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
-
-    # ----------------------------- #
     
+    # Start multiprocessing
     try:
         mp.set_start_method('spawn')
     except Exception:
@@ -184,9 +175,10 @@ def train(args: dict,
         logger.setLevel(logging.ERROR)
 
     # Define log/checkpointing paths
-    log_file = os.path.join(save_folder_path, f'{tag}_r{rank}.csv')
-    save_path = os.path.join(save_folder_path, f'{tag}' + '-ep{epoch}.pth.tar')
-    latest_path = os.path.join(save_folder_path, f'{tag}-latest.pth.tar')
+    log_file = os.path.join(save_folder_path, f'{write_tag}_r{rank}.csv')
+    save_path = os.path.join(save_folder_path,
+                             f'{write_tag}' + '-ep{epoch}.pth.tar')
+    latest_path = os.path.join(save_folder_path, f'{write_tag}-latest.pth.tar')
     load_path = None
     if load_model:
         load_path = os.path.join(
@@ -227,10 +219,10 @@ def train(args: dict,
         mask_collator = MaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
-            target_mask_size=target_mask_size,
-            context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood)
+            seq_len_neighborhood=seq_len_neighborhood,
+            target_mask_size=target_mask_size,
+            context_mask_size=context_mask_size,)
     
     # Initialize train and test datasets, dataloaders and samplers
     train_cell_dataset = make_cell_dataset(
@@ -293,7 +285,8 @@ def train(args: dict,
     target_encoder = DistributedDataParallel(target_encoder)
     for p in target_encoder.parameters():
         p.requires_grad = False
-    # -- momentum schedule
+
+    # Define momentum schedule
     momentum_scheduler = (ema[0] + i*(ema[1]-ema[0])/(ipe*num_epochs*ipe_scale)
                           for i in range(int(ipe*num_epochs*ipe_scale)+1))
 
@@ -315,18 +308,16 @@ def train(args: dict,
             mask_collator.step()
 
     def save_checkpoint(epoch):
-        save_dict = {
-            'encoder': encoder.state_dict(),
-            'predictor': predictor.state_dict(),
-            'target_encoder': target_encoder.state_dict(),
-            'opt': optimizer.state_dict(),
-            'scaler': None if scaler is None else scaler.state_dict(),
-            'epoch': epoch,
-            'loss': loss_meter.avg,
-            'batch_size': batch_size,
-            'world_size': world_size,
-            'lr': lr
-        }
+        save_dict = {'encoder': encoder.state_dict(),
+                     'predictor': predictor.state_dict(),
+                     'target_encoder': target_encoder.state_dict(),
+                     'opt': optimizer.state_dict(),
+                     'scaler': None if scaler is None else scaler.state_dict(),
+                     'epoch': epoch,
+                     'loss': loss_meter.avg,
+                     'batch_size': batch_size,
+                     'world_size': world_size,
+                     'lr': lr}
         if rank == 0:
             torch.save(save_dict, latest_path)
             if (epoch + 1) % checkpoint_freq == 0:
@@ -344,7 +335,8 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
+        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(
+        train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             seg_label = udata[1].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
@@ -359,46 +351,49 @@ def train(args: dict,
 
                 def forward_target():
                     with torch.no_grad(): # no backward pass for target encoder
-                        # Encode all cell neighborhood tokens
-                        h = target_encoder(
-                            tokens,
-                            seg_label,
-                            masks_attention=masks_attention) # output (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                                       # if no <cls> token (BATCH_SIZE,
-                                       # SEQ_LEN+1, EMBED_DIM) otherwise
-                                       # masks_attention
+                        # Target encorder forward pass with output dim 
+                        # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
+                        h = target_encoder(tokens,
+                                           seg_label,
+                                           masks_attention=masks_attention)
+
                         # Normalize over feature dim
                         h = F.layer_norm(h, (h.size(-1),))
-                        # Only keep encoded targets (masked genes of h)
+
+                        # Only keep encoded targets (masked genes of h); output
+                        # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
+                        # EMB_SIZE)
                         h = apply_masks(
                             h,
-                            masks_pred) # output (BATCH_SIZE * N_TARGETS,
-                                        # TARGET_MASK_SIZE, EMB_SIZE)
+                            masks_pred)
                         B = len(h)
-                        # Repeat targets if multiple contexts
+
+                        # Repeat targets if multiple contexts; output dim 
+                        # (BATCH_SIZE * N_TARGETS * N_CONTEXTS, 
+                        # TARGET_MASK_SIZE, EMB_DIM)
                         h = repeat_interleave_batch(
                             h,
                             B,
-                            repeat=len(masks_enc)) # output (BATCH_SIZE *
-                                                   # N_TARGETS * N_CONTEXTS,
-                                                   # TARGET_MASK_SIZE, EMB_DIM)
+                            repeat=len(masks_enc))
                         return h
 
                 def forward_context():
-                    # Encode only context cell neighborhood tokens
+                    # Context encoder forward pass with output dim (BATCH_SIZE,
+                    # MIN_CONTEXT_SIZE, EMB_DIM) where MIN_CONTEXT_SIZE is
+                    # minmum context size in the batch after removal of
+                    # overlapping targets
                     z = encoder(
                         tokens,
                         seg_label,
-                        masks_enc) # output (BATCH_SIZE, MIN_CONTEXT_SIZE,
-                                   # EMB_DIM) where MIN_CONTEXT_SIZE is minmum
-                                   # context size in the batch after removal of
-                                   # overlapping targets
+                        masks_enc)
+
+                    # Predictor forward pass with output dim (BATCH_SIZE *
+                    # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     z = predictor(
                         z,
                         seg_label,
                         masks_enc,
-                        masks_pred) # output (BATCH_SIZE * N_TARGETS *
-                                    # N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
+                        masks_pred) # output 
                     return z
 
                 def loss_fn(z, h):
@@ -436,7 +431,7 @@ def train(args: dict,
             loss_meter.update(loss)
             time_meter.update(etime)
 
-            # -- Logging
+            # Logging
             def log_stats():
                 csv_logger.log(epoch + 1,
                                itr,
