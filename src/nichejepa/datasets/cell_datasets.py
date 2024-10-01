@@ -64,6 +64,7 @@ class CellBaseDataset(Dataset):
 
     def _add_special_tokens_to_seq(self,
                                    seq_tokens: List,
+                                   seg_tokens: List,
                                    item: int,
                                    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -73,6 +74,8 @@ class CellBaseDataset(Dataset):
         -----------
         seq_tokens:
             Token sequence including all segments.
+        seg_tokens:
+            Segment tokens including all segments.
         item:
             Index of the cell in the huggingface dataset.
 
@@ -99,10 +102,7 @@ class CellBaseDataset(Dataset):
         if 'cls_cell' in self.special_tokens:
             seq_tokens = self.dataset[item][
                 "cls_cell_token"] + seq_tokens
-        seq_tokens = torch.tensor(seq_tokens)
-        seg_tokens = torch.cat(
-            (torch.zeros(self.n_special_tokens),
-             torch.tensor(self.dataset[item]["seg_tokens"])))
+        seg_tokens = [0] * self.n_special_tokens + seg_tokens
 
         return seq_tokens, seg_tokens
 
@@ -239,20 +239,26 @@ class CellGraphDataset(CellBaseDataset):
             item=item,
             segment_idx=1, # index cell seg
             segment_seq_len=self.seq_len_index_cell)
+        seg_tokens = [1] * len(gene_tokens_index_cell)
         gene_tokens_neighbor_cells = []
         for segment_idx in np.unique(self.dataset[item]["seg_tokens"]):
             if segment_idx != 1:
-                gene_tokens_neighbor_cells.extend(
-                    self._get_gene_tokens_for_segment(
-                        item=item,
-                        segment_idx=segment_idx, # neighbor cell segs
-                        segment_seq_len=self.seq_len_neighbor_cells))
+                segment_gene_tokens = self._get_gene_tokens_for_segment(
+                    item=item,
+                    segment_idx=segment_idx, # neighbor cell segs
+                    segment_seq_len=self.seq_len_neighbor_cells)
+                gene_tokens_neighbor_cells.extend(segment_gene_tokens)
+                seg_tokens.extend([segment_idx] * len(segment_gene_tokens))
         seq_tokens = gene_tokens_index_cell + gene_tokens_neighbor_cells
 
         # Add special tokens
         seq_tokens, seg_tokens = self._add_special_tokens_to_seq(
             seq_tokens=seq_tokens,
+            seg_tokens=seg_tokens,
             item=item)
+
+        seq_tokens = torch.tensor(seq_tokens)
+        seg_tokens = torch.tensor(seg_tokens).int()
 
         return seq_tokens, seg_tokens
 
@@ -284,13 +290,19 @@ class CellNeighborhoodDataset(CellBaseDataset):
             segment_idx=2, # neighborhood seg
             segment_seq_len=self.seq_len_neighborhood)
         seq_tokens = gene_tokens_cell + gene_tokens_neighborhood
+        seg_tokens = [1] * len(gene_tokens_cell) + [2] * len(
+            gene_tokens_neighborhood)
 
         # Add special tokens
         seq_tokens, seg_tokens = self._add_special_tokens_to_seq(
             seq_tokens=seq_tokens,
+            seg_tokens=seg_tokens,
             item=item)
 
-        return seq_tokens, seq_tokens
+        seq_tokens = torch.tensor(seq_tokens)
+        seg_tokens = torch.tensor(seg_tokens).int()
+
+        return seq_tokens, seg_tokens
 
 
 def make_cell_dataset(tokenizer_type: Literal['cell_graph',
