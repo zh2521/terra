@@ -153,7 +153,8 @@ class CellBaseDataset(Dataset):
                 np.arange(n_nonzero_tokens),
                 size=min(size, n_nonzero_tokens),
                 p=weights,
-                replace=(True if 'rep' in self.sampling_strategy else False))
+                replace=(True if self.sampling_strategy is not None and 'rep'
+                     in self.sampling_strategy else False))
                 
             # Sort sampled indices to preserve rank order
             sampled_indices = np.sort(sampled_indices)
@@ -192,7 +193,8 @@ class CellBaseDataset(Dataset):
             if seg_token == segment_idx]
 
         # Validate that segment sequence length is specified correctly
-        if 'rep' in self.sampling_strategy:
+        if (self.sampling_strategy is not None and 'rep' in
+        self.sampling_strategy):
             pass
         else:
             if segment_seq_len > len(segment_gene_tokens):
@@ -260,7 +262,7 @@ class CellGraphDataset(CellBaseDataset):
         seq_tokens = torch.tensor(seq_tokens)
         seg_tokens = torch.tensor(seg_tokens).int()
 
-        return seq_tokens, seg_tokens
+        return seq_tokens, seg_tokens, self.dataset[item]["cell_id"]
 
 
 class CellNeighborhoodDataset(CellBaseDataset):
@@ -302,7 +304,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
         seq_tokens = torch.tensor(seq_tokens)
         seg_tokens = torch.tensor(seg_tokens).int()
 
-        return seq_tokens, seg_tokens
+        return seq_tokens, seg_tokens, self.dataset[item]["cell_id"]
 
 
 def make_cell_dataset(tokenizer_type: Literal['cell_graph',

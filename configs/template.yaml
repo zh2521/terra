@@ -1,5 +1,6 @@
 data:
   dataset_name: 'starmap_merfish_mouse_brain_2_gene_panels'
+  raw_data_folder_path: ''
   tokenizer_type: 'cell_neighborhood' # 'cell_neighborhood', 'cell_graph'
   data_path: '/lustre/scratch126/cellgen/team361/am84/NicheJEPA/datasets/am84/st_data/gold/cell-neighborhood-tokenizer/starmap_merfish_mouse_brain_harmonized_2-gene-panels/16-shards/starmap_merfish_mouse_brain_harmonized_2-gene-panels_4_False_read_depth_shifted_log_3338.dataset'
   random_state: 0
@@ -18,7 +19,7 @@ meta:
   special_tokens: ['cls_cell', 'cls_neighborhood', 'assay', 'species', 'tissue', 'gene_panel', 'batch']
   enc_depth: 3 # 3
   checkpoint_freq: 5
-  log_freq: 1
+  log_freq: 20
   load_checkpoint: false
   load_timestamp: ''
   pred_depth: 1 # 1

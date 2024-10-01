@@ -105,7 +105,9 @@ def compute_mean_unmasked_emb(emb: torch.Tensor,
 
 def create_binary_selection_mask(tokens: torch.Tensor,
                                  seq_len_cell: int,
-                                 selection_type: Literal['cls',
+                                 n_special_tokens: int,
+                                 selection_type: Literal['cls_cell',
+                                                         'cls_neighborhood',
                                                          'agg_cell',
                                                          'agg_neighborhood',
                                                          'gene_cell',
@@ -139,14 +141,17 @@ def create_binary_selection_mask(tokens: torch.Tensor,
     selection_mask:
         The resulting 2D selection mask tensor.
     """
-    selection_start_idx = (1 if has_cls else 0)
-    if has_gene_panel:
-        selection_start_idx += 1
+    selection_start_idx = n_special_tokens
 
-    if selection_type == 'cls':
+    if selection_type == 'cls_cell':
         # Select only the first token in each sequence
         selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
         selection_mask[:, 0] = True
+        return selection_mask
+    elif selection_type == 'cls_neighborhood':
+        # Select only the first token in each sequence
+        selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
+        selection_mask[:, 1] = True
         return selection_mask
     elif selection_type == 'agg_cell':
         selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
@@ -266,7 +271,7 @@ def collect_adata_from_folder(load_folder_path: str) -> ad.AnnData:
     adata_list = []
 
     # Walk through the load folder path and read files
-    for subdir, _, files in os.walk(root_folder):
+    for subdir, _, files in os.walk(load_folder_path):
         for file in files:
             if file.endswith('.h5ad'):
                 file_path = os.path.join(subdir, file)
