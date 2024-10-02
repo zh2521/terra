@@ -1,14 +1,14 @@
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 
 
-def process_gene_tokens(gene_tokens: list,
+def process_gene_tokens(gene_tokens: List,
                         length: int,
                         token_dict: dict,
-                        special_tokens: Optional[list],
-                        special_tokens_idx: Optional[list]
-                        ) -> list:
+                        special_tokens: Optional[List],
+                        special_tokens_idx: Optional[List]
+                        ) -> List:
     """
     Add pad tokens or truncate gene token list based on length and add special
     tokens if defined.
@@ -70,7 +70,7 @@ def process_gene_tokens(gene_tokens: list,
 
 def rank_gene_tokens(gene_scores: np.ndarray,
                      gene_tokens: np.ndarray,
-                     n_tokens: Optional[int]=None
+                     n_tokens: Optional[int]=None,
                      ) -> np.ndarray:
     """
     Rank gene tokens based on matching gene scores (highest gene score -> rank 1
