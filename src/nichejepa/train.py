@@ -107,11 +107,6 @@ def train(args: dict,
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
 
-    use_bfloat16 = args['meta']['use_bfloat16']
-    load_model = args['meta']['load_checkpoint'] or resume_preempt
-    r_file = args['meta']['read_checkpoint']
-    checkpoint_freq = args['meta']['checkpoint_freq']
-    log_freq = args['meta']['log_freq']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
@@ -119,12 +114,13 @@ def train(args: dict,
     special_tokens = args['meta']['special_tokens']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
+    use_bfloat16 = args['meta']['use_bfloat16']
 
-    n_targets = args['mask']['n_targets']
     n_contexts = args['mask']['n_contexts']
-    target_mask_size = args['mask']['target_mask_size']
-    context_mask_size = args['mask']['context_mask_size']
+    n_targets = args['mask']['n_targets']
     segment_masking = args['mask']['segment_masking']
+    context_mask_size = args['mask']['context_mask_size']
+    target_mask_size = args['mask']['target_mask_size']
     per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
 
     warmup = args['optimization']['warmup']
@@ -133,14 +129,18 @@ def train(args: dict,
        ema = args['optimization']['ema']
     else:
        ema = [args['optimization']['ema'], 1]
-    ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
-    wd = float(args['optimization']['weight_decay'])
-    final_wd = float(args['optimization']['final_weight_decay'])
     start_lr = args['optimization']['start_lr']
     lr = args['optimization']['lr']
     final_lr = args['optimization']['final_lr']
+    wd = float(args['optimization']['weight_decay'])
+    final_wd = float(args['optimization']['final_weight_decay'])
+    ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
 
-    write_tag = args['logging']['write_tag']
+    log_freq = args['state']['log_freq']
+    checkpoint_freq = args['state']['checkpoint_freq']
+    write_tag = args['state']['write_tag']
+    load_model = args['state']['load_checkpoint'] or resume_preempt
+    r_file = args['state']['read_checkpoint']
 
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)

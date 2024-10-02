@@ -61,7 +61,7 @@ def prepare_dataset(args: dict,
     -----------
     args:
         A dictionary containing the configuration parameters, including:
-            - data_path: The path to the dataset.
+            - tokenized_data_folder_path: The path to the tokenized dataset.
             - sample_subset: Whether to sample a subset of the dataset.
             - sample_size: The size of the dataset to sample.
             - split: The train-test split ratio.
@@ -84,7 +84,7 @@ def prepare_dataset(args: dict,
             label.
     """
     # Load dataset from the specified path
-    data_path = args['data']['data_path']
+    data_path = args['data']['tokenized_data_folder_path']
     dataset = load_from_disk(data_path)
 
     # Sample subset if specified
