@@ -556,8 +556,19 @@ class CellNeighborhoodRankTokenizer:
         # Hardcoding dataset ID, assay, species, and tissue values for now
         if "merfish" in str(adata_file_path):
             dataset_id = 0
+            assay_key = "merfish"
+            species_key = "mus_musculus"
+            tissue_key = "brain"
         elif "starmap" in str(adata_file_path):
             dataset_id = 1
+            assay_key = "starmap"
+            species_key = "mus_musculus"
+            tissue_key = "brain"
+        elif "sim" in str(adata_file_path):
+            dataset_id = 2
+            assay_key = "sim"
+            species_key = "sim"
+            tissue_key = "sim"
         else:
             raise ValueError("Dataset ID not recognized.")
 
@@ -576,11 +587,21 @@ class CellNeighborhoodRankTokenizer:
             batch_tokens.append(self.token_dict[f"{dataset_id}_{batch_id}"])
             
         gene_panel_tokens = [self.token_dict[self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]]] * n_cells
-        assay_tokens = [self.token_dict[assay] for assay in adata.obs["assay"].tolist()]
+        try:
+            assay_tokens = [self.token_dict[assay] for assay in adata.obs["assay"].tolist()]
+        except:
+            assay_tokens = [self.token_dict[assay_key]] * n_cells
         
         # Hardcoding species and tissue values for now
-        species_tokens = [self.token_dict['mus_musculus']] * n_cells
-        tissue_tokens = [self.token_dict['brain']] * n_cells
+        try:
+            species_tokens = [self.token_dict[species] for species in adata.uns["species"]]
+        except:
+            species_tokens = [self.token_dict[species_key]] * n_cells
+        
+        try:
+            tissue_tokens = [self.token_dict[tissue] for tissue in adata.uns["tissue"]]
+        except:
+            tissue_tokens = [self.token_dict[tissue_key]] * n_cells
         
         special_tokens_dict = {'batch_token': batch_tokens,
                                  'gene_panel_token': gene_panel_tokens,
