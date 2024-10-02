@@ -583,6 +583,7 @@ class GeneTransformerPredictor(nn.Module):
                                                      # predictor masks
         seg_embs = apply_masks(seg_embs, masks_pred) # only keep seg from
                                                      # predictor masks
+          
         pos_embs = repeat_interleave_batch(
             pos_embs,
             B,
