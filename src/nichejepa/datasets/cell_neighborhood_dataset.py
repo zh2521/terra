@@ -22,6 +22,7 @@ class CellNeighborhoodDataset(Dataset):
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
                  has_cls: bool=True,
+                 has_gene_panel: bool=True,
                  sampling_strategy: Optional[str]=None,
                  sampling_seed: Optional[int]=42
                  ):
@@ -41,6 +42,7 @@ class CellNeighborhoodDataset(Dataset):
             Sequence length of the neighborhood tokens.
         has_cls:
             If 'True', a <cls> token is included for each cell at position 0.
+        has_gene_panel:
         sampling_strategy:
             Token sampling strategy.
         sampling_seed:
@@ -53,6 +55,7 @@ class CellNeighborhoodDataset(Dataset):
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len = seq_len_cell + seq_len_neighborhood
         self.has_cls = has_cls
+        self.has_gene_panel = has_gene_panel
         self.sampling_strategy = sampling_strategy
         self.sampling_seed = sampling_seed
         
@@ -85,6 +88,15 @@ class CellNeighborhoodDataset(Dataset):
                                "n_nonzero_neighborhood_tokens",
                                "n_nonzero_tokens"]:
                     metadata[key] = self.dataset[item][key]
+
+            if self.has_gene_panel:
+                # If a <gene_panel> token is used, prepend it to the tokens and
+                # consider it for segment labels
+                tokens = [self.vocab_size +
+                          (1 if self.has_cls else 0) + 
+                          int(metadata['dataset_id'])] + tokens
+
+                n_nonzero_tokens += 1
             
             if self.has_cls:
                 # If a <cls> token is used, prepend it to the tokens and
@@ -93,20 +105,17 @@ class CellNeighborhoodDataset(Dataset):
                 
                 # Set total number of nonzero tokens to include <cls> token
                 n_nonzero_tokens += 1
+
+            # Create segment labels: 0 for cls and gene panel token, 1 for cell
+            # tokens and 2 for neighborhood tokens
+            seg_labels = torch.cat(
+                (torch.zeros(self.has_cls + self.has_gene_panel),
+                 torch.ones(self.seq_len_cell),
+                 torch.ones(self.seq_len_neighborhood) * 2)).int()
                 
-                # Create segment labels: 1 for cell tokens and <cls> token and 2
-                # for neighborhood tokens (maybe this needs to be changed)
-                labels = torch.cat(
-                    (torch.ones(self.seq_len_cell + 1),
-                     torch.ones(self.seq_len_neighborhood) * 2)).int()
-            else:
-                # Create segment labels: 1 for cell tokens, 2 for neighborhood
-                # tokens
-                labels = torch.cat(
-                    (torch.ones(self.seq_len_cell),
-                    torch.ones(self.seq_len_neighborhood) * 2)).int()
-                
-            return torch.tensor(tokens), labels, metadata, n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens, n_nonzero_tokens
+            return (torch.tensor(tokens), seg_labels, metadata,
+                    n_nonzero_cell_tokens, n_nonzero_neighborhood_tokens,
+                    n_nonzero_tokens)
         
         # Case 2: only cell tokens are included
         elif self.seq_len_cell > 0:
@@ -130,21 +139,31 @@ class CellNeighborhoodDataset(Dataset):
                                "n_nonzero_tokens"]:
                     metadata[key] = self.dataset[item][key]
             
+            if self.has_gene_panel:
+                            # If a <gene_panel> token is used, prepend it to the tokens and
+                            # consider it for segment labels
+                            tokens = [self.vocab_size + 
+                                      (1 if self.has_cls else 0) + 
+                                      int(metadata['dataset_id'])] + tokens
+
+                            n_nonzero_tokens += 1
+            
             if self.has_cls:
                 # If a <cls> token is used, prepend it to the tokens and
-                # consider it for segment labels  
+                # consider it for segment labels
                 tokens = [self.vocab_size] + tokens
-
+                
                 # Set total number of nonzero tokens to include <cls> token
                 n_nonzero_tokens += 1
+
+            # Create segment labels: 0 for cls and gene panel token, 1 for cell
+            # tokens
+            seg_labels = torch.cat(
+                (torch.zeros(self.has_cls + self.has_gene_panel),
+                 torch.ones(self.seq_len_cell))).int()
                 
-                # Create segment labels: 1 for cell tokens and <cls> token
-                labels = torch.ones(self.seq_len_cell + 1).int()
-            else:
-                # Create segment labels: 1 for cell tokens
-                labels = torch.ones(self.seq_len_cell).int()
-                
-            return torch.tensor(tokens), labels, metadata, n_nonzero_cell_tokens, n_nonzero_tokens
+            return (torch.tensor(tokens), seg_labels, metadata,
+                    n_nonzero_cell_tokens, n_nonzero_tokens)
         
         # Case 3: only neighborhood tokens are included
         elif self.seq_len_neighborhood > 0:
@@ -168,22 +187,31 @@ class CellNeighborhoodDataset(Dataset):
                                "n_nonzero_tokens"]:
                     metadata[key] = self.dataset[item][key]
 
+            if self.has_gene_panel:
+                # If a <gene_panel> token is used, prepend it to the tokens and
+                # consider it for segment labels
+                tokens = [self.vocab_size + 
+                          (1 if self.has_cls else 0) + 
+                          int(metadata['dataset_id'])] + tokens
+
+                n_nonzero_tokens += 1
+            
             if self.has_cls:
                 # If a <cls> token is used, prepend it to the tokens and
-                # consider it for segment labels  
+                # consider it for segment labels
                 tokens = [self.vocab_size] + tokens
-
+                
                 # Set total number of nonzero tokens to include <cls> token
                 n_nonzero_tokens += 1
                 
-                # Create segment labels: 2 for neighborhood tokens and <cls>
-                # token (maybe this needs to be changed)
-                labels = (torch.ones(self.seq_len_neighborhood + 1) * 2).int()
-            else:
-                # Create segment labels: 2 for neighborhood tokens
-                labels = (torch.ones(self.seq_len_neighborhood) * 2).int()
+            # Create segment labels: 0 for cls and gene panel token, 2 for
+            # neighborhood tokens
+            seg_labels = torch.cat(
+                (torch.zeros(self.has_cls + self.has_gene_panel),
+                 torch.ones(self.seq_len_neighborhood) * 2)).int()
 
-            return torch.tensor(tokens), labels, metadata, n_nonzero_neighborhood_tokens, n_nonzero_tokens
+            return (torch.tensor(tokens), seg_labels, metadata,
+                    n_nonzero_neighborhood_tokens, n_nonzero_tokens)
         
         # Case 4: neither cell nor neighborhood tokens are included, which is an
         # invalid state
@@ -330,7 +358,8 @@ class CellNeighborhoodDataset(Dataset):
         tokens: List,
         n_nonzero_tokens: int,
         size: int,
-        sampling_strategy: Literal["normalized_count_rank_sampling"]="normalized_count_rank_sampling",
+        sampling_strategy: Literal['normalized_count_rank_sampling',
+                                   'random_sampling']='random_sampling',
         seed: int=42
         ) -> List:
         """
@@ -354,9 +383,7 @@ class CellNeighborhoodDataset(Dataset):
         sampled_tokens:
             List of sampled tokens.
         """
-        assert size < n_nonzero_tokens
-        
-        if sampling_strategy == "normalized_count_rank_sampling":
+        if sampling_strategy == 'normalized_count_rank_sampling':
             # Set seed for sampling
             np.random.seed(seed)
             
@@ -371,23 +398,30 @@ class CellNeighborhoodDataset(Dataset):
             sum_rank = (n_nonzero_tokens * (n_nonzero_tokens + 1) / 2.0) + 1e-9
             weights = [(n_nonzero_tokens - i)/sum_rank for i in range(n_nonzero_tokens)]
             assert np.isclose(np.sum(weights), 1.0)
-            
-            # Sample seq_cell_len or seq_neighborhood token indices based on
-            # weights
-            sampled_indices = np.random.choice(
-                np.arange(n_nonzero_tokens),
-                size=size,
-                p=weights,
-                replace=False)
-            
-            # Sort sampled indices to preserve rank order
-            sampled_indices = np.sort(sampled_indices)
-            sampled_tokens = [tokens[i] for i in sampled_indices]
-            
-            return sampled_tokens
+        elif sampling_strategy == 'random_sampling':
+            np.random.seed(seed)
+
+            weights = np.ones(n_nonzero_tokens) / n_nonzero_tokens
         else:
             raise ValueError(
                 f"{sampling_strategy} is an invalid sampling strategy.")
+            
+        # Sample seq_cell_len or seq_neighborhood token indices based on
+        # weights
+        sampled_indices = np.random.choice(
+            np.arange(n_nonzero_tokens),
+            size=min(size, n_nonzero_tokens),
+            p=weights,
+            replace=False)
+            
+        # Sort sampled indices to preserve rank order
+        sampled_indices = np.sort(sampled_indices)
+        sampled_tokens = [tokens[i] for i in sampled_indices]
+
+        if size > n_nonzero_tokens:
+            sampled_tokens.extend([0] * (size - len(sampled_tokens)))
+        
+        return sampled_tokens
 
 
 def make_cell_neighborhood_dataset(
@@ -403,7 +437,11 @@ def make_cell_neighborhood_dataset(
     seq_len_cell: int=0,
     seq_len_neighborhood: int=0,
     has_cls: bool=True,
-    distributed: bool=True
+    has_gene_panel: bool=True,
+    distributed: bool=True,
+    sampling_strategy: Optional[
+        Literal['normalized_count_rank_sampling',
+                'random_sampling']]=None,
     ) -> Tuple[CellNeighborhoodDataset,
                torch.utils.data.DataLoader,
                Optional[torch.utils.data.distributed.DistributedSampler]]:
@@ -438,6 +476,7 @@ def make_cell_neighborhood_dataset(
         Sequence length of the neighborhood tokens.
     has_cls:
         If 'True', a <cls> token is included for each cell at position 0.
+    has_gene_panel:
     distributed:
         If 'True', use distributed mode.
 
@@ -454,7 +493,9 @@ def make_cell_neighborhood_dataset(
                                       vocab_size,
                                       seq_len_cell=seq_len_cell,
                                       seq_len_neighborhood=seq_len_neighborhood,
-                                      has_cls=has_cls)
+                                      has_cls=has_cls,
+                                      has_gene_panel=has_gene_panel,
+                                      sampling_strategy=sampling_strategy)
     
     if distributed:
         dist_sampler = CustomDistributedLengthGroupedSampler(
@@ -464,7 +505,8 @@ def make_cell_neighborhood_dataset(
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             num_replicas=world_size,
-            rank=rank)
+            rank=rank,
+            seed=_GLOBAL_SEED)
 
         data_loader = torch.utils.data.DataLoader(dataset,
                                                   collate_fn=collator,

@@ -4,7 +4,7 @@ import os
 import sys
 import yaml
 from collections import defaultdict
-from typing import Literal
+from typing import List, Literal, Optional
 
 import anndata
 import numpy as np
@@ -42,9 +42,11 @@ logger = logging.getLogger()
 @torch.no_grad()
 def infer(args: dict,
           dataset: CellNeighborhoodDataset,
+          load_folder_path: str,
           cell_gene_ids: list=[],
           neighborhood_gene_ids: list=[],
           agg_type: Literal['cls', 'avg', 'weighted_avg']='avg',
+          agg_excluded_tokens: Optional[List]=None,
           feature_norm: bool=False
           ) -> anndata.AnnData:
     """
@@ -66,6 +68,8 @@ def infer(args: dict,
     agg_type:
         Specifies how (aggregated) cell and neighborhood embeddings are computed
         from individual gene embeddings.
+    agg_excluded_tokens:
+        List of tokens to be excluded from the aggregation.
     feature_norm:
         If 'True', apply feature norm in the last embedding layer.
 
@@ -84,6 +88,7 @@ def infer(args: dict,
     pred_emb_dim = args['meta']['pred_emb_dim']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
+    gene_panel_size = args['meta']['gene_panel_size']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
 
@@ -122,33 +127,24 @@ def infer(args: dict,
     # Initialize torch distributed backend
     world_size, rank = init_distributed()
     
-    # Compute seq_len based on config
+    # Compute seq_len and define gene panel token
     seq_len = seq_len_cell + seq_len_neighborhood
+    has_gene_panel = True if gene_panel_size > 0 else False
 
     # Set the folder for saving extracted features
-    folder = (f"logs/{data_set_name}_"
-              f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
-              f"enc_depth_{enc_depth}_enc_emb_dim_{enc_emb_dim}_n_targets_{n_targets}_"
-              f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
-              f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}_"
-              f"seq_len_cell_{seq_len_cell}_"
-              f"seq_len_neighborhood_{seq_len_neighborhood}_"
-              f"pos_learnable_{pos_learnable}_"
-              f"seg_learnable_{seg_learnable}_"
-              f"ratio_{per_segment_mask_ratio}")
-    save_folder = f"{folder}/extracted_features"
+    save_folder = f"{load_folder_path}/extracted_features"
     feature_path = f"{save_folder}/"
 
     os.makedirs(save_folder, exist_ok=True)
     tag = args['logging']['write_tag']
-    dump = os.path.join(folder, f'params.yaml')
+    dump = os.path.join(save_folder, f'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
     # Define checkpointing path
-    latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
-    load_path = (os.path.join(folder, r_file) if r_file is not None else
-        latest_path)
+    latest_path = os.path.join(load_folder_path, f'{tag}-latest.pth.tar')
+    load_path = (os.path.join(load_folder_path, r_file) if r_file is not None 
+        else latest_path)
 
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
@@ -159,6 +155,7 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
+        gene_panel_size=gene_panel_size,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         has_cls=has_cls)
@@ -176,6 +173,7 @@ def infer(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             has_cls=has_cls,
+            has_gene_panel=has_gene_panel,
             per_segment_mask_ratio = per_segment_mask_ratio)
     else:
         mask_collator = MaskCollator(
@@ -185,7 +183,8 @@ def infer(args: dict,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls)
+            has_cls=has_cls,
+            has_gene_panel=has_gene_panel)
 
     # Initialize dataloader
     _, loader = make_cell_neighborhood_dataset(
@@ -238,8 +237,11 @@ def infer(args: dict,
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
+
             emb_list = target_encoder.module.return_multi_layer_emb(
-                cell_neighborhood_tokens, seg_label, masks_attention=masks_attention)
+                cell_neighborhood_tokens,
+                seg_label,
+                masks_attention=masks_attention)
         
             if feature_norm:
                 # Normalize last layer like in training
@@ -254,24 +256,36 @@ def infer(args: dict,
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type=agg_type,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
+
+                cell_emb = compute_mean_unmasked_emb(emb,
+                                                     cell_mask)
+                neighborhood_emb = compute_mean_unmasked_emb(
+                    emb,
+                    neighborhood_mask)
             # Keep elements relevant to cell embedding
             elif (agg_type == "avg") or (agg_type == "weighted_avg"):
                 cell_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_cell",
+                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
                 neighborhood_mask = create_binary_selection_mask(
                     cell_neighborhood_tokens,
                     selection_type="agg_neighborhood",
+                    excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    has_cls=has_cls)
+                    has_cls=has_cls,
+                    has_gene_panel=has_gene_panel)
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,

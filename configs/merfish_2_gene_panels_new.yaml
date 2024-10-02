@@ -12,7 +12,7 @@ data:
   has_cls: True
   random_state: 0
   sample_subset: False
-  sampling_strategy: null # 'random_sampling'
+  sampling_strategy: null
 logging:
   write_tag: jepa
 mask:
@@ -25,7 +25,7 @@ mask:
 meta:
   enc_depth: 3 # 3
   load_checkpoint: false
-  load_timestamp: ''
+  load_timestamp: '23092024_163002_997'
   pred_depth: 1 # 1
   pred_emb_dim: 768
   enc_emb_dim: 768
@@ -37,16 +37,14 @@ meta:
   seg_learnable: False
   gene_panel_size: 2
 optimization:
-  epochs: 40 
+  epochs: 20 
   warmup: 3
   ema:
-  - 0.7
+  - 0.9764319982153814
   - 1.0
-  start_lr: 2.0e-05
-  lr: 2.0e-05
-  final_lr: 2.0e-05
+  start_lr: 5.0e-05
+  lr: 0.000001
+  final_lr: 1.0e-06
   weight_decay: 0.04
-  final_weight_decay: 0.04
+  final_weight_decay: 0.4
   ipe_scale: 1.0
-embedding:
-  agg_type: 'avg'

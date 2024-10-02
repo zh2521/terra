@@ -24,6 +24,8 @@ import pickle
 import random
 import sys
 import yaml
+from datetime import datetime
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -58,9 +60,6 @@ checkpoint_freq = 5
 
 
 _GLOBAL_SEED = 0
-np.random.seed(_GLOBAL_SEED)
-torch.manual_seed(_GLOBAL_SEED)
-torch.backends.cudnn.benchmark = True
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -70,7 +69,8 @@ logger = logging.getLogger()
 def train(args: dict,
           train_dataset: CellNeighborhoodDataset,
           test_dataset: CellNeighborhoodDataset,
-          resume_preempt: bool=False
+          resume_preempt: bool=False,
+          save_folder_path: Optional[str]=None,
           ):
     """
     Train the model.
@@ -84,7 +84,21 @@ def train(args: dict,
     test_dataset:
         Test split CellNeighborhoodDataset.
     resume_preempt:
+    save_folder_path:
+        Path for saving model artifacts.
     """
+
+    # ---------------- #
+    # Set random seeds
+    # ----------------- #
+
+    np.random.seed(_GLOBAL_SEED)
+    torch.manual_seed(_GLOBAL_SEED)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(_GLOBAL_SEED)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     # ----------------------------- #
     #  Load params from config file
     # ----------------------------- #
@@ -97,6 +111,7 @@ def train(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    gene_panel_size = args['meta']['gene_panel_size']
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
     if not torch.cuda.is_available():
@@ -114,6 +129,7 @@ def train(args: dict,
     has_cls = args['data']['has_cls']
     data_set_name = args['data']['data_set_name']
     vocab_size = args['data']['vocab_size']
+    sampling_strategy = args['data']['sampling_strategy']
 
     # Load mask params
     n_targets = args['mask']['n_targets']
@@ -138,24 +154,24 @@ def train(args: dict,
     final_lr = args['optimization']['final_lr']
 
     seq_len = seq_len_cell + seq_len_neighborhood
+    has_gene_panel = True if gene_panel_size > 0 else False
 
     # Create folder to store artifacts
-    # -- LOGGING
-    folder = (f"logs/{data_set_name}_"
-              f"pred_depth_{pred_depth}_pred_emb_dim_{pred_emb_dim}_"
-              f"enc_depth_{enc_depth}_enc_emb_dim_{enc_emb_dim}_n_targets_{n_targets}_"
-              f"n_contexts_{n_contexts}_target_mask_size_{target_mask_size}_"
-              f"context_mask_size_{context_mask_size}_num_epochs_{num_epochs}_"
-              f"seq_len_cell_{seq_len_cell}_"
-              f"seq_len_neighborhood_{seq_len_neighborhood}_"
-              f"pos_learnable_{pos_learnable}_"
-              f"seg_learnable_{seg_learnable}_"
-              f"ratio_{per_segment_mask_ratio}")
+    if not save_folder_path:
+        artifact_folder_path = os.path.join(
+            os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))), "artifacts")
+        current_timestamp = (
+            datetime.now().strftime("%d%m%Y_%H%M%S") +
+            f"_{datetime.now().microsecond // 1000:03d}")
+        save_folder_path = os.path.join(artifact_folder_path,
+                                        data_set_name,
+                                        current_timestamp)
 
-    os.makedirs(folder, exist_ok=True)
+    os.makedirs(save_folder_path, exist_ok=True)
     tag = args['logging']['write_tag']
 
-    dump = os.path.join(folder, 'params.yaml')
+    dump = os.path.join(save_folder_path, 'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
@@ -173,13 +189,13 @@ def train(args: dict,
         logger.setLevel(logging.ERROR)
 
     # Define log/checkpointing paths
-    log_file = os.path.join(folder, f'{tag}_r{rank}.csv')
-    save_path = os.path.join(folder, f'{tag}' + '-ep{epoch}.pth.tar')
-    latest_path = os.path.join(folder, f'{tag}-latest.pth.tar')
+    log_file = os.path.join(save_folder_path, f'{tag}_r{rank}.csv')
+    save_path = os.path.join(save_folder_path, f'{tag}' + '-ep{epoch}.pth.tar')
+    latest_path = os.path.join(save_folder_path, f'{tag}-latest.pth.tar')
     load_path = None
     if load_model:
         load_path = os.path.join(
-            folder, r_file) if r_file is not None else latest_path
+            save_folder_path, r_file) if r_file is not None else latest_path
 
     # Initialize csv logger
     csv_logger = CSVLogger(log_file,
@@ -199,6 +215,7 @@ def train(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
+        gene_panel_size=gene_panel_size,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         has_cls=has_cls)
@@ -212,7 +229,8 @@ def train(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             has_cls=has_cls,
-            per_segment_mask_ratio = per_segment_mask_ratio)
+            has_gene_panel=has_gene_panel,
+            per_segment_mask_ratio=per_segment_mask_ratio)
     else:
         mask_collator = MaskCollator(
             n_targets=n_targets,
@@ -221,7 +239,8 @@ def train(args: dict,
             context_mask_size=context_mask_size,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            has_cls=has_cls)
+            has_cls=has_cls,
+            has_gene_panel=has_gene_panel)
     
     # Initialize dataloader and -sampler
     _, train_loader, train_sampler = make_cell_neighborhood_dataset(
@@ -236,7 +255,9 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls)
+        has_cls=has_cls,
+        has_gene_panel=has_gene_panel,
+        sampling_strategy=sampling_strategy)
 
     _, test_loader, test_sampler = make_cell_neighborhood_dataset(
         batch_size=batch_size,
@@ -250,7 +271,9 @@ def train(args: dict,
         drop_last=False,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        has_cls=has_cls)
+        has_cls=has_cls,
+        has_gene_panel=has_gene_panel,
+        sampling_strategy=sampling_strategy)
 
     ipe = len(train_loader)
 
@@ -325,16 +348,16 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred,  masks_attention) in enumerate(train_loader):
+        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
             def load_cell_neighborhoods():
                 # -- unsupervised imgs
                 cell_neighborhood_tokens = udata[0].to(device,
                                                        non_blocking=True)
-                seg_label = udata[1].to(device, non_blocking=True)                 
+                seg_label = udata[1].to(device, non_blocking=True)
                 masks_1 = [u.to(device, non_blocking=True) for u in masks_enc]
                 masks_2 = [u.to(device, non_blocking=True) for u in masks_pred]
                 masks_3 = masks_attention.to(device, non_blocking=True)
-                return (cell_neighborhood_tokens, seg_label,  masks_1, masks_2, masks_3)
+                return (cell_neighborhood_tokens, seg_label, masks_1, masks_2, masks_3)
             cell_neighborhood_tokens, seg_label, masks_enc, masks_pred, masks_attention = load_cell_neighborhoods()
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
