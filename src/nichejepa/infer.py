@@ -82,47 +82,6 @@ def infer(args: dict,
     adata:
         An AnnData object with the stored embeddings and labels.
     """
-    # ----------------------------- #
-    #  Load params from config file
-    # ----------------------------- #
-    # Load meta params
-    use_bfloat16 = args['meta']['use_bfloat16']
-    r_file = args['meta']['read_checkpoint']
-    pred_depth = args['meta']['pred_depth']
-    pred_emb_dim = args['meta']['pred_emb_dim']
-    enc_depth = args['meta']['enc_depth']
-    enc_emb_dim = args['meta']['enc_emb_dim']
-    special_tokens = args['meta']['special_tokens']
-    pos_learnable = args['meta']['pos_learnable']
-    seg_learnable = args['meta']['seg_learnable']
-
-    # Load data params
-    raw_data_folder_path = args['data']['raw_data_folder_path']
-    batch_size = args['data']['batch_size']
-    vocab_size = args['data']['vocab_size']
-    pin_memory = args['data']['pin_memory']
-    num_workers = args['data']['num_workers']
-    dataset_name = args['data']['dataset_name']
-    tokenizer_type = args['data']['tokenizer_type']
-    seq_len_cell = args['data']['seq_len_cell']
-    seq_len_neighborhood = args['data']['seq_len_neighborhood']
-    n_segments = args['data']['n_segments']
-
-    # Load optimization params
-    num_epochs = args['optimization']['epochs']
-
-    # Load mask params
-    n_targets = args['mask']['n_targets']
-    n_contexts = args['mask']['n_contexts']
-    target_mask_size = args['mask']['target_mask_size']
-    context_mask_size = args['mask']['context_mask_size']
-    segment_masking = args['mask']['segment_masking']
-    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
-    # ----------------------------- #
-
-    # ------------------------------------ #
-    #  Load model and initialize data loader
-    # ------------------------------------ #
     # Set device
     if not torch.cuda.is_available():
         device = torch.device('cpu')
@@ -130,8 +89,36 @@ def infer(args: dict,
         device = torch.device('cuda:0')
         torch.cuda.set_device(device)
 
-    # Initialize torch distributed backend
-    world_size, rank = init_distributed()
+    # Load params from config file
+    enc_depth = args['meta']['enc_depth']
+    enc_emb_dim = args['meta']['enc_emb_dim']
+    pred_depth = args['meta']['pred_depth']
+    pred_emb_dim = args['meta']['pred_emb_dim']
+    special_tokens = args['meta']['special_tokens']
+    pos_learnable = args['meta']['pos_learnable']
+    seg_learnable = args['meta']['seg_learnable']
+    use_bfloat16 = args['meta']['use_bfloat16']
+
+    dataset_name = args['data']['dataset_name']
+    raw_data_folder_path = args['data']['raw_data_folder_path']
+    batch_size = args['data']['batch_size']
+    vocab_size = args['data']['vocab_size']
+    pin_memory = args['data']['pin_memory']
+    num_workers = args['data']['num_workers']
+    tokenizer_type = args['data']['tokenizer_type']
+    seq_len_cell = args['data']['seq_len_cell']
+    seq_len_neighborhood = args['data']['seq_len_neighborhood']
+    n_segments = args['data']['n_segments']
+
+    n_contexts = args['mask']['n_contexts']
+    n_targets = args['mask']['n_targets']
+    segment_masking = args['mask']['segment_masking']
+    context_mask_size = args['mask']['context_mask_size']
+    target_mask_size = args['mask']['target_mask_size']
+    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
+
+    r_file = args['state']['read_checkpoint']
+    tag = args['state']['write_tag']
     
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
@@ -142,10 +129,12 @@ def infer(args: dict,
     feature_path = f"{save_folder}/"
 
     os.makedirs(save_folder, exist_ok=True)
-    tag = args['logging']['write_tag']
     dump = os.path.join(save_folder, f'params.yaml')
     with open(dump, 'w') as f:
         yaml.dump(args, f)
+
+    # Initialize torch distributed backend
+    world_size, rank = init_distributed()
 
     # Define checkpointing path
     latest_path = os.path.join(load_folder_path, f'{tag}-latest.pth.tar')
@@ -220,11 +209,8 @@ def infer(args: dict,
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-    # ------------------------------------ #
-
-    # ----------------------------- #
-    #  Retrieve embeddings
-    # ----------------------------- #
+   
+    # Retrieve embeddings
     target_encoder.eval()
 
     all_cell_ids = []
