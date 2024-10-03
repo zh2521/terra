@@ -219,12 +219,12 @@ class CellBaseDataset(Dataset):
         return segment_gene_tokens
 
 
-class CellGraphDataset(CellBaseDataset):
+class CellGraphRankDataset(CellBaseDataset):
     def __init__(self,
                  **base_dataset_kwargs
                  ):
         """
-        Torch CellGraphDataset class.
+        Torch CellGraphRankDataset class.
 
         Parameters
         -----------
@@ -265,12 +265,12 @@ class CellGraphDataset(CellBaseDataset):
         return seq_tokens, seg_tokens, self.dataset[item]["cell_id"]
 
 
-class CellNeighborhoodDataset(CellBaseDataset):
+class CellNeighborhoodRankDataset(CellBaseDataset):
     def __init__(self,
                  **base_dataset_kwargs
                  ):
         """
-        Torch CellNeighborhoodDataset class.
+        Torch CellNeighborhoodRankDataset class.
 
         Parameters
         -----------
@@ -307,16 +307,94 @@ class CellNeighborhoodDataset(CellBaseDataset):
         return seq_tokens, seg_tokens, self.dataset[item]["cell_id"]
 
 
-def make_cell_dataset(tokenizer_type: Literal['cell_graph',
-                                              'cell_neighborhood'],
+class CellNeighborhoodCountDataset(CellBaseDataset):
+    def __init__(self,
+                 **base_dataset_kwargs
+                 ):
+        """
+        Torch CellNeighborhoodCountDataset class.
+
+        Parameters
+        -----------
+        **base_dataset_kwargs:
+            Keyword arguments for the initialization of CellBaseDataset.
+        """
+        super().__init__(**base_dataset_kwargs)
+
+    def _get_gene_tokens_and_counts_for_segment(self, 
+                                                item: int,
+                                                segment_idx: int,
+                                                segment_seq_len: int,
+                                                ) -> List[int]:
+        """
+        This needs to be cleaned up later. Add sampling.
+        """
+        # Only keep gene tokens in specified segment
+        segment_gene_tokens = [gene_token for gene_token, seg_token in zip(
+            self.dataset[item]["gene_tokens"], self.dataset[item]["seg_tokens"])
+            if seg_token == segment_idx]
+
+        segment_counts = [count for counts, seg_token in zip(
+            self.dataset[item]["gene_expr"], self.dataset[item]["seg_tokens"])
+            if seg_token == segment_idx]
+
+        if segment_seq_len > len(segment_gene_tokens):
+            raise ValueError(
+                'Sequence length for a given segment cannot be larger than'
+                'segment size when not sampling with replacement.')
+
+        segment_gene_tokens = segment_gene_tokens[:segment_seq_len]
+        segment_gene_expr = segment_gene_expr[:segment_seq_len]
+                
+        return segment_gene_tokens, segment_gene_expr
+
+        def __getitem__(self,
+                        item: int
+                        ) -> Tuple[torch.Tensor, torch.Tensor]:
+            # Get (sampled) gene tokens
+            gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
+                item=item,
+                segment_idx=1, # cell seg
+                segment_seq_len=self.seq_len_cell)
+            gene_tokens_neighborhood, gene_expr_neighborhood = self._get_gene_tokens_and_counts_for_segment(
+                item=item,
+                segment_idx=2, # neighborhood seg
+                segment_seq_len=self.seq_len_neighborhood)
+            seq_tokens = gene_tokens_cell + gene_tokens_neighborhood
+            gene_expr = gene_expr_cell + gene_expr_neighborhood
+            seg_tokens = [1] * len(gene_tokens_cell) + [2] * len(
+                gene_tokens_neighborhood)
+
+            # Add special tokens
+            seq_tokens, seg_tokens = self._add_special_tokens_to_seq(
+                seq_tokens=seq_tokens,
+                seg_tokens=seg_tokens,
+                item=item)
+
+            seq_tokens = torch.tensor(seq_tokens)
+            seg_tokens = torch.tensor(seg_tokens).int()
+
+            # Add 1s for special tokens
+            gene_expr = [1] * self.n_special_tokens + gene_expr
+
+            return seq_tokens, seg_tokens, self.dataset[item]["cell_id"], gene_expr
+
+
+def make_cell_dataset(tokenizer_type: Literal['cell_graph_rank',
+                                              'cell_neighborhood_rank',
+                                              'cell_neighborhood_count'],
                       **cell_dataset_kwargs
-                      ) -> Union[CellGraphDataset, CellNeighborhoodDataset]:
+                      ) -> Union[CellGraphRankDataset,
+                                 CellNeighborhoodRankDataset,
+                                 CellNeighborhoodCountDataset]:
     """
     Based on tokenizer type, return CellGraphDataset or CellNeighborhoodDataset.
     """
-    if tokenizer_type == 'cell_graph':
-        cell_dataset = CellGraphDataset(**cell_dataset_kwargs)
-    elif tokenizer_type  == 'cell_neighborhood':
-        cell_dataset = CellNeighborhoodDataset(**cell_dataset_kwargs)
+    if tokenizer_type == 'cell_graph_rank':
+        cell_dataset = CellGraphRankDataset(**cell_dataset_kwargs)
+    elif tokenizer_type  == 'cell_neighborhood_rank':
+        cell_dataset = CellNeighborhoodRankDataset(**cell_dataset_kwargs)
+    elif tokenizer_type  == 'cell_neighborhood_count':
+        cell_dataset = CellNeighborhoodCountDataset(**cell_dataset_kwargs)
 
     return cell_dataset

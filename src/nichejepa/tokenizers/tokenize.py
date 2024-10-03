@@ -45,6 +45,31 @@ def process_gene_tokens(gene_tokens: List,
         num_nonzero_tokens = len(processed_gene_tokens) - pad_size
                 
     return processed_gene_tokens, num_nonzero_tokens
+
+
+def process_gene_expr(gene_expr: List,
+                      length: int,
+                      ) -> List:
+    """
+    This needs to be updated.   
+    """
+    # Convert to np.int64 to ensure all elements are of the same type. Should
+    # this be double?
+    processed_gene_expr = np.array(gene_expr, dtype=np.int64)
+    
+    pad_size = int(length - len(processed_gene_expr))
+    if pad_size < 0:
+        # Truncate
+        processed_gene_expr = processed_gene_expr[:length]
+    else:
+        # Add padding with 1
+        processed_gene_expr = np.pad(
+            processed_gene_expr,
+            (0, pad_size),
+            'constant',
+            constant_values=1)
+                
+    return processed_gene_expr
     
 
 def rank_gene_tokens(gene_scores: np.ndarray,

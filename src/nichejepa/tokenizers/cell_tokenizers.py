@@ -88,7 +88,7 @@ from ..preprocessors.normalizers import normalize_by_read_depth
 from ..preprocessors.normalizers import normalize_by_seurat
 from ..preprocessors.normalizers import normalize_by_shifted_log_mean
 from ..preprocessors.normalizers import normalize_by_shifted_log
-from .tokenize import process_gene_tokens, rank_gene_tokens
+from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
 
 
 warnings.filterwarnings("ignore", message=".*The 'nopython' keyword.*") # noqa
@@ -1874,9 +1874,22 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             self.token_dict)
         del example['gene_tokens_neighborhood']
 
+        gene_expr_cell = process_gene_expr(
+            example['gene_expr_cell'],
+            int(self.model_input_size / 2))
+        del example['gene_expr_cell']
+
+        gene_expr_neighborhood = process_gene_expr(
+            example['gene_expr_neighborhood'],
+            int(self.model_input_size / 2))
+        del example['gene_expr_neighborhood']
+
         example['gene_tokens'] = np.concatenate(
             (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy()))
-        
+
+        example['gene_expr'] = np.concatenate(
+            (gene_expr_cell.copy(), gene_expr_neighborhood.copy()))
+
         # Retrieve attributes
         example['n_nonzero_tokens'] = (
             n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens)
