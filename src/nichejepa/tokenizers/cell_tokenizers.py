@@ -68,6 +68,7 @@ import logging
 import pickle
 import warnings
 import concurrent
+from acb import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Literal, Optional, Tuple
 
@@ -110,7 +111,7 @@ GENE_PANEL_ID_TO_GENE_PANEL_DICT_FILE = base_path / "gene_panel_ID_to_gene_panel
 FILE_PATH_TO_GENE_PANEL_ID_DICT_FILE = base_path / "file_path_to_gene_panel_ID_dict.pkl"
 
 
-class CellBaseTokenizer:
+class CellBaseTokenizer(ABC):
     def __init__(self,
                  custom_attr_name_dict: Optional[dict]=None,
                  nproc: int=1,
@@ -119,6 +120,8 @@ class CellBaseTokenizer:
                  chunk_size: int=512,
                  model_input_size: int=2048,
                  token_dictionary_file: Path | str=TOKEN_DICTIONARY_FILE,
+                 gene_panel_ID_to_gene_panel_dict_file: Path | str=GENE_PANEL_ID_TO_GENE_PANEL_DICT_FILE,
+                 file_path_to_gene_panel_ID_dict_file: Path | str=FILE_PATH_TO_GENE_PANEL_ID_DICT_FILE,
                  ):
         """
         """
@@ -127,7 +130,6 @@ class CellBaseTokenizer:
         self.processing_mode = processing_mode
         self.chunk_size = chunk_size
         self.model_input_size = model_input_size
-        self.gene_list_file = gene_list_file
         self.gene_panel_ID_to_gene_panel_dict_file = gene_panel_ID_to_gene_panel_dict_file
         self.file_path_to_gene_panel_ID_dict_file = file_path_to_gene_panel_ID_dict_file
 
@@ -136,12 +138,14 @@ class CellBaseTokenizer:
             self.token_dict = pickle.load(f)
 
         # Load gene panel ID to gene panel dictionary
-        print(f"Loading gene panel ID to gene panel dictionary from {self.gene_panel_ID_to_gene_panel_dict_file}.")
+        logger.info('Loading gene panel ID to gene panel dictionary from '
+                    f'{self.gene_panel_ID_to_gene_panel_dict_file}.')
         with open(self.gene_panel_ID_to_gene_panel_dict_file, "rb") as f:
             self.gene_panel_ID_to_gene_panel_dict = pickle.load(f)
             
         # Load dictionary of file paths to gene panel IDs
-        print(f"Loading file path to gene panel ID dictionary from {self.file_path_to_gene_panel_ID_dict_file}.")
+        logger.info('Loading file path to gene panel ID dictionary from '
+                    f'{self.file_path_to_gene_panel_ID_dict_file}.')
         with open(self.file_path_to_gene_panel_ID_dict_file, "rb") as f:
             self.file_path_to_gene_panel_ID_dict = pickle.load(f)
             
@@ -152,7 +156,11 @@ class CellBaseTokenizer:
         self.coding_miRNA_dict = dict(
             zip(self.coding_miRNA_ids, [True] * len(self.vocab)))
 
-        self.special_token_keys = ['batch_token', 'gene_panel_token', 'assay_token', 'species_token', 'tissue_token']      
+        self.special_token_keys = ['batch_token',
+                                   'gene_panel_token',
+                                   'assay_token',
+                                   'species_token',
+                                   'tissue_token']      
 
     def tokenize_data(self,
                       input_directory: Path | str,
@@ -160,10 +168,10 @@ class CellBaseTokenizer:
                       output_file_prefix: str,
                       file_format: Literal["h5ad"]="h5ad",
                       use_generator: bool=False,
-                      cache_directory_path: Path | str=None,
+                      cache_directory_path: Optional[Path | str]=None,
                       num_shards: int=None,
-                      keep_in_memory: bool=False
-                      ) -> None:
+                      keep_in_memory: bool=False,
+                      ):
         """
         Tokenize files in 'input_directory' and save as tokenized '.dataset'
         file in 'output_directory'.
@@ -198,25 +206,23 @@ class CellBaseTokenizer:
             (Path(output_directory) / output_file_prefix).with_suffix(
                 ".dataset"))
         tokenized_dataset.save_to_disk(output_path, num_shards=num_shards)
-        print(f"Tokenized dataset saved to '{output_path}'.")
+        logger.info("Tokenized dataset saved to '{output_path}'.")
 
-    def create_dataset(self,
-                       dataset_dict: dict,
-                       use_generator: bool=False,
-                       cache_directory_path: Path | str=None,
-                       keep_in_memory: bool=False,
-                       ) -> Dataset:
+    def _create_dataset(self,
+                        dataset_dict: dict,
+                        use_generator: bool=False,
+                        cache_directory_path: Optional[Path | str]=None,
+                        keep_in_memory: bool=False,
+                        ) -> Dataset:
         """
         Create a huggingface dataset based on tokenized cells.
 
         Parameters
         ----------
         dataset_dict:
+            Dictionary based on which the huggingface dataset will be created.
         use_generator:
             If 'True', use generator for tokenization, else dict.
-        keep_original_gene_tokens:
-            If 'True', keep original gene tokens in Hugging Face dataset (before
-            padding/truncation and addition of special tokens).
         cache_directory_path:
             If specified, cache directory path for dataset creation.
         keep_in_memory:
@@ -225,24 +231,24 @@ class CellBaseTokenizer:
         Returns
         ----------
         dataset:
-            Hugging Face dataset containing the tokenized cells.
+            Huggingface dataset containing the tokenized cells.
         """
         # Create huggingface dataset
-        print("Creating huggingface dataset...")
+        logger.info('Creating huggingface dataset...')
         if use_generator:
             def dict_generator():
-                for i in range(len(dataset_dict["cell_id"])):
+                for i in range(len(dataset_dict['cell_id'])):
                     yield {k: dataset_dict[k][i] for k in dataset_dict.keys()}
-            print("Using generator for dataset creation.")
+            logger.info('Using generator for dataset creation.')
             dataset = Dataset.from_generator(dict_generator,
                                              num_proc=self.nproc,
                                              keep_in_memory=keep_in_memory,
                                              cache_dir=cache_directory_path)
         else:
-            print("Using dictionary for dataset creation.")
+            logger.info('Using dictionary for dataset creation.')
             dataset = Dataset.from_dict(dataset_dict)
 
-        print("Formatting gene tokens...")
+        logger.info('Formatting gene tokens...')
         formatted_dataset = dataset.map(
             self._format_gene_tokens, 
             num_proc=self.nproc,
@@ -250,12 +256,12 @@ class CellBaseTokenizer:
                 
         return formatted_dataset
 
-    def tokenize_files(self,
+    def _tokenize_files(self,
                        data_directory: Path | str,
                        file_format: Literal["h5ad"]="h5ad"
-                       ) -> Tuple[np.ndarray, np.ndarray, dict, dict, List[str]]:
+                       ) -> dict:
         """
-        Tokenize multiple files.
+        Tokenize multiple files in a directory.
 
         Parameters
         ----------
@@ -266,50 +272,75 @@ class CellBaseTokenizer:
 
         Returns
         ----------
-        gene_tokens_cell:
-            Cell-wise vector of ranked cell gene tokens.
-        gene_tokens_neighborhood:
-            Cell-wise vector of ranked neighborhood gene tokens.
-        cell_metadata:
-            Dictionary of cell metadata where keys are metadata columns and
-            values are lists of cell-wise values.
-        special_tokens_dict:
-            Dictionary of special tokens where keys are special token names and
-            values are special token values (for each cell).
-        cell_IDs:
-            List of cell IDs.
+        dataset_dict:
+            Dictionary containing the cell IDs and tokens for the tokenized
+            files with the following keys and values:
+                - cell_IDs: List of cell IDs.
+                - gene_tokens_cell: Cell-wise vector of ranked cell gene tokens.
+                - gene_tokens_neighborhood: Cell-wise vector of ranked
+                      neighborhood gene tokens.
+                - metadata columns: cell-wise metadata
+                - special token columns: vectors of special tokens
         """
         file_found = 0
 
-        tokenize_file_fn = self.tokenize_adata
+        tokenize_file_fn = self._tokenize_adata # for support of other file
+                                                # formats in the future
 
-        if self.processing_mode == "sequential":
-        # Loop through data directory to tokenize '.h5ad' files sequentially
-            print("Tokenizing files sequentially...")
-            for file_path in data_directory.glob(f"**/*.{file_format}"):
+        # Initialize dict to add results from individual files
+        dataset_dict = {}
+
+        # Loop through data directory to tokenize '.h5ad' files
+        if self.processing_mode == 'sequential':
+            logger.info('Tokenizing files sequentially...')
+            for file_path in data_directory.glob(f'**/*.{file_format}'):
                 file_found = 1
-                print(f"Tokenizing '{file_path}'...")
+                logger.info(f"Tokenizing '{file_path}'.")
                 file_dataset_dict = tokenize_file_fn(file_path)
-        elif self.processing_mode == "parallel":
-            print("Tokenizing files in parallel...")
-            with concurrent.futures.ProcessPoolExecutor(max_workers=self.nproc) as executor:
+                for k in file_dataset_dict.keys():
+                    if k not in dataset_dict:
+                        dataset_dict[k] = []
+                    dataset_dict[k] += file_dataset_dict[k]
+        elif self.processing_mode == 'parallel':
+            logger.info('Tokenizing files in parallel...')
+            with concurrent.futures.ProcessPoolExecutor(
+            max_workers=self.nproc) as executor:
                 futures = []
                 for file_path in data_directory.glob(f"**/*.{file_format}"):
                     file_found = 1
-                    print(f"Tokenizing '{file_path}'...")
+                    logger.info(f"Tokenizing '{file_path}'...")
                     future = executor.submit(tokenize_file_fn, file_path)
                     futures.append(future)
                 for future in concurrent.futures.as_completed(futures):
                     file_dataset_dict = future.result()
-                   
-        for k in file_dataset_dict.keys():
-            dataset_dict[k] += file_dataset_dict[k]
+                    for k in file_dataset_dict.keys():
+                        if k not in dataset_dict:
+                            dataset_dict[k] = []
+                        dataset_dict[k] += file_dataset_dict[k]
 
         if file_found == 0:
-            logger.error(f"No '.{file_format}' files found in directory '{data_directory}'.")
-            raise
+            logger.error(
+                f"No '.{file_format}' files found in directory "
+                f"'{data_directory}'.")
+            raise FileNotFoundError(
+                f"No '.{file_format}' files found in directory "
+                f"'{data_directory}'.")
 
         return dataset_dict
+
+    @abstractmethod
+    def _tokenize_adata(self):
+        """
+        Tokenizer-specific logic to tokenize one adata file.
+        """
+        pass
+
+    @abstractmethod
+    def _format_gene_tokens(self):
+        """
+        Tokenizer-specific logic to format gene tokens.
+        """
+        pass
 
 
 class CellGraphRankTokenizer(CellBaseTokenizer):
@@ -904,12 +935,14 @@ class CellNeighborhoodRankTokenizer(CellBaseTokenizer):
             self.token_dict = pickle.load(f)
 
         # Load gene panel ID to gene panel dictionary
-        print(f"Loading gene panel ID to gene panel dictionary from {self.gene_panel_ID_to_gene_panel_dict_file}.")
+        logger.info('Loading gene panel ID to gene panel dictionary from '
+                    f'{self.gene_panel_ID_to_gene_panel_dict_file}.')
         with open(self.gene_panel_ID_to_gene_panel_dict_file, "rb") as f:
             self.gene_panel_ID_to_gene_panel_dict = pickle.load(f)
             
         # Load dictionary of file paths to gene panel IDs
-        print(f"Loading file path to gene panel ID dictionary from {self.file_path_to_gene_panel_ID_dict_file}.")
+        logger.info('Loading file path to gene panel ID dictionary from '
+                    f'{self.file_path_to_gene_panel_ID_dict_file}.')
         with open(self.file_path_to_gene_panel_ID_dict_file, "rb") as f:
             self.file_path_to_gene_panel_ID_dict = pickle.load(f)
             
@@ -1658,33 +1691,9 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
         """
         super().__init__(**base_tokenizer_kwargs)
 
-        gene_list_file: Path | str=GENE_LIST_FILE,
-        gene_panel_ID_to_gene_panel_dict_file: Path | str=GENE_PANEL_ID_TO_GENE_PANEL_DICT_FILE,
-        file_path_to_gene_panel_ID_dict_file: Path | str=FILE_PATH_TO_GENE_PANEL_ID_DICT_FILE,
-
-        use_separate_cell_and_neighborhood_tokens: bool=False,
-        cell_special_tokens: Optional[list[str]]=None, # ["<cls_cell>"],
-        cell_special_tokens_idx: Optional[list[int]]=None, # [0],
-        neighborhood_special_tokens: Optional[list[str]]=None, # ["<cls_neighborhood>"],
-        neighborhood_special_tokens_idx: Optional[list[int]]=None #[0]
-        ):
-      
-     
-
-        self.cell_special_tokens = cell_special_tokens
-        self.cell_special_tokens_idx = cell_special_tokens_idx
-        self.neighborhood_special_tokens = neighborhood_special_tokens
-        self.neighborhood_special_tokens_idx = neighborhood_special_tokens_idx
-
-
-
-    def tokenize_adata(self,
+    def _tokenize_adata(self,
                        adata_file_path: Path | str
-                       ) -> Tuple[np.ndarray,
-                                  np.ndarray,
-                                  dict,
-                                  dict,
-                                  List[str]]:
+                       ) -> dict:
             """
             Tokenize cells from an '.h5ad' (anndata) file.
 
@@ -1707,6 +1716,9 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             cell_IDs:
                 List of cell IDs.
             """
+            # Initialize dict to collect tokens and metadata
+            adata_token_dict = {}
+
             adata = ad.read_h5ad(adata_file_path)
 
             print("Filtering cells...")
@@ -1718,11 +1730,13 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             adata = aggregate_neighbors(adata,
                                         radius=27.5)
 
-            # Initialize cell metadata
+            # Initialize dict to collect tokens and metadata
             if self.custom_attr_name_dict is not None:
                 print("Initializing cell metadata.")
-                cell_metadata = {
+                adata_token_dict = {
                     attr_key: [] for attr_key in self.custom_attr_name_dict.keys()}
+            else:
+                adata_token_dict = {}
 
             # Retrieve gene tokens for genes contained in dataset and vocab, i.e.
             # protein-coding and miRNA genes
@@ -1740,10 +1754,10 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             # Prepare gene tokens for cell and neighborhood for this file
             # Other custom attributes are now set to None
             # so cell_metadata is not used
-            gene_tokens_cell = []
-            gene_expr_cell = []
-            gene_tokens_neighborhood = []
-            gene_expr_neighborhood = []
+            adata_token_dict['gene_tokens_cell'] = []
+            adata_token_dict['gene_expr_cell'] = []
+            adata_token_dict['gene_tokens_neighborhood'] = []
+            adata_token_dict['gene_expr_neighborhood'] = []
                 
             # Divide cells into chunks and loop through chunks
             print("Ranking gene tokens.")
@@ -1751,32 +1765,27 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
                 counts_cell = sp.csr_matrix(adata[
                     i : i + self.chunk_size, coding_miRNA_idx].X)
                 counts_neighborhood = sp.csr_matrix(
-                    adata[i : i + self.chunk_size, coding_miRNA_idx].layers["X_neighborhood"]
-                    )
+                    adata[i : i + self.chunk_size, coding_miRNA_idx].layers["X_neighborhood"])
 
-                gene_expr_cell += [
+                adata_token_dict['gene_expr_cell'] += [
                     counts_cell[j].data[np.argsort(-counts_cell[j].data)]
-                    for j in range(counts_cell.shape[0])
-                    ]
+                    for j in range(counts_cell.shape[0])]
 
                 # Rank cell gene tokens and append across chunks
-                gene_tokens_cell += [
+                adata_token_dict['gene_tokens_cell'] += [
                     rank_gene_tokens(counts_cell[j].data,
                     coding_miRNA_tokens_cell[counts_cell[j].indices])
-                    for j in range(counts_cell.shape[0])
-                    ]
+                    for j in range(counts_cell.shape[0])]
 
-                gene_expr_neighborhood += [
+                adata_token_dict['gene_expr_neighborhood'] += [
                     counts_neighborhood[j].data[np.argsort(-counts_neighborhood[j].data)]
-                    for j in range(counts_neighborhood.shape[0])
-                    ]
+                    for j in range(counts_neighborhood.shape[0])]
 
                 # Rank neighborhood gene tokens and append across chunks
-                gene_tokens_neighborhood += [
+                adata_token_dict['gene_tokens_neighborhood'] += [
                     rank_gene_tokens(counts_neighborhood[j].data,
                                      coding_miRNA_tokens_neighborhood[counts_neighborhood[j].indices])
-                    for j in range(counts_neighborhood.shape[0])
-                    ]
+                    for j in range(counts_neighborhood.shape[0])]
 
                 # Add values to cell metadata
                 if self.custom_attr_name_dict is not None:
@@ -1812,11 +1821,13 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
                 batch_IDs = adata.obs["batch"].tolist()
             
             # Set cell IDs
-            cell_IDs = []
-            batch_tokens = []
+            adata_token_dict['cell_IDs'] = []
+            adata_token_dict['batch_tokens'] = []
             for cell_idx, batch_id in enumerate(batch_IDs):
-                cell_IDs.append(f"{dataset_id}_{batch_id}_{cell_idx}")
-                batch_tokens.append(self.token_dict[f"{dataset_id}_{batch_id}"])
+                adata_token_dict['cell_IDs'].append(
+                    f'{dataset_id}_{batch_id}_{cell_idx}')
+                adata_token_dict['batch_tokens'].append(
+                    self.token_dict[f'{dataset_id}_{batch_id}'])
                 
             gene_panel_tokens = [self.token_dict[self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]]] * n_cells
             try:
@@ -1835,64 +1846,50 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             except:
                 tissue_tokens = [self.token_dict[tissue_key]] * n_cells
 
-            adata_token_dict['assay_tokens'] = assay_tokens
-            adata_token_dict['species_token'] = species_token
-            adata_token_dict['tissue_token'] = tissue_token
-            adata_token_dict['gene_panel_token'] = gene_panel_token
-            adata_token_dict['batch_token'] = batch_tokens
+            adata_token_dict['assay_token'] = assay_tokens
+            adata_token_dict['species_token'] = species_tokens
+            adata_token_dict['tissue_token'] = tissue_tokens
+            adata_token_dict['gene_panel_token'] = gene_panel_tokens
+            adata_token_dict['batch_token'] = batch_tokenss
 
             return adata_token_dict
             
-
     def _format_gene_tokens(example):
-        # MANDATORY TOKENS
-        example["cls_cell_token"] = [self.token_dict["<cls_cell>"]]
-        example["cls_neighborhood_token"] = [self.token_dict["<cls_neighborhood>"]]
-
-        # GENE TOKENS
+        # Retrieve gene tokens
         gene_tokens_cell, n_nonzero_cell_tokens = process_gene_tokens(
-            example["gene_tokens_cell"],
+            example['gene_tokens_cell'],
             int(self.model_input_size / 2),
-            self.token_dict,
-            self.cell_special_tokens,
-            self.cell_special_tokens_idx)
-        del example["gene_tokens_cell"]
+            self.token_dict)
+        del example['gene_tokens_cell']
 
         gene_tokens_neighborhood, n_nonzero_neighborhood_tokens = process_gene_tokens(
-            example["gene_tokens_neighborhood"],
+            example['gene_tokens_neighborhood'],
             int(self.model_input_size / 2),
-            self.token_dict,
-            self.neighborhood_special_tokens,
-            self.neighborhood_special_tokens_idx)
-        del example["gene_tokens_neighborhood"]
+            self.token_dict)
+        del example['gene_tokens_neighborhood']
 
-        example["gene_tokens"] = np.concatenate(
-            (gene_tokens_cell.copy(),
-            gene_tokens_neighborhood.copy()
-            )
-        )
+        example['gene_tokens'] = np.concatenate(
+            (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy()))
         
-        # SEGMENT TOKENS
-        example["seg_tokens"] = np.concatenate(
+        # Retrieve attributes
+        example['n_nonzero_tokens'] = (
+            n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens)
+
+        # Define segment tokens
+        example['seg_tokens'] = np.concatenate(
             (np.array([1] * len(gene_tokens_cell)),
-                np.array([2] * len(gene_tokens_neighborhood))
-            )
-        )
+             np.array([2] * len(gene_tokens_neighborhood))))
         
-        # SPECIAL TOKENS
-        example["batch_token"] = [example["batch_token"]]
-        example["gene_panel_token"] = [example["gene_panel_token"]]
-        example["assay_token"] = [example["assay_token"]]
-        example["species_token"] = [example["species_token"]]
-        example["tissue_token"] = [example["tissue_token"]]
+        # Retrieve mandatory special tokens
+        example['cls_cell_token'] = [self.token_dict['<cls_cell>']]
+        example['cls_neighborhood_token'] = [
+            self.token_dict['<cls_neighborhood>']]
 
-        # METADATA
-        example["cell_id"] = example["cell_id"]
-                    
-        # ATTRIBUTES
-        example["n_nonzero_tokens"] = (
-            n_nonzero_cell_tokens +
-            n_nonzero_neighborhood_tokens
-        )
+        # Retrieve other special tokens
+        example['batch_token'] = [example['batch_token']]
+        example['gene_panel_token'] = [example['gene_panel_token']]
+        example['assay_token'] = [example['assay_token']]
+        example['species_token'] = [example['species_token']]
+        example['tissue_token'] = [example['tissue_token']]
                 
         return example

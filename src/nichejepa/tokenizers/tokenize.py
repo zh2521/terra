@@ -6,8 +6,6 @@ import numpy as np
 def process_gene_tokens(gene_tokens: List,
                         length: int,
                         token_dict: dict,
-                        special_tokens: Optional[List],
-                        special_tokens_idx: Optional[List]
                         ) -> List:
     """
     Add pad tokens or truncate gene token list based on length and add special
@@ -21,10 +19,6 @@ def process_gene_tokens(gene_tokens: List,
         Length to which to pad or truncate the gene token list to.
     token_dict:
         Token dictionary.
-    special_tokens:
-        List of special tokens to be added to the gene token list.
-    special_tokens_idx:
-        List with indices where special tokens are added to the gene token list.
 
     Returns
     ----------
@@ -32,24 +26,9 @@ def process_gene_tokens(gene_tokens: List,
        List containing padded or truncated (ranked) gene tokens, including
        special tokens if defined.       
     """
-
-    if special_tokens:
-        # Make space for special tokens
-        processed_gene_tokens = gene_tokens[:(length-len(special_tokens))]
-
-        # Add special tokens
-        for special_token, special_token_idx in zip(
-            special_tokens, special_tokens_idx):
-            processed_gene_tokens = np.insert(
-                processed_gene_tokens,
-                special_token_idx,
-                token_dict.get(special_token))
-    else:
-        processed_gene_tokens = gene_tokens
-
     # Convert to np.int64 to ensure all elements are of the same type. Should
     # this be double?
-    processed_gene_tokens = np.array(processed_gene_tokens, dtype=np.int64)
+    processed_gene_tokens = np.array(gene_tokens, dtype=np.int64)
     
     pad_size = int(length - len(processed_gene_tokens))
     if pad_size < 0:
@@ -62,7 +41,7 @@ def process_gene_tokens(gene_tokens: List,
             processed_gene_tokens,
             (0, pad_size),
             'constant',
-            constant_values=token_dict.get("<pad>"))
+            constant_values=token_dict.get('<pad>'))
         num_nonzero_tokens = len(processed_gene_tokens) - pad_size
                 
     return processed_gene_tokens, num_nonzero_tokens
