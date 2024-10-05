@@ -162,7 +162,7 @@ def infer(args: dict,
 
     # Initialize mask collator
     if block_masking:
-       mask_collator = SegmentMaskCollator(
+       mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
