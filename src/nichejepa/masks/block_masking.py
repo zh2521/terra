@@ -32,6 +32,9 @@ class BlockMaskCollator:
         The length of the token sequence representing the neighborhood block.
     per_block_mask_ratio: float
         The ratio of elements to be masked in each block.
+    separate_cls: bool
+        This will determine whether we add the CLS of  cell only to cell blocks and
+        the CLS of  neighborhood only to the neighborhood or not.
     """
     
     def __init__(self,
@@ -42,7 +45,8 @@ class BlockMaskCollator:
                  seq_len_cell: int=0,
                  seq_len_neighborhood: int=0,
                  n_special_tokens: int=0,
-                 per_block_mask_ratio: float=0.3):
+                 per_block_mask_ratio: float=0.3,
+                 separate_cls: bool=True):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
         self.target_mask_size = target_mask_size
@@ -52,7 +56,7 @@ class BlockMaskCollator:
         self.seq_len_gene_tokens = self.seq_len_cell + self.seq_len_neighborhood
         self.n_special_tokens = n_special_tokens
         self.per_block_mask_ratio = per_block_mask_ratio
-
+        self.separate_cls = separate_cls
         # Determine the valid start position for the mask based on number of
         # special tokens
         self.valid_min_start = self.n_special_tokens
@@ -109,9 +113,15 @@ class BlockMaskCollator:
                 # Randomly choose indices to mask within the block
                 # DON'T USE torch.rand as it could produce repeated indices
                 mask_indices = torch.randperm(block_size)[:num_to_mask]
-                masked_indices = block_non_zero_indices[mask_indices].tolist()  # Convert to list
-                context_mask[masked_indices] = 0  # Set masked indices to 0 in the context mask
-                masked_indices = list(range(self.n_special_tokens)) + masked_indices # include special tokens
+                masked_indices = block_non_zero_indices[mask_indices].tolist()  # Convert to list.
+                context_mask[masked_indices] = 0  # Set masked indices to 0 in the context mask.
+                max_index, min_index = max(masked_indices), min(masked_indices) # Find the maximum and minimum index positions in the mask.  
+                if min_index > self.seq_len_cell and self.separate_cls: # If the min_index is greater than self.seq_len_cell and self.separate_cls is True.
+                   masked_indices = list(range(1,self.n_special_tokens)) + masked_indices # Include special tokens, excluding cls_cell.
+                elif self.seq_len_cell > max_index and self.separate_cls: # If the max_index is smaller than self.seq_len_cell and self.separate_cls is True.
+                    masked_indices = [0] + list(range(2,self.n_special_tokens)) + masked_indices # include special tokens excluding cls_neighborhood.
+                else: # This means the block is in both neighborhood  and cell or and self.separate_cls is False.
+                    masked_indices = list(range(self.n_special_tokens)) + masked_indices # include special tokens including both cls_neighborhood and cls_cell.
                 keep_tokens_target = min(keep_tokens_target, len(masked_indices))  # Update minimum tokens target
                 block_masks.append(torch.tensor(masked_indices))  # Append the masked indices io the list
             else:
@@ -206,4 +216,3 @@ class BlockMaskCollator:
         collated_masks_attention = torch.utils.data.default_collate(collated_masks_attention).unsqueeze(1).unsqueeze(1)
         
         return collated_batch, collated_masks_context, collated_masks_target, collated_masks_attention
-
