@@ -20,7 +20,7 @@ from .datasets.cell_datasets import CellBaseDataset, make_cell_dataset
 from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import init_model, load_checkpoint
 from .masks.multigene import MaskCollator
-from .masks.segment_masking  import SegmentMaskCollator
+from .masks.block_masking  import BlockMaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -112,10 +112,10 @@ def infer(args: dict,
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
-    segment_masking = args['mask']['segment_masking']
+    block_masking = args['mask']['block_masking']
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
-    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
+    per_block_mask_ratio = args['mask']['per_block_mask_ratio']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
@@ -161,14 +161,14 @@ def infer(args: dict,
     target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
-    if segment_masking:
-       mask_collator = SegmentMaskCollator(
+    if block_masking:
+       mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_segment_mask_ratio = per_segment_mask_ratio)
+            per_block_mask_ratio = per_block_mask_ratio)
     else:
         mask_collator = MaskCollator(
             n_targets=n_targets,
@@ -265,13 +265,13 @@ def infer(args: dict,
             # Keep elements relevant to cell embedding
             elif (agg_type == "avg") or (agg_type == "weighted_avg"):
                 cell_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type="agg_cell",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     n_special_tokens=n_special_tokens)
                 neighborhood_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type="agg_neighborhood",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
@@ -285,12 +285,12 @@ def infer(args: dict,
                         neighborhood_mask)
                 elif agg_type == "weighted_avg":
                     cell_weights = compute_unmasked_rank_based_weights(
-                        cell_neighborhood_tokens, cell_mask)
+                        tokens, cell_mask)
                     cell_emb = compute_mean_unmasked_emb(
                         emb * cell_weights.unsqueeze(-1),
                         cell_mask)
                     neighborhood_weights = compute_unmasked_rank_based_weights(
-                        cell_neighborhood_tokens, neighborhood_mask)
+                        tokens, neighborhood_mask)
                     neighborhood_emb = compute_mean_unmasked_emb(
                         emb * neighborhood_weights.unsqueeze(-1),
                         neighborhood_mask)
@@ -307,7 +307,7 @@ def infer(args: dict,
             if i == (len(emb_list) - 1):
                 for gene_id in cell_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=cell_neighborhood_tokens,
+                        tokens=tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="cell",
@@ -319,7 +319,7 @@ def infer(args: dict,
                         all_cell_gene_emb_dict[gene_id].append(gene_emb)
                 for gene_id in neighborhood_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=cell_neighborhood_tokens,
+                        tokens=tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="neighborhood",
