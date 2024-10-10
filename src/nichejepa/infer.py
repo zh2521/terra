@@ -223,10 +223,11 @@ def infer(args: dict,
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
         seg_label = udata[1].to(device, non_blocking=True)
+        counts = udata[2].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
-        all_cell_ids.extend(udata[2])
+        all_cell_ids.extend(udata[3])
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
@@ -234,6 +235,7 @@ def infer(args: dict,
 
             emb_list = target_encoder.module.return_multi_layer_emb(
                 tokens,
+                counts,
                 seg_label,
                 masks_attention=masks_attention)
         
@@ -337,8 +339,8 @@ def infer(args: dict,
     # Add metadata
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
     merged_obs = pd.merge(adata.obs,
-                         adata_metadata.obs,
-                         on='cell_id')
+                          adata_metadata.obs,
+                          on='cell_id')
     adata.obs = merged_obs.set_index('cell_id')
    
     # Store cell and neighborhood embeddings of all observations across layers  

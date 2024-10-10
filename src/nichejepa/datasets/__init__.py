@@ -1,6 +1,8 @@
 from .cell_datasets import (CellBaseDataset,
-                            CellGraphDataset,
-                            CellNeighborhoodDataset,
+                            CellGraphRankDataset,
+                            CellGraphCountDataset,
+                            CellNeighborhoodRankDataset,
+                            CellNeighborhoodCountDataset,
                             make_cell_dataset)
 from .dataloaders import (CustomDistributedLengthGroupedSampler,
                           init_dataloader_and_sampler)

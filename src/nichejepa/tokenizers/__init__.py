@@ -1,5 +1,7 @@
-from .cell_tokenizers import (CellGraphRankTokenizer,
-                              CellNeighborhoodRankTokenizer)
+from .cell_tokenizers import (CellBaseTokenizer,
+                              CellGraphRankTokenizer,
+                              CellNeighborhoodRankTokenizer,
+                              CellNeighborhoodCountTokenizer)
 from ..preprocessors.aggregators import aggregate_neighbors
 from ..preprocessors.filters import filter_poor_quality_cells
 from ..preprocessors.normalizers import (normalize_by_analytic_pearson_residuals,
@@ -10,4 +12,4 @@ from ..preprocessors.normalizers import (normalize_by_analytic_pearson_residuals
                                          normalize_by_seurat,
                                          normalize_by_shifted_log,
                                          normalize_by_shifted_log_mean)
-from .tokenize import process_gene_tokens, rank_gene_tokens
+from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
