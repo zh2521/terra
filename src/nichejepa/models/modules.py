@@ -180,6 +180,28 @@ class Block(nn.Module):
         return x
 
 
+class CountProjection(nn.Module):
+    def __init__(self,
+                 dim=100):
+        """
+        Project counts to value embeddings.
+        """
+        super().__init__()
+        self.linear1 = nn.Linear(1, dim)
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.01)
+        self.linear2 = nn.Linear(dim, dim)
+        self.softmax = nn.Softmax(dim=-1)
+    
+    def forward(self, x):
+        out = self.linear1(x)
+        out = self.leaky_relu(out)
+        out = self.linear2(out)
+        out = out + x
+        out = self.softmax(out)
+        
+        return out
+
+
 class DropPath(nn.Module):
     """
     DropPath module to drop paths per observation, applied in main path of

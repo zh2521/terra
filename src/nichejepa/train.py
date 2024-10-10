@@ -363,9 +363,9 @@ def train(args: dict,
                     with torch.no_grad(): # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                        h = target_encoder(tokens,
-                                           counts,
-                                           seg_label,
+                        h = target_encoder(tokens=tokens,
+                                           segments=seg_label,
+                                           counts=counts,
                                            masks_attention=masks_attention)
 
                         # Normalize over feature dim
@@ -394,17 +394,19 @@ def train(args: dict,
                     # minmum context size in the batch after removal of
                     # overlapping targets
                     z = encoder(
-                        tokens,
-                        counts,
-                        seg_label,
-                        masks_enc)
+                        tokens=tokens,
+                        segments=seg_label,
+                        counts=counts,
+                        masks=masks_enc)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     z = predictor(
+                        tokens,
                         z,
-                        counts,
                         seg_label,
+                        encoder.module.gene_embed,
+                        encoder.module.seg_embed,
                         masks_enc,
                         masks_pred) # output 
                     return z

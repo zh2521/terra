@@ -14,7 +14,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .modules import Attention, Block, DropPath, MLP
+from .modules import Attention, Block, CountProjection, DropPath, MLP
 from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)
@@ -101,6 +101,13 @@ class GeneTransformerEncoder(nn.Module):
         self.gene_embed = nn.Embedding(vocab_size, # already includes <pad>
                                        embed_dim,
                                        padding_idx=0)
+
+        # Initialize value embeddings
+        self.value_embed = nn.Parameter(
+            torch.randn(100,
+                        embed_dim))
+
+        self.count_projection = CountProjection(dim=100)
                                           
         # Initialize segment embeddings
         self.seg_embed = nn.Embedding(n_segments + 1, # add <pad>
@@ -116,6 +123,7 @@ class GeneTransformerEncoder(nn.Module):
                      [2] * embed_dim],
                     dtype=torch.float32))
 
+        """
         # Initialize positional embeddings
         self.pos_embed = nn.Parameter(
             torch.zeros(1,
@@ -133,6 +141,7 @@ class GeneTransformerEncoder(nn.Module):
                 n_sincos_pos=seq_len-n_special_tokens)
             self.pos_embed.data.copy_(
                 torch.from_numpy(pos_embed).float().unsqueeze(0))
+        """
 
         # Define decaying drop path rate (higher drop rate in deeper blocks)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
@@ -183,9 +192,9 @@ class GeneTransformerEncoder(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def forward(self,
-                x: torch.Tensor,
-                counts: torch.Tensor,
-                seg_label: torch.Tensor,
+                tokens: torch.Tensor,
+                segments: torch.Tensor,
+                counts: Optional[torch.Tensor],
                 masks: Optional[Union[List[torch.Tensor], torch.Tensor]]=None,
                 masks_attention: Optional[torch.Tensor]=None 
                 ) -> torch.Tensor:
@@ -196,10 +205,13 @@ class GeneTransformerEncoder(nn.Module):
 
         Parameters
         -----------
-        x:
+        tokens:
             Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
-        seg_label:
+        segments:
             Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
+        counts:
+            Tensor containing the counts corresponding to gene tokens with shape
+            (BATCH_SIZE, SEQ_LEN).
         masks:
             List of N_MASKS tensors containing indices (within the sequence) of
             tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
@@ -217,13 +229,23 @@ class GeneTransformerEncoder(nn.Module):
             if not isinstance(masks, list):
                 masks = [masks]
 
-        # Get gene embeddings for sequence of gene tokens
-        x = self.gene_embed(x)
+        # Get embeddings for sequence of gene tokens (including special tokens)
+        x = self.gene_embed(tokens)
+
+        a = self.count_projection(counts.unsqueeze(dim=-1))
+        values = torch.matmul(a, self.value_embed)
+
+        # Add 0s to value embeddings for special tokens
+        values = torch.cat((torch.zeros(values.shape[0],
+                                        self.n_special_tokens,
+                                        values.shape[2]).to(values.device),
+                            values), dim=1)
 
         B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
         
         # Add positional and segment embeddings to gene embedding
-        x = x + self.pos_embed + self.seg_embed(seg_label)
+        # x = x + self.pos_embed + self.seg_embed(segments)
+        x = x + values + self.seg_embed(segments)
               
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -328,12 +350,19 @@ class GeneTransformerEncoder(nn.Module):
             if not isinstance(masks, list):
                 masks = [masks]
 
+        x[:, 2] = 436 # temp
+
         # Get gene embeddings for sequence of gene tokens
         x = self.gene_embed(x)
+
+        a = self.count_projection(counts.float().unsqueeze(dim=-1))
+        values = torch.matmul(a, self.value_embed)
+
         B, N, D = x.shape
 
         # Add positional and segment embeddings to gene embedding
-        x = x + self.pos_embed + self.seg_embed(seg_label)
+        # x = x + self.pos_embed + self.seg_embed(seg_label)
+        x = x + self.seg_embed(seg_label) + values
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -436,20 +465,7 @@ class GeneTransformerPredictor(nn.Module):
         # Define decaying drop path rate (higher drop rate in deeper blocks)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-        # Initialize segment embeddings
-        self.seg_embed = nn.Embedding(n_segments + 1, # add <pad>
-                                      embed_dim,
-                                      padding_idx=0)
-        if not seg_learnable:
-            # Prevent gradient updates and manually set embedding weights
-            self.seg_embed.weight.requires_grad = False
-            self.seg_embed.weight.copy_(
-                torch.tensor(
-                    [[0] * embed_dim,
-                     [1] * embed_dim,
-                     [2] * embed_dim],
-                    dtype=torch.float32))
-
+        """
         # Initialize positional embeddings
         self.predictor_pos_embed = nn.Parameter(
             torch.zeros(1,
@@ -467,6 +483,7 @@ class GeneTransformerPredictor(nn.Module):
                 n_sincos_pos=seq_len-n_special_tokens)
             self.predictor_pos_embed.data.copy_(
                 torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
+        """
         
         # Initialize predictor blocks, norm layer, and predictor projection
         # layer to project back to encoder embedding size
@@ -522,8 +539,10 @@ class GeneTransformerPredictor(nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                counts: torch.Tensor,
+                z: torch.Tensor,
                 seg_label: torch.Tensor,
+                gene_embed,
+                seg_embed,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor]
                 ) -> torch.Tensor:
@@ -566,30 +585,30 @@ class GeneTransformerPredictor(nn.Module):
         B = len(x) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
 
         # Map from encoder dim to pedictor dim
-        x = self.predictor_embed(x)
+        z = self.predictor_embed(z)
+
+        gene_embs = gene_embed(x)
+        seg_embs = seg_embed(seg_label)
 
         # Add positional embeddings to tokens from context masks
-        x_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
-        x_seg_embed = self.seg_embed(seg_label)
-        x += apply_masks(x_pos_embed, masks_enc) # only keep pos from encoder
+        z_gene_embed = gene_embed(x)
+        z_seg_embed = seg_embed(seg_label)
+        z += apply_masks(z_gene_embed, masks_enc) # only keep pos from encoder
                                                  # masks
 
-        x += apply_masks(x_seg_embed, masks_enc) # only keep seg from encoder
+        z += apply_masks(z_seg_embed, masks_enc) # only keep seg from encoder
                                                  # masks
 
-        _, N_ctxt, D = x.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
+        _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
 
         # Create positional embeddings for tokens from target masks
-        pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
-        seg_embs = self.seg_embed(seg_label)
-
-        pos_embs = apply_masks(pos_embs, masks_pred) # only keep pos from
-                                                     # predictor masks
+        gene_embs = apply_masks(gene_embs, masks_pred) # only keep pos from
+                                                      # predictor masks
         seg_embs = apply_masks(seg_embs, masks_pred) # only keep seg from
                                                      # predictor masks
           
-        pos_embs = repeat_interleave_batch(
-            pos_embs,
+        gene_embs = repeat_interleave_batch(
+            gene_embs,
             B,
             repeat=len(masks_enc)) # repeat pos embeddings for all encoder masks
         seg_embs = repeat_interleave_batch(
@@ -600,19 +619,19 @@ class GeneTransformerPredictor(nn.Module):
         # Repeat mask token for all batches, masks and positions from
         # predictor masks
         pred_tokens = self.mask_token.repeat(
-            pos_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
-            pos_embs.size(1), # TARGET_MASK_SIZE
+            gene_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
+            gene_embs.size(1), # TARGET_MASK_SIZE
             1)
 
-        # Add positional and segment embeddings to mask tokens                  
-        pred_tokens += pos_embs + seg_embs
+        # Add gene and segment embeddings to mask tokens                  
+        pred_tokens += gene_embs + seg_embs
 
         # Repeat context embeddings for all target masks
-        x = x.repeat(len(masks_pred), 1, 1)
+        z = z.repeat(len(masks_pred), 1, 1)
 
         # Concatenate context embeddings and mask tokens (both incl. pos
         # embedding)
-        x = torch.cat([x, pred_tokens], dim=1)
+        x = torch.cat([z, pred_tokens], dim=1)
 
         # Run forward prop
         for blk in self.predictor_blocks:

@@ -1685,7 +1685,8 @@ class CellNeighborhoodRankTokenizer:
 
 class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
     def __init__(self,
-                 **base_tokenizer_kwargs
+                 shifted_log_norm: bool=True,
+                 **base_tokenizer_kwargs,
                  ):
         """
         CellNeighborhoodCountTokenizer class.
@@ -1696,6 +1697,7 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             Keyword arguments for the initialization of CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
+        self.shifted_log_norm = shifted_log_norm
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str
@@ -1730,6 +1732,9 @@ class CellNeighborhoodCountTokenizer(CellBaseTokenizer):
             print("Filtering cells...")
             # Filter to remove poor quality cells
             adata = filter_poor_quality_cells(adata)
+
+            if self.shifted_log_norm:
+                adata.X = normalize_by_shifted_log(adata.X)
 
             print("Computing spatial neighborhood graph and aggregating counts.")
             # Aggregate neighborhood cell gene expression

@@ -1,5 +1,6 @@
 from .cell_datasets import (CellBaseDataset,
                             CellGraphRankDataset,
+                            CellGraphCountDataset,
                             CellNeighborhoodRankDataset,
                             CellNeighborhoodCountDataset,
                             make_cell_dataset)

@@ -55,19 +55,19 @@ def process_gene_expr(gene_expr: List,
     """
     # Convert to np.int64 to ensure all elements are of the same type. Should
     # this be double?
-    processed_gene_expr = np.array(gene_expr, dtype=np.int64)
+    processed_gene_expr = np.array(gene_expr)
     
     pad_size = int(length - len(processed_gene_expr))
     if pad_size < 0:
         # Truncate
         processed_gene_expr = processed_gene_expr[:length]
     else:
-        # Add padding with 1
+        # Add padding with 0s
         processed_gene_expr = np.pad(
             processed_gene_expr,
             (0, pad_size),
             'constant',
-            constant_values=1)
+            constant_values=0.)
                 
     return processed_gene_expr
     

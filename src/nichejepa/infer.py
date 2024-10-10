@@ -267,13 +267,13 @@ def infer(args: dict,
             # Keep elements relevant to cell embedding
             elif (agg_type == "avg") or (agg_type == "weighted_avg"):
                 cell_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type="agg_cell",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
                     n_special_tokens=n_special_tokens)
                 neighborhood_mask = create_binary_selection_mask(
-                    cell_neighborhood_tokens,
+                    tokens,
                     selection_type="agg_neighborhood",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
@@ -287,12 +287,12 @@ def infer(args: dict,
                         neighborhood_mask)
                 elif agg_type == "weighted_avg":
                     cell_weights = compute_unmasked_rank_based_weights(
-                        cell_neighborhood_tokens, cell_mask)
+                        tokens, cell_mask)
                     cell_emb = compute_mean_unmasked_emb(
                         emb * cell_weights.unsqueeze(-1),
                         cell_mask)
                     neighborhood_weights = compute_unmasked_rank_based_weights(
-                        cell_neighborhood_tokens, neighborhood_mask)
+                        tokens, neighborhood_mask)
                     neighborhood_emb = compute_mean_unmasked_emb(
                         emb * neighborhood_weights.unsqueeze(-1),
                         neighborhood_mask)
@@ -309,7 +309,7 @@ def infer(args: dict,
             if i == (len(emb_list) - 1):
                 for gene_id in cell_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=cell_neighborhood_tokens,
+                        tokens=tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="cell",
@@ -321,7 +321,7 @@ def infer(args: dict,
                         all_cell_gene_emb_dict[gene_id].append(gene_emb)
                 for gene_id in neighborhood_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=cell_neighborhood_tokens,
+                        tokens=tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="neighborhood",
@@ -339,8 +339,8 @@ def infer(args: dict,
     # Add metadata
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
     merged_obs = pd.merge(adata.obs,
-                         adata_metadata.obs,
-                         on='cell_id')
+                          adata_metadata.obs,
+                          on='cell_id')
     adata.obs = merged_obs.set_index('cell_id')
    
     # Store cell and neighborhood embeddings of all observations across layers  
