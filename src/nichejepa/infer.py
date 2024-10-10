@@ -20,7 +20,7 @@ from .datasets.cell_datasets import CellBaseDataset, make_cell_dataset
 from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import init_model, load_checkpoint
 from .masks.multigene import MaskCollator
-from .masks.segment_masking  import SegmentMaskCollator
+from .masks.block_masking  import BlockMaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -112,10 +112,10 @@ def infer(args: dict,
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
-    segment_masking = args['mask']['segment_masking']
+    block_masking = args['mask']['block_masking']
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
-    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
+    per_block_mask_ratio = args['mask']['per_block_mask_ratio']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
@@ -161,14 +161,14 @@ def infer(args: dict,
     target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
-    if segment_masking:
-       mask_collator = SegmentMaskCollator(
+    if block_masking:
+       mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_segment_mask_ratio = per_segment_mask_ratio)
+            per_block_mask_ratio = per_block_mask_ratio)
     else:
         mask_collator = MaskCollator(
             n_targets=n_targets,

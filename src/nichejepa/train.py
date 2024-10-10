@@ -41,7 +41,7 @@ from .helper import (init_model,
                      init_opt,
                      load_checkpoint)
 from .masks.multigene import MaskCollator
-from .masks.segment_masking  import SegmentMaskCollator
+from .masks.block_masking  import BlockMaskCollator
 from .masks.utils import apply_masks
 from .models.utils import repeat_interleave_batch
 from .utils.distributed import (AllReduce,
@@ -106,6 +106,7 @@ def train(args: dict,
     batch_size = args['data']['batch_size']
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
+    separate_cls = args['data']['separate_cls']
 
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
@@ -118,10 +119,10 @@ def train(args: dict,
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
-    segment_masking = args['mask']['segment_masking']
+    block_masking = args['mask']['block_masking']
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
-    per_segment_mask_ratio = args['mask']['per_segment_mask_ratio']
+    per_block_mask_ratio = args['mask']['per_block_mask_ratio']
 
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
@@ -211,14 +212,15 @@ def train(args: dict,
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
-    if segment_masking:
-       mask_collator = SegmentMaskCollator(
+    if block_masking:
+       mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_segment_mask_ratio=per_segment_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            separate_cls=separate_cls)
     else:
         mask_collator = MaskCollator(
             n_targets=n_targets,
