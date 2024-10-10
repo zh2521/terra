@@ -14,8 +14,9 @@ data:
   n_segments: 2 # number of unique segment tokens
   sampling_strategy: null  # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
   batch_size: 64
-  num_workers: 12
+  num_workers: 0
   pin_memory: True
+  separate_cls: True
 meta:
   enc_depth: 3
   enc_emb_dim: 768
@@ -28,7 +29,7 @@ meta:
   use_bfloat16: True
 mask:
   n_contexts: 1
-  n_targets: 3 # this is the number of blocks in block masking
+  n_targets: 5 # this is the number of blocks in block masking
   block_masking: True # this is used to select block_masking
   context_mask_size: 1220 # this doesn't have meaning in block masking.
   target_mask_size: 10 # this doesn't have meaning in block masking.
