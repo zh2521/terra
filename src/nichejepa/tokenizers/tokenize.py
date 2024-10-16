@@ -26,8 +26,7 @@ def process_gene_tokens(gene_tokens: List,
        List containing padded or truncated (ranked) gene tokens, including
        special tokens if defined.       
     """
-    # Convert to np.int64 to ensure all elements are of the same type. Should
-    # this be double?
+    # Convert to np.int64 to ensure all elements are of the same type.
     processed_gene_tokens = np.array(gene_tokens, dtype=np.int64)
     
     pad_size = int(length - len(processed_gene_tokens))

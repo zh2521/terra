@@ -352,7 +352,8 @@ def train(args: dict,
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
-            counts = udata[2].to(device, non_blocking=True)
+            if gt_type == 'count':
+                counts = udata[2].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
