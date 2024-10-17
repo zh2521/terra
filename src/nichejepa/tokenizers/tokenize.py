@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 
 
-def process_gene_tokens(gene_tokens: List,
+def process_gene_tokens(gene_tokens: List[int],
                         length: int,
                         token_dict: dict,
                         ) -> Tuple[np.ndarray, int]:
@@ -26,7 +26,7 @@ def process_gene_tokens(gene_tokens: List,
     num_nonzero_tokens:
        Number of nonzero gene tokens.
     """
-    processed_gene_tokens = np.array(gene_tokens)
+    processed_gene_tokens = np.array(gene_tokens, dtype=np.int64)
     
     pad_size = int(length - len(processed_gene_tokens))
     if pad_size < 0:
