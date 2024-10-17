@@ -480,6 +480,10 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
 
+        # TEMP TODO REMOVO
+        avg_batch_emb = (self.token_embed(torch.tensor([435]).to(tokens.device)) + self.token_embed(torch.tensor([436]).to(tokens.device))) / 2
+        token_emb[:, 2, :] = avg_batch_emb
+
         # Get segment embeddings
         seg_emb = self.seg_embed(segments)
 

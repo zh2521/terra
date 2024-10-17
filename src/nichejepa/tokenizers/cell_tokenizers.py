@@ -14,24 +14,25 @@ Required format:
     adata.obsm['spatial'].
 Required gene attributes:
     Ensembl ID for each gene ('ensembl_id').
+Required cell attributes:
+    Cell ID in index. Metadata is retrieved at inference time via this cell ID.
 Optional cell attributes:
     Binary indicator of whether cell should be used for tokenization based on
-    user-defined filtering criteria ('filter_pass'). Any other cell metadata can
-    be passed on to the tokenized dataset as a custom attribute dictionary.
+    user-defined filtering criteria ('filter_pass').
 
 Usage
 ----------
 .. code-block :: python
-    >>> from nichejepa import CellGraphRankTokenizer
-    >>> tk = CellGraphRankTokenizer(nproc=4)
+    >>> from nichejepa import CellGraphTokenizer
+    >>> tk = CellGraphTokenizer(nproc=4)
     >>> tk.tokenize_data(
     >>>     'input_directory', 'output_directory', 'output_file_prefix')
 
 or
 
 .. code-block :: python
-    >>> from nichejepa import CellNeighborhoodRankTokenizer
-    >>> tk = CellNeighborhoodRankTokenizer(nproc=4)
+    >>> from nichejepa import CellNeighborhoodTokenizer
+    >>> tk = CellNeighborhoodTokenizer(nproc=4)
     >>> tk.tokenize_data(
     >>>     'input_directory', 'output_directory', 'output_file_prefix')
 
@@ -43,21 +44,16 @@ specified by the argument 'file_format' in the tokenize_data function. Genes
 should be labeled with Ensembl IDs (adata.var['ensembl_id']), which provide a
 unique identifer for conversion to tokens. Gene names can be converted to
 Ensembl IDs via the helper function nichejepa.utils.genes.get_ensembl_ids() or
-via the pyensembl Python package. No cell metadata is required, but custom cell
-attributes may be passed onto the tokenized dataset by providing a dictionary of
-custom attributes, which is formatted as {original_attr_name:
-desired_dataset_attr_name}. For example, if the original '.h5ad' file has cell
-attributes in adata.obs['cell_type'] and one would like to retain these
-attributes as labels in the tokenized dataset with the new names 'cell_types',
-the following custom attribute dictionary should be provided: {'cell_type':
-'cell_types'}. Additionally, if the original '.h5ad' file contains a cell
-attribute called adata.obs['filter_pass'], this will be used as a binary
-indicator of whether to include these cells in the tokenization. All cells with
-'1' in this attribute will be tokenized, whereas the others will be excluded.
-One may use this column to indicate QC filtering or other criteria for selection
-for inclusion in the final tokenized dataset. If one's data is in other formats
-besides '.h5ad', one can use the relevant tools (such as Anndata tools) to
-convert the file to '.h5ad' format prior to initializing the cell tokenizer.
+via the pyensembl Python package. No cell metadata is required, but the cell ID
+needs to be stored in the index. Additionally, if the original '.h5ad' file
+contains a cell attribute called adata.obs['filter_pass'], this will be used as
+a binary indicator of whether to include these cells in the tokenization. All
+cells with '1' in this attribute will be tokenized, whereas the others will be
+excluded. One may use this column to indicate QC filtering or other criteria for
+selection for inclusion in the final tokenized dataset. If one's data is in
+other formats besides '.h5ad', one can use the relevant tools (such as Anndata
+tools) to convert the file to '.h5ad' format prior to initializing the cell
+tokenizer.
 """
 
 from __future__ import annotations
@@ -84,8 +80,8 @@ from ..preprocessors.normalizers import normalize_by_mean
 from ..preprocessors.normalizers import normalize_by_nonzero_mean
 from ..preprocessors.normalizers import normalize_by_read_depth
 from ..preprocessors.normalizers import normalize_by_seurat
-from ..preprocessors.normalizers import normalize_by_shifted_log_mean
 from ..preprocessors.normalizers import normalize_by_shifted_log
+from ..preprocessors.normalizers import normalize_by_shifted_log_mean
 from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
 
 
@@ -113,13 +109,13 @@ class CellBaseTokenizer(ABC):
             'sequential', 'parallel']]='sequential',
         chunk_size: int=512,
         model_input_size: int=2048,
-        norm_factor: Optional[Literal["read_depth", "cell_area"]]=None,
-        norm_method: Optional[Literal["analytic_pearson_residuals",
-                                      "mean",
-                                      "nzmean",
-                                      "seurat_v3",
-                                      "shifted_logmean"
-                                      "shifted_log"]]="shifted_log",
+        norm_factor: Optional[Literal['read_depth', 'cell_area']]=None,
+        norm_method: Optional[Literal['analytic_pearson_residuals',
+                                      'mean',
+                                      'nzmean',
+                                      'seurat_v3',
+                                      'shifted_logmean'
+                                      'shifted_log']]='shifted_log',
         cell_gene_means_file: Path | str=CELL_GENE_MEANS_FILE,
         cell_gene_nzmeans_file: Path | str=CELL_GENE_NZMEANS_FILE,
         cell_gene_logmeans_file: Path | str=CELL_GENE_LOGMEANS_FILE,
@@ -171,6 +167,7 @@ class CellBaseTokenizer(ABC):
         self.coding_miRNA_dict = dict(
             zip(self.coding_miRNA_ids, [True] * len(self.vocab)))
 
+        # Define special tokens
         self.special_token_keys = ['batch_token',
                                    'gene_panel_token',
                                    'assay_token',
@@ -232,12 +229,12 @@ class CellBaseTokenizer(ABC):
                         keep_in_memory: bool=False,
                         ) -> Dataset:
         """
-        Create a huggingface dataset based on tokenized cells.
+        Create a Hugging Face dataset based on tokenized cells.
 
         Parameters
         ----------
         dataset_dict:
-            Dictionary based on which the huggingface dataset will be created.
+            Dictionary based on which the Hugging Face dataset will be created.
         use_generator:
             If 'True', use generator for tokenization, else dict.
         cache_directory_path:
@@ -248,10 +245,10 @@ class CellBaseTokenizer(ABC):
         Returns
         ----------
         dataset:
-            Huggingface dataset containing the tokenized cells.
+            Hugging Face dataset containing the tokenized cells.
         """
-        # Create huggingface dataset
-        logger.info('Creating huggingface dataset...')
+        # Create Hugging Face dataset
+        logger.info('Creating Hugging Face dataset...')
         if use_generator:
             def dict_generator():
                 for i in range(len(dataset_dict['cell_id'])):
@@ -275,9 +272,9 @@ class CellBaseTokenizer(ABC):
         return formatted_dataset
 
     def _tokenize_files(self,
-                       data_directory: Path | str,
-                       file_format: Literal['h5ad']='h5ad',
-                       ) -> dict:
+                        data_directory: Path | str,
+                        file_format: Literal['h5ad']='h5ad',
+                        ) -> dict:
         """
         Tokenize multiple files in a directory.
 
@@ -292,13 +289,7 @@ class CellBaseTokenizer(ABC):
         ----------
         dataset_dict:
             Dictionary containing the cell IDs and tokens for the tokenized
-            files with the following keys and values:
-                - cell_IDs: List of cell IDs.
-                - gene_tokens_cell: Cell-wise vector of ranked cell gene tokens.
-                - gene_tokens_neighborhood: Cell-wise vector of ranked
-                      neighborhood gene tokens.
-                - metadata columns: cell-wise metadata
-                - special token columns: vectors of special tokens
+            files.
         """
         file_found = 0
 
@@ -313,7 +304,7 @@ class CellBaseTokenizer(ABC):
             logger.info('Tokenizing files sequentially...')
             for file_path in data_directory.glob(f'**/*.{file_format}'):
                 file_found = 1
-                logger.info(f"Tokenizing '{file_path}'.")
+                logger.info(f"Tokenizing '{file_path}'...")
                 file_dataset_dict = tokenize_file_fn(file_path)
                 for k in file_dataset_dict.keys():
                     if k not in dataset_dict:
@@ -324,7 +315,7 @@ class CellBaseTokenizer(ABC):
             with concurrent.futures.ProcessPoolExecutor(
             max_workers=self.nproc) as executor:
                 futures = []
-                for file_path in data_directory.glob(f"**/*.{file_format}"):
+                for file_path in data_directory.glob(f'**/*.{file_format}'):
                     file_found = 1
                     logger.info(f"Tokenizing '{file_path}'...")
                     future = executor.submit(tokenize_file_fn, file_path)
@@ -371,7 +362,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         Parameters
         -----------
         **base_tokenizer_kwargs:
-            Keyword arguments for the initialization of CellBaseTokenizer.
+            Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
 
@@ -389,18 +380,29 @@ class CellGraphTokenizer(CellBaseTokenizer):
         Returns
         ----------
         adata_dict:
-            Dictionary with keys:
+            Dictionary with tokenized data stored in keys:
             - gene_tokens_cell:
                 Cell-wise vector of ranked cell gene tokens.
+            - gene_expr_cell:
+                Cell-wise vector of ranked cell gene expression.
             - gene_tokens_neighborhood:
                 Cell-wise vector of ranked neighborhood gene tokens.
-            cell_metadata:
-                Dictionary of cell metadata where keys are metadata columns and
-                values are lists of cell-wise values.
-            special_tokens_dict:
-                Dictionary of special tokens where keys are special token names and
-                values are special token values (for each cell).
-            cell_IDs:
+            - gene_expr_neighborhood:
+                Cell-wise vector of ranked neighborhood gene expression.
+            - seg_tokens_neighborhood:
+                Segment tokens for the neighborhood (each neighbor cell is a
+                different segment).
+            - assay_token:
+                List containing assay token.
+            - species_tokens:
+                List containing species token.
+            - tissue_token:
+                List containing tissue token.
+            - gene_panel_token:
+                List containing gene panel token.
+            - batch_token:
+                List containing batch token.
+            - cell_ids:
                 List of cell IDs.
         """
         # Initialize dict to collect tokens and cell ids
@@ -412,11 +414,11 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Filter to remove poor quality cells
         adata = filter_poor_quality_cells(adata)
 
-        print("Computing spatial neighborhood graph.")
+        print('Computing spatial neighborhood graph.')
         # Compute spatial neighborhood graph with delaunay triangulation
         sq.gr.spatial_neighbors(adata,
-                                coord_type="generic",
-                                spatial_key="spatial",
+                                coord_type='generic',
+                                spatial_key='spatial',
                                 delaunay=True)
 
         print('Normalizing gene expression counts.')
@@ -425,14 +427,14 @@ class CellGraphTokenizer(CellBaseTokenizer):
             if self.norm_method == 'analytic_pearson_residuals':
                 raise ValueError(
                     "Invalid combination of 'norm_factor' and 'norm_method': "
-                    f"({self.norm_factor} / {self.norm_method}).")
+                    f'({self.norm_factor} / {self.norm_method}).')
             adata.X = normalize_by_read_depth(adata.X)
 
         elif self.norm_factor == 'cell_area':
             if self.norm_method == 'analytic_pearson_residuals':
                 raise ValueError(
                     "Invalid combination of 'norm_factor' and 'norm_method': "
-                    f"({self.norm_factor} / {self.norm_method}).")
+                    f'({self.norm_factor} / {self.norm_method}).')
             adata.X = normalize_by_cell_area(
                 adata.X,
                 cell_areas=adata.obs['cell_area'].values)
@@ -504,12 +506,12 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 coding_miRNA_tokens_cell[norm_counts_cell[j].indices])
                 for j in range(norm_counts_cell.shape[0])]
 
-            # Append gene expression across chunks
+            # Rank gene expression and append across chunks
             adata_dict['gene_expr_cell'] += [
                 norm_counts_cell[j].data[np.argsort(-norm_counts_cell[j].data)]
                 for j in range(norm_counts_cell.shape[0])]
 
-        print("Retrieving tokens for neighborhood cells.")
+        print('Retrieving tokens for neighborhood cells.')
         adata_dict['gene_tokens_neighborhood'] = [
             np.array([]) for i in range(len(adata))]
         adata_dict['gene_expr_neighborhood'] = [
@@ -522,13 +524,13 @@ class CellGraphTokenizer(CellBaseTokenizer):
         for i in range(len(adata)):
             # Get sorted indices of neighbor cells based on distance to index
             # cell
-            row_start = adata.obsp["spatial_distances"].indptr[i]
-            row_end = adata.obsp["spatial_distances"].indptr[i+1]
-            row_data = adata.obsp["spatial_distances"].data[row_start:row_end]
+            row_start = adata.obsp['spatial_distances'].indptr[i]
+            row_end = adata.obsp['spatial_distances'].indptr[i+1]
+            row_data = adata.obsp['spatial_distances'].data[row_start:row_end]
             sorted_indices = np.argsort(row_data)
             # Loop through distance-sorted neighbor cells and add gene, cell pos
             # and gene pos tokens
-            for j, k in enumerate(adata.obsp["spatial_connectivities"][
+            for j, k in enumerate(adata.obsp['spatial_connectivities'][
                 i].nonzero()[1][sorted_indices]):
                 adata_dict['gene_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['gene_tokens_neighborhood'][i],
@@ -545,7 +547,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         
         # Add special tokens
         n_cells = len(adata)
-        batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
+        batch_id_key = f'{adata.uns['dataset_id']}_{adata.uns['batch']}'
         adata_dict['batch_token'] = [self.token_dict[batch_id_key]] * n_cells
         adata_dict['gene_panel_token'] = [
             self.token_dict[
@@ -619,7 +621,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         del example['gene_tokens_neighborhood']
         del example['gene_expr_neighborhood']
-
         example['gene_tokens'] = np.concatenate(
             (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy()))
         example['gene_expr'] = np.concatenate(
@@ -658,7 +659,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         Parameters
         -----------
         **base_tokenizer_kwargs:
-            Keyword arguments for the initialization of CellBaseTokenizer.
+            Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
 
@@ -676,18 +677,26 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         Returns
         ----------
         adata_dict:
-            Dictionary with keys:
+            Dictionary with tokenized data stored in keys:
             - gene_tokens_cell:
                 Cell-wise vector of ranked cell gene tokens.
+            - gene_expr_cell:
+                Cell-wise vector of ranked cell gene expression.
             - gene_tokens_neighborhood:
                 Cell-wise vector of ranked neighborhood gene tokens.
-            cell_metadata:
-                Dictionary of cell metadata where keys are metadata columns and
-                values are lists of cell-wise values.
-            special_tokens_dict:
-                Dictionary of special tokens where keys are special token names and
-                values are special token values (for each cell).
-            cell_IDs:
+            - gene_expr_neighborhood:
+                Cell-wise vector of ranked neighborhood gene expression.
+            - assay_token:
+                List containing assay token.
+            - species_tokens:
+                List containing species token.
+            - tissue_token:
+                List containing tissue token.
+            - gene_panel_token:
+                List containing gene panel token.
+            - batch_token:
+                List containing batch token.
+            - cell_ids:
                 List of cell IDs.
         """
         # Initialize dict to collect tokens and cell ids
@@ -709,7 +718,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             if self.norm_method == 'analytic_pearson_residuals':
                 raise ValueError(
                     "Invalid combination of 'norm_factor' and 'norm_method': "
-                    f"({self.norm_factor} / {self.norm_method}).")
+                    f'({self.norm_factor} / {self.norm_method}).')
             adata.X = normalize_by_read_depth(adata.X)
             adata.layers['X_neighborhood'] = normalize_by_read_depth(
                 adata.layers['X_neighborhood'])
@@ -717,7 +726,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             if self.norm_method == 'analytic_pearson_residuals':
                 raise ValueError(
                     "Invalid combination of 'norm_factor' and 'norm_method': "
-                    f"({self.norm_factor} / {self.norm_method}).")
+                    f'({self.norm_factor} / {self.norm_method}).')
             adata.X = normalize_by_cell_area(
                 adata.X,
                 cell_areas=adata.obs['cell_area'].values)
@@ -821,7 +830,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
                     norm_counts_neighborhood[j].indices])
                 for j in range(norm_counts_neighborhood.shape[0])]
 
-            # Append gene expression across chunks
+            # Rank gene expression and append across chunks
             adata_dict['gene_expr_cell'] += [
                 norm_counts_cell[j].data[np.argsort(-norm_counts_cell[j].data)]
                 for j in range(norm_counts_cell.shape[0])]
