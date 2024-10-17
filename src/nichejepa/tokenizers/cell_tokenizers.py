@@ -547,7 +547,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         
         # Add special tokens
         n_cells = len(adata)
-        batch_id_key = f'{adata.uns['dataset_id']}_{adata.uns['batch']}'
+        batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
         adata_dict['batch_token'] = [self.token_dict[batch_id_key]] * n_cells
         adata_dict['gene_panel_token'] = [
             self.token_dict[
