@@ -622,18 +622,23 @@ class CellGraphTokenizer(CellBaseTokenizer):
         del example['gene_tokens_neighborhood']
         del example['gene_expr_neighborhood']
         example['gene_tokens'] = np.concatenate(
-            (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy()))
+            (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy())).astype(
+                int)
         example['gene_expr'] = np.concatenate(
-            (gene_expr_cell.copy(), gene_expr_neighborhood.copy()))
+            (gene_expr_cell.copy(), gene_expr_neighborhood.copy())).astype(
+                float)
 
         # Retrieve attributes
         example['n_nonzero_tokens'] = (
             n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens)
 
         # Define segments
+        seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
-            (np.array([1] * len(gene_tokens_cell)),
-             example['seg_tokens_neighborhood']))
+            (np.array([1 if gene_token != 0 else 0 for gene_token in
+                       gene_tokens_cell]),
+             [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
+              gene_token in gene_tokens_neighborhood])).astype(int)
         del example['seg_tokens_neighborhood']
         
         # Retrieve special tokens
@@ -876,7 +881,8 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             self.token_dict)
         del example['gene_tokens_neighborhood']
         example['gene_tokens'] = np.concatenate(
-            (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy()))
+            (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy())).astype(
+                int)
 
         # Retrieve gene expression
         gene_expr_cell = process_gene_expr(
@@ -888,7 +894,8 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             int(self.model_input_size / 2))
         del example['gene_expr_neighborhood']
         example['gene_expr'] = np.concatenate(
-            (gene_expr_cell.copy(), gene_expr_neighborhood.copy()))
+            (gene_expr_cell.copy(), gene_expr_neighborhood.copy())).astype(
+                float)
 
         # Retrieve attributes
         example['n_nonzero_tokens'] = (
@@ -896,8 +903,10 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Define segments
         example['seg_tokens'] = np.concatenate(
-            (np.array([1] * len(gene_tokens_cell)),
-             np.array([2] * len(gene_tokens_neighborhood))))
+            (np.array([1 if gene_token != 0 else 0 for gene_token in
+                       gene_tokens_cell]),
+             np.array([2 if gene_token != 0 else 0 for gene_token in
+                       gene_tokens_neighborhood]))).astype(int)
         
         # Retrieve special tokens
         example['cls_cell_token'] = [self.token_dict['<cls_cell>']]

@@ -76,7 +76,7 @@ def process_gene_expr(gene_expr: List,
             processed_gene_expr,
             (0, pad_size),
             'constant',
-            constant_values=-np.inf)
+            constant_values=0.)
                 
     return processed_gene_expr
     
