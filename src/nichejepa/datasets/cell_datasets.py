@@ -65,10 +65,11 @@ class CellBaseDataset(Dataset):
     def _add_special_tokens_to_seq(self,
                                    tokens: List,
                                    segments: List,
+                                   positions: List,
                                    item: int,
                                    ) -> Tuple[List[int], List[int]]:
         """
-        Add special tokens to sequence and update segment tokens.
+        Add special tokens to sequence and update segment and positions tokens.
 
         Parameters
         -----------
@@ -76,6 +77,8 @@ class CellBaseDataset(Dataset):
             Token sequence including all segments.
         segments:
             Segment tokens including all segments.
+        positions:
+            Position tokens including all segments.
         item:
             Index of the cell in the Hugging Face dataset.
 
@@ -102,8 +105,9 @@ class CellBaseDataset(Dataset):
             tokens = self.dataset[item]["cls_cell_token"] + tokens
                 
         segments = [1] * self.n_special_tokens + segments
+        positions = list(range(1, self.n_special_tokens + 1)) + positions
 
-        return tokens, segments
+        return tokens, segments, positions
 
     def _create_sampled_token_and_count_seq(self,
                                             tokens: List,
@@ -195,7 +199,11 @@ class CellBaseDataset(Dataset):
             """
             # Only keep gene tokens and gene expr in specified segment
             segment_start_idx = self.dataset[item]["seg_tokens"].index(segment)
-            segment_end_idx = self.dataset[item]["seg_tokens"].index(segment+1)
+            if segment + 1 in self.dataset[item]["seg_tokens"]:
+                segment_end_idx = self.dataset[item]["seg_tokens"].index(segment+1)
+            else:
+                segment_end_idx = len(self.dataset[item]["seg_tokens"])
+            
             segment_gene_tokens = self.dataset[item]["gene_tokens"][
                 segment_start_idx: segment_end_idx]
             segment_gene_expr = self.dataset[item]["gene_expr"][
@@ -258,6 +266,7 @@ class CellGraphDataset(CellBaseDataset):
             segment_seq_len=self.seq_len_cell)
         segments = [2 if gene_token != 0 else 0 for gene_token in
                     gene_tokens_cell]
+        positions = list(range(1, len(gene_tokens_cell) + 1))
         gene_tokens_neighborhood = []
         gene_expr_neighborhood = []
         for segment in np.unique(self.dataset[item]["seg_tokens"]):
@@ -271,20 +280,25 @@ class CellGraphDataset(CellBaseDataset):
                 gene_expr_neighborhood.extend(segment_gene_expr)
                 segments.extend([segment if gene_token != 0 else 0 for
                                  gene_token in segment_gene_tokens])
+                positions.extend(list(range(1, len(segment_gene_tokens) + 1)))
         tokens = gene_tokens_cell + gene_tokens_neighborhood
+        positions = [position if tokens[i] != 0 else 0 for i, position in 
+                enumerate(positions)]
         gene_expr = gene_expr_cell + gene_expr_neighborhood
 
         # Add special tokens
-        tokens, segments = self._add_special_tokens_to_seq(
+        tokens, segments, positions = self._add_special_tokens_to_seq(
             tokens=tokens,
             segments=segments,
+            positions=positions,
             item=item)
 
         tokens = torch.tensor(tokens)
         segments = torch.tensor(segments)
+        positions = torch.tensor(positions)
         gene_expr = torch.tensor(gene_expr)
 
-        return tokens, segments, gene_expr, self.dataset[item]["cell_id"]
+        return tokens, segments, positions, gene_expr, self.dataset[item]["cell_id"]
 
 
 class CellNeighborhoodDataset(CellBaseDataset):
@@ -321,18 +335,24 @@ class CellNeighborhoodDataset(CellBaseDataset):
         segments = [2 if gene_token != 0 else 0 for gene_token in
                     gene_tokens_cell] + [3 if gene_token != 0 else 0 for
                     gene_token in gene_tokens_neighborhood]
+        positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
+            range(1, len(gene_tokens_neighborhood) + 1))
+        positions = [position if tokens[i] != 0 else 0 for i, position in 
+                     enumerate(positions)]
 
         # Add special tokens
-        tokens, segments = self._add_special_tokens_to_seq(
+        tokens, segments, positions = self._add_special_tokens_to_seq(
             tokens=tokens,
             segments=segments,
+            positions=positions,
             item=item)
 
         tokens = torch.tensor(tokens)
         segments = torch.tensor(segments)
+        positions = torch.tensor(positions)
         gene_expr = torch.tensor(gene_expr)
 
-        return tokens, segments, gene_expr, self.dataset[item]["cell_id"]
+        return tokens, segments, positions, gene_expr, self.dataset[item]["cell_id"]
 
 
 def make_cell_dataset(tokenizer_type: Literal['cell_graph',

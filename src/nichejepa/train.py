@@ -352,7 +352,8 @@ def train(args: dict,
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
-            counts = udata[2].to(device, non_blocking=True)
+            positions = udata[2].to(device, non_blocking=True)
+            counts = udata[3].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -370,6 +371,7 @@ def train(args: dict,
                         if gt_type == 'rank':
                             h = target_encoder(tokens=tokens,
                                                segments=segments,
+                                               positions=positions,
                                                masks_attention=masks_attention)
                         elif gt_type == 'counts':
                             h = target_encoder(tokens=tokens,
@@ -405,6 +407,7 @@ def train(args: dict,
                     if gt_type == 'rank':
                         z = encoder(tokens=tokens,
                                     segments=segments,
+                                    positions=positions,
                                     masks=masks_enc)                       
                     elif gt_type == 'counts':
                         z = encoder(tokens=tokens,
@@ -417,6 +420,7 @@ def train(args: dict,
                     if gt_type == 'rank':
                         x = predictor(z=z,
                                       segments=segments,
+                                      positions=positions,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,

@@ -225,7 +225,8 @@ def infer(args: dict,
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
         segments = udata[1].to(device, non_blocking=True)
-        counts = udata[2].to(device, non_blocking=True)
+        positions = udata[2].to(device, non_blocking=True)
+        counts = udata[3].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
@@ -239,6 +240,7 @@ def infer(args: dict,
                 emb_list = target_encoder.module.return_multi_layer_emb(
                     tokens=tokens,
                     segments=segments,
+                    positions=positions,
                     masks_attention=masks_attention)
             elif gt_type == 'counts':
                 emb_list = target_encoder.module.return_multi_layer_emb(

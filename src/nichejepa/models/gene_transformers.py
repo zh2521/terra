@@ -102,9 +102,10 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                                         padding_idx=0)
 
         # Initialize segment embeddings
-        self.seg_embed = nn.Embedding(n_segments + 1, # include <pad>
-                                      embed_dim,
-                                      padding_idx=0)
+        self.seg_embed = nn.Embedding(
+            n_segments + 2, # include <pad> and special token segment
+            embed_dim,
+            padding_idx=0)
 
         if not seg_learnable:
             # Prevent gradient updates and initialize with sincos embedding
@@ -112,7 +113,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             seg_embed = get_1d_sincos_pos_embed(
                 embed_dim=embed_dim,
                 n_zero_pos=0,
-                n_sincos_pos=n_segments)
+                n_sincos_pos=n_segments + 1)
             self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
         # Define decaying drop path rate (higher drop rate in deeper blocks)
@@ -375,6 +376,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
     def forward(self,
                 tokens: torch.Tensor,
                 segments: torch.Tensor,
+                positions: torch.Tensor,
                 masks: Optional[Union[List[torch.Tensor], torch.Tensor]]=None,
                 masks_attention: Optional[torch.Tensor]=None 
                 ) -> torch.Tensor:
@@ -390,6 +392,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             segments:
                 Tensor containing segment labels with shape (BATCH_SIZE,
                 SEQ_LEN).
+            positions:
+                Tensor containing position labels with shape (BATCH_SIZE,
+                SEQ_LEN)
             masks:
                 List of N_MASKS tensors containing indices (within the sequence)
                 of tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
@@ -413,9 +418,12 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             # Get segment embeddings
             seg_emb = self.seg_embed(segments)
+
+            # Get positional embeddings
+            pos_emb = self.pos_embed(positions)
             
             # Add positional and segment embeddings to token embeddings
-            x = self.pos_embed + token_emb + seg_emb
+            x = token_emb + seg_emb + pos_emb
 
             B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
                 
@@ -438,6 +446,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
     def return_multi_layer_emb(self,
                                tokens: torch.Tensor,
                                segments: torch.Tensor,
+                               positions: torch.Tensor,
                                counts: torch.Tensor,
                                masks: Optional[Union[
                                    List[torch.Tensor], torch.Tensor]]=None,
@@ -481,8 +490,11 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         # Get segment embeddings
         seg_emb = self.seg_embed(segments)
 
+        # Get positional embeddings
+        pos_emb = self.pos_embed(positions)
+
         # Add positional and segment embeddings to token embeddings
-        x = self.pos_embed + token_emb + seg_emb
+        x = token_emb + seg_emb + pos_emb
 
         B, N, D = x.shape
 
@@ -503,30 +515,6 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             emb_list.append(x)
 
         return emb_list
-
-    @torch.no_grad()
-    def return_pos_emb(self,
-                       tokens: torch.Tensor,
-                       ) -> torch.Tensor:
-        """
-        Return the positional embeddings for a batch of input token sequences.
-
-        Parameters
-        -----------
-        tokens:
-            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
-
-        Returns
-        -----------
-        pos_embed:
-            Tensor containing the positional embeddings repeated across the
-            batch dimension with shape (BATCH_SIZE, SEQ_LEN, EMBED_DIM).
-        """
-        # Repeat the positional embeddings across the batch dimension to match
-        # the input shape
-        pos_embed = self.pos_embed.repeat(tokens.shape[0], 1, 1)
-
-        return pos_embed
 
 
 class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
@@ -710,38 +698,16 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
     """
     GeneTransformerRankPredictor class.
-
-    pos_learnable:
-        If 'True', positional embeddings are learnable, otherwise use sin cos
-        positional embeddings.
     """
     def __init__(self,
-                 pos_learnable: bool=False,
                  **base_encoder_kwargs
                  ):
         super().__init__(**base_encoder_kwargs)
 
-        # Initialize positional embeddings
-        self.predictor_pos_embed = nn.Parameter(
-            torch.zeros(1,
-                        self.seq_len,
-                        self.predictor_embed_dim))
-        if pos_learnable:
-            trunc_normal_(self.predictor_pos_embed, std=self.init_std)
-            if self.n_special_tokens > 0:
-                self.predictor_pos_embed.data[0, 0:self.n_special_tokens, :] = 0
-        else:
-            self.predictor_pos_embed.requires_grad = False
-            predictor_pos_embed = get_1d_sincos_pos_embed(
-                embed_dim=self.predictor_pos_embed.shape[-1],
-                n_zero_pos=self.n_special_tokens,
-                n_sincos_pos=self.seq_len-self.n_special_tokens)
-            self.predictor_pos_embed.data.copy_(
-                torch.from_numpy(predictor_pos_embed).float().unsqueeze(0))
-
     def forward(self,
                 z: torch.Tensor,
                 segments: torch.Tensor,
+                positions: torch.Tensor,
                 enc_pos_embed: nn.Embedding,
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
@@ -758,6 +724,13 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             segments:
                 Tensor containing segment labels with shape (BATCH_SIZE,
                 SEQ_LEN).
+            positions:
+                Tensor containing position labels with shape (BATCH_SIZE,
+                SEQ_LEN).
+            enc_pos_embed:
+                Positional embeddings from the encoder.
+            enc_seg_embed:
+                Segment embeddings from the encoder.
             masks_enc:
                 List of N_CONTEXT_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
@@ -790,7 +763,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_embed(z)
 
             # Add positional embeddings to tokens from context masks
-            z_pos_embed = self.predictor_pos_embed.repeat(B, 1, 1)
+            z_pos_embed = enc_pos_embed(positions)
             z_seg_embed = enc_seg_embed(segments)
             z += apply_masks(z_pos_embed, masks_enc) # only keep pos from encoder
                                                     # masks
@@ -801,7 +774,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
 
             # Create positional embeddings for tokens from target masks
-            pos_embs = self.predictor_pos_embed.repeat(B, 1, 1)
+            pos_embs = enc_pos_embed(positions)
             seg_embs = enc_seg_embed(segments)
 
             pos_embs = apply_masks(pos_embs, masks_pred) # only keep pos from
@@ -826,7 +799,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 1)
 
             # Add positional and segment embeddings to mask tokens                  
-            pred_tokens += pos_embs + seg_embs
+            pred_tokens += seg_embs + pos_embs
 
             # Repeat context embeddings for all target masks
             z = z.repeat(len(masks_pred), 1, 1)
