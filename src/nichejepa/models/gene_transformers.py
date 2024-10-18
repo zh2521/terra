@@ -359,21 +359,18 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         super().__init__(**base_encoder_kwargs)
 
         # Initialize positional embeddings
-        self.pos_embed = nn.Parameter(
-            torch.zeros(1,
-                        self.seq_len,
-                        self.embed_dim))
+        self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
+                                      self.embed_dim,
+                                      padding_idx=0)
 
-        if pos_learnable:
-            trunc_normal_(self.pos_embed, std=self.init_std)
-        else:
-            self.pos_embed.requires_grad = False
+        if not pos_learnable:
+            # Prevent gradient updates and initialize with sincos embedding
+            self.pos_embed.weight.requires_grad = False
             pos_embed = get_1d_sincos_pos_embed(
-                embed_dim=self.pos_embed.shape[-1],
+                embed_dim=self.embed_dim,
                 n_zero_pos=0,
                 n_sincos_pos=self.seq_len)
-            self.pos_embed.data.copy_(
-                torch.from_numpy(pos_embed).float().unsqueeze(0))
+            self.pos_embed.weight[1:].copy_(torch.from_numpy(pos_embed).float())
 
     def forward(self,
                 tokens: torch.Tensor,

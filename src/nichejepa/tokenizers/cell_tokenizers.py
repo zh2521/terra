@@ -591,7 +591,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_segments > 1:
-            for segment in range(2, n_segments + 2):
+            for segment in range(2, n_segments + 1):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -640,6 +640,19 @@ class CellGraphTokenizer(CellBaseTokenizer):
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
         del example['seg_tokens_neighborhood']
+
+        # Add padding to make all sequences have length 'model_input_size'
+        if len(example['gene_tokens']) < self.model_input_size:
+            example['gene_tokens'] = np.append(
+                example['gene_tokens'],
+                np.zeros(self.model_input_size - len(example['gene_tokens']),
+                         dtype=int))
+            example['seg_tokens'] = np.append(
+                example['seg_tokens'],
+                np.zeros(self.model_input_size - len(example['seg_tokens']),
+                         dtype=int))
+            example['gene_expr'] = np.append(example['gene_expr'], np.zeros(
+                (self.model_input_size - len(example['gene_expr']))))
         
         # Retrieve special tokens
         example['cls_cell_token'] = [self.token_dict['<cls_cell>']]

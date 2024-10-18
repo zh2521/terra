@@ -282,7 +282,7 @@ class CellGraphDataset(CellBaseDataset):
 
         tokens = torch.tensor(tokens)
         segments = torch.tensor(segments)
-        gene_expr = torch.tensor(gene_expr).float()
+        gene_expr = torch.tensor(gene_expr)
 
         return tokens, segments, gene_expr, self.dataset[item]["cell_id"]
 
@@ -329,7 +329,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
 
         tokens = torch.tensor(tokens)
         segments = torch.tensor(segments)
-        gene_expr = torch.tensor(gene_expr).float()
+        gene_expr = torch.tensor(gene_expr)
 
         return tokens, segments, gene_expr, self.dataset[item]["cell_id"]
 
