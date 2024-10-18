@@ -540,7 +540,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                      adata_dict['gene_expr_cell'][k]))
                 adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['seg_tokens_neighborhood'][i],
-                     [j+2] * len(adata_dict['gene_tokens_cell'][k])))
+                     [j+3] * len(adata_dict['gene_tokens_cell'][k])))
 
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
@@ -567,22 +567,20 @@ class CellGraphTokenizer(CellBaseTokenizer):
         """
         Format examples.
         """
-        # Get example-specific number of segments (incl. index cell segment)
+        # Get example-specific number of gene segments
+        n_gene_segments = 1 # index cell segment
         if len(example['seg_tokens_neighborhood']) > 0:
-            n_segments = int(max(example['seg_tokens_neighborhood']))
-        else:
-            # Cell does not have any neighbor
-            n_segments = 1
+            n_gene_segments += len(set(example['seg_tokens_neighborhood']))
 
         # Retrieve cell gene tokens and gene expression
         gene_tokens_cell, n_nonzero_cell_tokens = process_gene_tokens(
             example['gene_tokens_cell'],
-            int(self.model_input_size / n_segments),
+            int(self.model_input_size / n_gene_segments),
             self.token_dict)
         del example['gene_tokens_cell']
         gene_expr_cell = process_gene_expr(
             example['gene_expr_cell'],
-            int(self.model_input_size / n_segments))
+            int(self.model_input_size / n_gene_segments))
         del example['gene_expr_cell']
 
         # Retrieve neighborhood gene tokens and gene expression
@@ -590,8 +588,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         gene_expr_neighborhood = np.array([])
         n_nonzero_neighborhood_tokens = 0
 
-        if n_segments > 1:
-            for segment in range(2, n_segments + 1):
+        if n_gene_segments > 1:
+            for segment in range(2, n_gene_segments + 1):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -599,7 +597,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
                 gene_tokens_neighborhood_segment, n_nonzero_neighborhood_segment_tokens = process_gene_tokens(
                     gene_tokens_neighborhood_segment,
-                    int(self.model_input_size / n_segments),
+                    int(self.model_input_size / n_gene_segments),
                     self.token_dict)
 
                 gene_tokens_neighborhood = np.hstack(
@@ -614,7 +612,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
                 gene_expr_neighborhood_segment = process_gene_expr(
                     gene_expr_neighborhood_segment,
-                    int(self.model_input_size / n_segments))
+                    int(self.model_input_size / n_gene_segments))
 
                 gene_expr_neighborhood = np.hstack(
                     (gene_expr_neighborhood, gene_expr_neighborhood_segment))
@@ -635,7 +633,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Define segments
         seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
-            (np.array([1 if gene_token != 0 else 0 for gene_token in
+            (np.array([2 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
@@ -916,9 +914,9 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Define segments
         example['seg_tokens'] = np.concatenate(
-            (np.array([1 if gene_token != 0 else 0 for gene_token in
+            (np.array([2 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
-             np.array([2 if gene_token != 0 else 0 for gene_token in
+             np.array([3 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_neighborhood]))).astype(int)
         
         # Retrieve special tokens

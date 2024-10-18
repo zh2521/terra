@@ -101,16 +101,16 @@ class CellBaseDataset(Dataset):
         if 'cls_cell' in self.special_tokens:
             tokens = self.dataset[item]["cls_cell_token"] + tokens
                 
-        segments = [0] * self.n_special_tokens + segments
+        segments = [1] * self.n_special_tokens + segments
 
         return tokens, segments
 
     def _create_sampled_token_and_count_seq(self,
-                                  tokens: List,
-                                  counts: List,
-                                  n_nonzero_tokens: int,
-                                  size: int,
-                                  ) -> List[int]:
+                                            tokens: List,
+                                            counts: List,
+                                            n_nonzero_tokens: int,
+                                            size: int,
+                                            ) -> List[int]:
         """
         Sample a subset of tokens based on a sampling strategy.
 
@@ -166,7 +166,7 @@ class CellBaseDataset(Dataset):
 
         if size > n_nonzero_tokens:
             sampled_tokens.extend([0] * (size - len(sampled_tokens)))
-            sampled_counts.extend([-np.inf] * (size - len(sampled_counts)))
+            sampled_counts.extend([0.0] * (size - len(sampled_counts)))
 
         return sampled_tokens, sampled_counts
          
@@ -193,16 +193,13 @@ class CellBaseDataset(Dataset):
             segment_gene_tokens:
                 List of tokens for a given segment.
             """
-            # Only keep gene tokens in specified segment
-            segment_gene_tokens = [gene_token for gene_token, seg_token in zip(
-                self.dataset[item]["gene_tokens"],
-                self.dataset[item]["seg_tokens"])
-                if seg_token == segment]
-
-            segment_gene_expr = [gene_expr for gene_expr, seg_token in zip(
-                self.dataset[item]["gene_expr"],
-                self.dataset[item]["seg_tokens"])
-                if seg_token == segment]
+            # Only keep gene tokens and gene expr in specified segment
+            segment_start_idx = self.dataset[item]["seg_tokens"].index(segment)
+            segment_end_idx = self.dataset[item]["seg_tokens"].index(segment+1)
+            segment_gene_tokens = self.dataset[item]["gene_tokens"][
+                segment_start_idx: segment_end_idx]
+            segment_gene_expr = self.dataset[item]["gene_expr"][
+                segment_start_idx: segment_end_idx]
 
             # Validate that segment sequence length is specified correctly
             if (self.sampling_strategy is not None and 'rep' in
@@ -211,8 +208,8 @@ class CellBaseDataset(Dataset):
             else:
                 if segment_seq_len > len(segment_gene_tokens):
                     raise ValueError(
-                        'Sequence length for a given segment cannot be larger than'
-                        'segment size when not sampling with replacement.')
+                        'Sequence length for a given segment cannot be larger '
+                        'than segment size when not sampling with replacement.')
 
             # If no sampling strategy is specified, use all tokens up to
             # specified length
@@ -257,20 +254,23 @@ class CellGraphDataset(CellBaseDataset):
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=1, # index cell seg
+            segment=2, # index cell seg
             segment_seq_len=self.seq_len_cell)
-        segments = [1] * len(gene_tokens_cell)
+        segments = [2 if gene_token != 0 else 0 for gene_token in
+                    gene_tokens_cell]
         gene_tokens_neighborhood = []
         gene_expr_neighborhood = []
         for segment in np.unique(self.dataset[item]["seg_tokens"]):
-            if segment != 1:
+            if segment > 2: # 2 is index cell segment, higher segments are
+                            # neighbor cell segments
                 segment_gene_tokens, segment_gene_expr = self._get_gene_tokens_and_counts_for_segment(
                     item=item,
                     segment=segment, # neighbor cell segs
                     segment_seq_len=self.seq_len_neighborhood)
                 gene_tokens_neighborhood.extend(segment_gene_tokens)
                 gene_expr_neighborhood.extend(segment_gene_expr)
-                segments.extend([segment] * len(segment_gene_tokens))
+                segments.extend([segment if gene_token != 0 else 0 for
+                                 gene_token in segment_gene_tokens])
         tokens = gene_tokens_cell + gene_tokens_neighborhood
         gene_expr = gene_expr_cell + gene_expr_neighborhood
 
@@ -310,16 +310,17 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=1, # cell seg
+            segment=2, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neighborhood, gene_expr_neighborhood = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=2, # neighborhood seg
+            segment=3, # neighborhood seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neighborhood
         gene_expr = gene_expr_cell + gene_expr_neighborhood
-        segments = [1] * len(gene_tokens_cell) + [2] * len(
-            gene_tokens_neighborhood)
+        segments = [2 if gene_token != 0 else 0 for gene_token in
+                    gene_tokens_cell] + [3 if gene_token != 0 else 0 for
+                    gene_token in gene_tokens_neighborhood]
 
         # Add special tokens
         tokens, segments = self._add_special_tokens_to_seq(
