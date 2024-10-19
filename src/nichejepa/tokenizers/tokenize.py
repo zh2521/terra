@@ -1,15 +1,14 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 
-def process_gene_tokens(gene_tokens: List,
+def process_gene_tokens(gene_tokens: List[int],
                         length: int,
                         token_dict: dict,
-                        ) -> List:
+                        ) -> Tuple[np.ndarray, int]:
     """
-    Add pad tokens or truncate gene token list based on length and add special
-    tokens if defined.
+    Add pad tokens or truncate gene token list based on length.
 
     Parameters
     ----------
@@ -23,11 +22,10 @@ def process_gene_tokens(gene_tokens: List,
     Returns
     ----------
     processed_gene_tokens:
-       List containing padded or truncated (ranked) gene tokens, including
-       special tokens if defined.       
+       Array containing padded or truncated (ranked) gene tokens.
+    num_nonzero_tokens:
+       Number of nonzero gene tokens.
     """
-    # Convert to np.int64 to ensure all elements are of the same type. Should
-    # this be double?
     processed_gene_tokens = np.array(gene_tokens, dtype=np.int64)
     
     pad_size = int(length - len(processed_gene_tokens))
@@ -49,12 +47,23 @@ def process_gene_tokens(gene_tokens: List,
 
 def process_gene_expr(gene_expr: List,
                       length: int,
-                      ) -> List:
+                      ) -> np.ndarray:
     """
-    This needs to be updated.   
+    Pad gene expression with '-np.inf' or truncate gene expression based on
+    length.
+
+    Parameters
+    ----------
+    gene_expr:
+        List containing (ranked) gene expression.
+    length:
+        Length to which to pad or truncate the gene expression list to.
+
+    Returns
+    ----------
+    processed_gene_expr:
+        Array containing padded or truncated (ranked) gene expression.
     """
-    # Convert to np.int64 to ensure all elements are of the same type. Should
-    # this be double?
     processed_gene_expr = np.array(gene_expr)
     
     pad_size = int(length - len(processed_gene_expr))
@@ -95,10 +104,8 @@ def rank_gene_tokens(gene_scores: np.ndarray,
     ranked_gene_tokens:
         1D vector containing gene tokens ranked by gene scores.
     """
-    
     # Sort gene tokens by gene scores
     sorted_indices = np.argsort(-gene_scores)
     ranked_gene_tokens = gene_tokens[sorted_indices][:n_tokens]
     
     return ranked_gene_tokens
-    

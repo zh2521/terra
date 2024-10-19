@@ -90,6 +90,7 @@ def infer(args: dict,
         torch.cuda.set_device(device)
 
     # Load params from config file
+    gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
@@ -143,6 +144,7 @@ def infer(args: dict,
 
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
+        gt_type=gt_type,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -222,22 +224,30 @@ def infer(args: dict,
     for itr, (udata, masks_enc, masks_pred, masks_attention) in tqdm(enumerate(loader)):
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
-        seg_label = udata[1].to(device, non_blocking=True)
-        counts = udata[2].to(device, non_blocking=True)
+        segments = udata[1].to(device, non_blocking=True)
+        positions = udata[2].to(device, non_blocking=True)
+        counts = udata[3].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
-        all_cell_ids.extend(udata[3])
+        all_cell_ids.extend(udata[-1])
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
-            emb_list = target_encoder.module.return_multi_layer_emb(
-                tokens,
-                counts,
-                seg_label,
-                masks_attention=masks_attention)
+            if gt_type == 'rank':
+                emb_list = target_encoder.module.return_multi_layer_emb(
+                    tokens=tokens,
+                    segments=segments,
+                    positions=positions,
+                    masks_attention=masks_attention)
+            elif gt_type == 'counts':
+                emb_list = target_encoder.module.return_multi_layer_emb(
+                    tokens=tokens,
+                    segments=segments,
+                    counts=counts,
+                    masks_attention=masks_attention)
         
             if feature_norm:
                 # Normalize last layer like in training
@@ -341,6 +351,7 @@ def infer(args: dict,
     merged_obs = pd.merge(adata.obs,
                           adata_metadata.obs,
                           on='cell_id')
+
     adata.obs = merged_obs.set_index('cell_id')
    
     # Store cell and neighborhood embeddings of all observations across layers  

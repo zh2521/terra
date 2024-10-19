@@ -276,9 +276,6 @@ def collect_adata_from_folder(load_folder_path: str) -> ad.AnnData:
             if file.endswith('.h5ad'):
                 file_path = os.path.join(subdir, file)
                 adata = sc.read_h5ad(file_path)
-                adata.obs['cell_id'] = [
-                    str(1 - file_idx) + '_' + row['batch'] + '_' + str(row_idx)
-                    for row_idx, (_, row) in enumerate(adata.obs.iterrows())] # temp, should be added in silver data 
                 adata_list.append(adata)
 
     concatenated_adata = ad.concat(adata_list, join='outer', index_unique=None)
