@@ -672,8 +672,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             if not isinstance(masks, list):
                 masks = [masks]
 
-        # TEMP TODO REMOVO
-        # tokens[:, 2] = 0
+        # Replace special tokens (except <cls> tokens) with pad tokens for
+        # inference
+        tokens[:, 2:self.n_special_tokens] = 0
 
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
