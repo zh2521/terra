@@ -619,16 +619,28 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
             zero_counts_mask = counts == 0.0 # 0 counts have a separate
                                              # embedding
-            value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
-            value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
-            value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
+
+            zero_value_embed = self.special_value_embed(
+                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+            value_emb[zero_counts_mask] = zero_value_embed
+            
+            cls_value_embed = self.special_value_embed(
+                torch.tensor([1, 2], device=tokens.device)).to(value_emb.dtype)
+            value_emb[:, :2, :] = cls_value_embed
+            #value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
+            #value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
+            #value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
             #value_emb[:, 0, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
             #value_emb[:, 1, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
 
+            batch1_value_embed = self.special_value_embed(
+                torch.tensor([3], device=tokens.device)).to(value_emb.dtype)
+            batch2_value_embed = self.special_value_embed(
+                torch.tensor([4], device=tokens.device)).to(value_emb.dtype)
             batch0_mask = counts == 435
             batch1_mask = counts == 436
-            value_emb[batch0_mask] = self.special_value_embed.weight[3, :].to(value_emb.dtype) # special_value_embed[1:4, :] # self.special_value_embed.weight[1:4, :]
-            value_emb[batch1_mask] = self.special_value_embed.weight[4, :].to(value_emb.dtype) 
+            value_emb[batch0_mask] = batch1_value_embed
+            value_emb[batch1_mask] = batch2_value_embed
 
             # Get embeddings for segments
             seg_emb = self.seg_embed(segments)
@@ -693,8 +705,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         tokens[:, 2] = 0
         segments[:, 2] = 0
-        #counts[:, :3] = 0.0
-        self.special_value_embed.weight[0, :] = 0
+        counts[:, :3] = 0.0
+        #self.special_value_embed.weight[0, :] = 0
 
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
@@ -703,22 +715,29 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         value_emb = torch.matmul(a, self.value_embed.weight)
 
         zero_counts_mask = counts == 0.0 # 0 counts have a separate
-                                            # embedding
-        value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
-        value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
-        value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
+                                         # embedding
+
+        zero_value_embed = self.special_value_embed(
+            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+        value_emb[zero_counts_mask] = zero_value_embed
+        
+        cls_value_embed = self.special_value_embed(
+            torch.tensor([1, 2], device=tokens.device)).to(value_emb.dtype)
+        value_emb[:, :2, :] = cls_value_embed
+        #value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
+        #value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
+        #value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
         #value_emb[:, 0, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
         #value_emb[:, 1, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
 
-        #special_mask = torch.zeros(counts.shape[0], counts.shape[1], dtype=torch.bool, device=counts.device)
-        #special_mask[:, 2] = True
-        #special_value_embed = self.special_value_embed(counts[:, 3].int()).to(value_emb.dtype)
-        #value_embed[:, 3, :] = special_value_embed
-
+        batch1_value_embed = self.special_value_embed(
+            torch.tensor([3], device=tokens.device)).to(value_emb.dtype)
+        batch2_value_embed = self.special_value_embed(
+            torch.tensor([4], device=tokens.device)).to(value_emb.dtype)
         batch0_mask = counts == 435
         batch1_mask = counts == 436
-        value_emb[batch0_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[1:4, :] # self.special_value_embed.weight[1:4, :]
-        value_emb[batch1_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype)  
+        value_emb[batch0_mask] = zero_value_embed # batch1_value_embed, zero_value_embed
+        value_emb[batch1_mask] = zero_value_embed # batch2_value_embed, zero_value_embed
 
         #special_mask = torch.zeros(counts.shape[0], counts.shape[1], dtype=torch.bool, device=counts.device)
         #special_mask[:, 2] = True
