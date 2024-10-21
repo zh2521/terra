@@ -109,6 +109,7 @@ class CellBaseTokenizer(ABC):
             'sequential', 'parallel']]='sequential',
         chunk_size: int=512,
         model_input_size: int=2048,
+        include_zero_expr_genes: bool=True,
         norm_factor: Optional[Literal['read_depth', 'cell_area']]=None,
         norm_method: Optional[Literal['analytic_pearson_residuals',
                                       'mean',
@@ -133,6 +134,7 @@ class CellBaseTokenizer(ABC):
         self.processing_mode = processing_mode
         self.chunk_size = chunk_size
         self.model_input_size = model_input_size
+        self.include_zero_expr_genes = include_zero_expr_genes
         self.norm_factor = norm_factor
         self.norm_method = norm_method
         self.cell_gene_means_file = cell_gene_means_file
@@ -540,7 +542,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                      adata_dict['gene_expr_cell'][k]))
                 adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['seg_tokens_neighborhood'][i],
-                     [j+3] * len(adata_dict['gene_tokens_cell'][k])))
+                     [j+11] * len(adata_dict['gene_tokens_cell'][k])))
 
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
@@ -596,7 +598,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
-            for segment in range(2, n_gene_segments + 1):
+            for segment in range(11, n_gene_segments + 10):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -640,7 +642,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Define segments
         seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
-            (np.array([2 if gene_token != 0 else 0 for gene_token in
+            (np.array([10 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
@@ -843,34 +845,57 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         # Divide cells into chunks and loop through chunks
         print('Ranking gene tokens based on normalized counts.')
         for i in range(0, len(adata), self.chunk_size):
-            norm_counts_cell = adata[
-                i : i + self.chunk_size, coding_miRNA_idx].X.toarray()
-            norm_counts_neighborhood = adata[
-                i : i + self.chunk_size, coding_miRNA_idx].layers[
-                    'X_neighborhood'].toarray()
+            if self.include_zero_expr_genes:
+                norm_counts_cell = adata[
+                    i : i + self.chunk_size, coding_miRNA_idx].X.toarray()
+                norm_counts_neighborhood = adata[
+                    i : i + self.chunk_size, coding_miRNA_idx].layers[
+                        'X_neighborhood'].toarray()
 
-            # Rank gene tokens and append across chunks
-            adata_dict['gene_tokens_cell'] += [
-                rank_gene_tokens(norm_counts_cell[j].tolist()[0],
-                coding_miRNA_tokens_cell)
-                for j in range(norm_counts_cell.shape[0])]
-            adata_dict['gene_tokens_neighborhood'] += [
-                rank_gene_tokens(norm_counts_neighborhood[j].tolist()[0],
-                coding_miRNA_tokens_neighborhood)
-                for j in range(norm_counts_neighborhood.shape[0])]
+                # Rank gene tokens and append across chunks
+                adata_dict['gene_tokens_cell'] += [
+                    rank_gene_tokens(norm_counts_cell[j],
+                    coding_miRNA_tokens_cell)
+                    for j in range(norm_counts_cell.shape[0])]
+                adata_dict['gene_tokens_neighborhood'] += [
+                    rank_gene_tokens(norm_counts_neighborhood[j],
+                    coding_miRNA_tokens_neighborhood)
+                    for j in range(norm_counts_neighborhood.shape[0])]
 
-            # Rank gene expression and append across chunks
-            adata_dict['gene_expr_cell'] += [
-                norm_counts_cell[j].tolist()[0][np.argsort(-norm_counts_cell[j].tolist()[0])]
-                for j in range(norm_counts_cell.shape[0])]
-            adata_dict['gene_expr_neighborhood'] += [
-                norm_counts_neighborhood[j].tolist()[0][
-                    np.argsort(-norm_counts_neighborhood[j].tolist()[0])]
-                for j in range(norm_counts_neighborhood.shape[0])]
+                # Rank gene expression and append across chunks
+                adata_dict['gene_expr_cell'] += [
+                    norm_counts_cell[j][np.argsort(-norm_counts_cell[j])]
+                    for j in range(norm_counts_cell.shape[0])]
+                adata_dict['gene_expr_neighborhood'] += [
+                    norm_counts_neighborhood[j][
+                        np.argsort(-norm_counts_neighborhood[j])]
+                    for j in range(norm_counts_neighborhood.shape[0])]
+            else:
+                norm_counts_cell = sp.csr_matrix(adata[
+                    i : i + self.chunk_size, coding_miRNA_idx].X)
+                norm_counts_neighborhood = sp.csr_matrix(adata[
+                    i : i + self.chunk_size, coding_miRNA_idx].layers[
+                        'X_neighborhood'])
 
-        print(adata_dict['gene_tokens_cell'][0])
-        print(adata_dict['gene_expr_cell'][0])
+                # Rank gene tokens and append across chunks
+                adata_dict['gene_tokens_cell'] += [
+                    rank_gene_tokens(norm_counts_cell[j].data,
+                    coding_miRNA_tokens_cell[norm_counts_cell[j].indices])
+                    for j in range(norm_counts_cell.shape[0])]
+                adata_dict['gene_tokens_neighborhood'] += [
+                    rank_gene_tokens(norm_counts_neighborhood[j].data,
+                    coding_miRNA_tokens_neighborhood[
+                        norm_counts_neighborhood[j].indices])
+                    for j in range(norm_counts_neighborhood.shape[0])]
 
+                # Rank gene expression and append across chunks
+                adata_dict['gene_expr_cell'] += [
+                    norm_counts_cell[j].data[np.argsort(-norm_counts_cell[j].data)]
+                    for j in range(norm_counts_cell.shape[0])]
+                adata_dict['gene_expr_neighborhood'] += [
+                    norm_counts_neighborhood[j].data[
+                        np.argsort(-norm_counts_neighborhood[j].data)]
+                    for j in range(norm_counts_neighborhood.shape[0])]
 
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
@@ -938,9 +963,9 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Define segments
         example['seg_tokens'] = np.concatenate(
-            (np.array([2 if gene_token != 0 else 0 for gene_token in
+            (np.array([10 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
-             np.array([3 if gene_token != 0 else 0 for gene_token in
+             np.array([11 if gene_token != 0 else 0 for gene_token in
                        gene_tokens_neighborhood]))).astype(int)
         
         # Retrieve special tokens

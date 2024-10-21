@@ -113,7 +113,7 @@ class CellBaseDataset(Dataset):
             tokens = self.dataset[item]["cls_cell_token"] + tokens
             gene_expr = [-100000] + gene_expr
                 
-        segments = [1] * self.n_special_tokens + segments
+        segments = list(range(1, self.n_special_tokens + 1)) + segments
         positions = list(range(1, self.n_special_tokens + 1)) + positions
 
         return tokens, segments, positions, gene_expr
@@ -273,14 +273,14 @@ class CellGraphDataset(CellBaseDataset):
             item=item,
             segment=2, # index cell seg
             segment_seq_len=self.seq_len_cell)
-        segments = [2 if gene_token != 0 else 0 for gene_token in
+        segments = [10 if gene_token != 0 else 0 for gene_token in
                     gene_tokens_cell]
         positions = list(range(1, len(gene_tokens_cell) + 1))
         gene_tokens_neighborhood = []
         gene_expr_neighborhood = []
         for segment in np.unique(self.dataset[item]["seg_tokens"]):
-            if segment > 2: # 2 is index cell segment, higher segments are
-                            # neighbor cell segments
+            if segment > 10: # 10 is index cell segment, higher segments are
+                             # neighbor cell segments
                 segment_gene_tokens, segment_gene_expr = self._get_gene_tokens_and_counts_for_segment(
                     item=item,
                     segment=segment, # neighbor cell segs
@@ -333,16 +333,16 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=2, # cell seg
+            segment=10, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neighborhood, gene_expr_neighborhood = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=3, # neighborhood seg
+            segment=11, # neighborhood seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neighborhood
         gene_expr = gene_expr_cell + gene_expr_neighborhood
-        segments = [2 if gene_token != 0 else 0 for gene_token in
-                    gene_tokens_cell] + [3 if gene_token != 0 else 0 for
+        segments = [10 if gene_token != 0 else 0 for gene_token in
+                    gene_tokens_cell] + [11 if gene_token != 0 else 0 for
                     gene_token in gene_tokens_neighborhood]
         positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
             range(1, len(gene_tokens_neighborhood) + 1))
