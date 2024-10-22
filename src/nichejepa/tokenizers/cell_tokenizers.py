@@ -706,6 +706,12 @@ class CellGraphTokenizer(CellBaseTokenizer):
         example['gene_panel_token'] = [example['gene_panel_token']]
         example['batch_token'] = [example['batch_token']]
 
+        example['assay_value_token'] = [example['assay_value_token']]
+        example['species_value_token'] = [example['species_value_token']]
+        example['tissue_value_token'] = [example['tissue_value_token']]
+        example['gene_panel_value_token'] = [example['gene_panel_value_token']]
+        example['batch_value_token'] = [example['batch_value_token']] 
+
         # Retrieve special token values
         example['assay_value'] = [example['assay_value']]
         example['species_value'] = [example['species_value']]
@@ -1032,6 +1038,12 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         example['tissue_token'] = [example['tissue_token']]
         example['gene_panel_token'] = [example['gene_panel_token']]
         example['batch_token'] = [example['batch_token']]
+
+        example['assay_value_token'] = [example['assay_value_token']]
+        example['species_value_token'] = [example['species_value_token']]
+        example['tissue_value_token'] = [example['tissue_value_token']]
+        example['gene_panel_value_token'] = [example['gene_panel_value_token']]
+        example['batch_value_token'] = [example['batch_value_token']]        
 
         # Retrieve special token values
         example['assay_value'] = [example['assay_value']]

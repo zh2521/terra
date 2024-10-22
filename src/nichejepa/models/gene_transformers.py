@@ -622,20 +622,13 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             
             # Assign special value embeddings to <cls> tokens
             cls_value_embed = self.special_value_embed(
-                torch.tensor([1, 2], device=tokens.device)).to(value_emb.dtype)
+                torch.tensor([2, 3], device=tokens.device)).to(value_emb.dtype)
             value_emb[:, :2, :] = cls_value_embed
 
-            # counts[:, 2]
-
             # Assign special value embeddings to other special tokens
-            batch1_value_embed = self.special_value_embed(
-                torch.tensor([1673], device=tokens.device)).to(value_emb.dtype)
-            batch2_value_embed = self.special_value_embed(
-                torch.tensor([1674], device=tokens.device)).to(value_emb.dtype)
-            batch0_mask = counts == 1673 # 435, 1673
-            batch1_mask = counts == 1674 # 436, 1674
-            value_emb[batch0_mask] = batch1_value_embed
-            value_emb[batch1_mask] = batch2_value_embed
+            spt_value_embed = self.special_value_embed(
+                counts[:, 2:self.n_special_tokens]).to(value_emb.dtype)
+            value_emb[:, 2:self.n_special_tokens, :] = spt_value_embed
 
             # Get embeddings for segments
             seg_emb = self.seg_embed(segments)
