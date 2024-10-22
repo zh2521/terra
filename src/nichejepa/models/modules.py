@@ -180,11 +180,16 @@ class Block(nn.Module):
         return x
 
 
-class CountProjection(nn.Module):
+class ValueEmbWeightsProjection(nn.Module):
     def __init__(self,
                  dim=100):
         """
-        Project counts to value embeddings.
+        Project counts to value embedding weights.
+
+        Parameters
+        -----------
+        dim:
+            Dimensionality of the value embedding.        
         """
         super().__init__()
         self.linear1 = nn.Linear(1, dim)

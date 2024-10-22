@@ -40,7 +40,7 @@ from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import (init_model,
                      init_opt,
                      load_checkpoint)
-from .masks.multigene import MaskCollator
+from .masks.random_masking import RandomMaskCollator
 from .masks.block_masking  import BlockMaskCollator
 from .masks.utils import apply_masks
 from .models.utils import repeat_interleave_batch
@@ -224,7 +224,7 @@ def train(args: dict,
             per_block_mask_ratio=per_block_mask_ratio,
             separate_cls=separate_cls)
     else:
-        mask_collator = MaskCollator(
+        mask_collator = RandomMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,

@@ -108,10 +108,10 @@ class CellBaseDataset(Dataset):
             gene_expr = self.dataset[item]["assay_value"] + gene_expr
         if 'cls_neighborhood' in self.special_tokens:
             tokens = self.dataset[item]["cls_neighborhood_token"] + tokens
-            gene_expr = [-100000] + gene_expr
+            gene_expr = [0] + gene_expr
         if 'cls_cell' in self.special_tokens:
             tokens = self.dataset[item]["cls_cell_token"] + tokens
-            gene_expr = [-100000] + gene_expr
+            gene_expr = [0] + gene_expr
                 
         segments = list(range(1, self.n_special_tokens + 1)) + segments
         positions = list(range(1, self.n_special_tokens + 1)) + positions

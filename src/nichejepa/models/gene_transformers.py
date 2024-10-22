@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .modules import Attention, Block, CountProjection, DropPath, MLP
+from .modules import Attention, Block, ValueEmbWeightsProjection, DropPath, MLP
 from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)
@@ -549,19 +549,22 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     """
     def __init__(self,
                  n_value_bins: int=100,
-                 **base_encoder_kwargs
+                 n_special_values: int=6,
+                 **base_encoder_kwargs,
                  ):
         super().__init__(**base_encoder_kwargs)
         self.n_value_bins = n_value_bins
+        self.n_special_values = n_special_values
 
-        # Initialize value embeddings
+        # Initialize value embeddings and value embedding weight projection
+        # layer
         self.value_embed = nn.Embedding(self.n_value_bins,
                                         self.embed_dim)
-        self.special_value_embed = nn.Embedding(6, # temp
+        self.special_value_embed = nn.Embedding(self.n_special_values,
                                                 self.embed_dim,
                                                 padding_idx=0)
-
-        self.count_projection = CountProjection(dim=self.n_value_bins)
+        self.count_projection = ValueEmbWeightsProjection(
+            dim=self.n_value_bins)
 
     def forward(self,
                 tokens: torch.Tensor,
@@ -589,7 +592,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 List of N_MASKS tensors containing indices (within the sequence)
                 of tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
             masks_attention:
-                Tensor containing input for mask attention 
+                Tensor containing input for mask attention.
+
             Returns
             -----------
             x:
@@ -602,43 +606,34 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 if not isinstance(masks, list):
                     masks = [masks]
 
-            # segments[:, 3] = 0
-            # counts[:, :3] = 0.0
-
             # Get token embeddings for sequence of tokens
             token_emb = self.token_embed(tokens)
 
-            #value_embed = self.value_embed(
-            #    torch.tensor(range(self.n_value_bins)).to(tokens.device))
+            # Get value embeddings
+            value_emb_weights = self.count_projection(
+                counts.unsqueeze(dim=-1))
+            value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
 
-            #special_value_embed = self.special_value_embed(
-            #    torch.tensor(range(4)).to(tokens.device))
-
-            a = self.count_projection(counts.unsqueeze(dim=-1))
-            value_emb = torch.matmul(a, self.value_embed.weight)
-
-            zero_counts_mask = counts == 0.0 # 0 counts have a separate
-                                             # embedding
-
+            # Assign padding value embedding to 0 counts 
+            zero_counts_mask = counts == 0.0
             zero_value_embed = self.special_value_embed(
                 torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
             value_emb[zero_counts_mask] = zero_value_embed
             
+            # Assign special value embeddings to <cls> tokens
             cls_value_embed = self.special_value_embed(
                 torch.tensor([1, 2], device=tokens.device)).to(value_emb.dtype)
             value_emb[:, :2, :] = cls_value_embed
-            #value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
-            #value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
-            #value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
-            #value_emb[:, 0, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
-            #value_emb[:, 1, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
 
+            # counts[:, 2]
+
+            # Assign special value embeddings to other special tokens
             batch1_value_embed = self.special_value_embed(
-                torch.tensor([3], device=tokens.device)).to(value_emb.dtype)
+                torch.tensor([1673], device=tokens.device)).to(value_emb.dtype)
             batch2_value_embed = self.special_value_embed(
-                torch.tensor([4], device=tokens.device)).to(value_emb.dtype)
-            batch0_mask = counts == 435
-            batch1_mask = counts == 436
+                torch.tensor([1674], device=tokens.device)).to(value_emb.dtype)
+            batch0_mask = counts == 1673 # 435, 1673
+            batch1_mask = counts == 1674 # 436, 1674
             value_emb[batch0_mask] = batch1_value_embed
             value_emb[batch1_mask] = batch2_value_embed
 
@@ -706,7 +701,6 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         tokens[:, 2] = 0
         segments[:, 2] = 0
         #counts[:, :3] = 0.0
-        #self.special_value_embed.weight[0, :] = 0
 
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
@@ -734,8 +728,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             torch.tensor([3], device=tokens.device)).to(value_emb.dtype)
         batch2_value_embed = self.special_value_embed(
             torch.tensor([4], device=tokens.device)).to(value_emb.dtype)
-        batch0_mask = counts == 435
-        batch1_mask = counts == 436
+        batch0_mask = counts == 1673 # 435, 1673
+        batch1_mask = counts == 1674 # 436, 1674
+
         value_emb[batch0_mask] = zero_value_embed # batch1_value_embed, zero_value_embed
         value_emb[batch1_mask] = zero_value_embed # batch2_value_embed, zero_value_embed
 

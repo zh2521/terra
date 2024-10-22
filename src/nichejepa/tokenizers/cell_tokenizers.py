@@ -562,27 +562,47 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
         
-        # Add special tokens (positional special tokens and value special tokens)
+        # Add special tokens (positional tokens and value tokens)
         n_cells = len(adata)
-
-        adata_dict['batch_token'] = [self.token_dict['batch']] * n_cells
-        adata_dict['gene_panel_token'] = [self.token_dict['gene_panel']] * n_cells
-        adata_dict['assay_token'] = [self.token_dict['assay']] * n_cells
-        adata_dict['species_token'] = [self.token_dict['species']] * n_cells
-        adata_dict['tissue_token'] = [self.token_dict['tissue']] * n_cells
-
         batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
-        adata_dict['batch_value'] = [self.token_dict[batch_id_key]] * n_cells
-        adata_dict['gene_panel_value'] = [
-            self.token_dict[
-                self.file_path_to_gene_panel_ID_dict[
-                    str(adata_file_path)]]] * n_cells
+
+        adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
+        adata_dict['gene_panel_token'] = [
+            self.token_dict['spt_gene_panel']] * n_cells
+        adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
+        adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
+        adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
+
+        adata_dict['batch_value_token'] = [
+            self.token_dict[f'spv_{batch_id_key}']] * n_cells
+        adata_dict['gene_panel_value_token'] = [self.token_dict[
+            f'spv_{self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]}']
+            ] * n_cells
+        adata_dict['assay_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
+        adata_dict['species_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
+        adata_dict['tissue_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
+
+        # Store values with right embedding index for count tokenizer
+        spv_dict = {
+            k: v for k, v in self.token_dict.items() if k.startswith('spv_')}
+        spv_start_idx = min(spv_dict.values())
+        spv_idx_subtract = spv_start_idx - 4 # leave space for <cls> tokens
+
+        adata_dict['batch_value'] = [
+            self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
+        adata_dict['gene_panel_value'] = [self.token_dict[
+            f'spv_{self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]}']
+            - spv_idx_subtract] * n_cells
         adata_dict['assay_value'] = [
-            self.token_dict[adata.uns['assay']]] * n_cells
-        adata_dict['species_value'] = [
-            self.token_dict[adata.uns['species']]] * n_cells
-        adata_dict['tissue_value'] = [
-            self.token_dict[adata.uns['tissue']]] * n_cells
+            self.token_dict[
+                f'spv_{adata.uns["assay"]}'] - spv_idx_subtract] * n_cells
+        adata_dict['species_value'] = [self.token_dict[
+            f'spv_{adata.uns["species"]}'] - spv_idx_subtract] * n_cells
+        adata_dict['tissue_value'] = [self.token_dict[
+            f'spv_{adata.uns["tissue"]}'] - spv_idx_subtract] * n_cells
 
         return adata_dict
             
@@ -915,27 +935,47 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
         
-        # Add special tokens (positional special tokens and value special tokens)
+        # Add special tokens (positional tokens and value tokens)
         n_cells = len(adata)
-
-        adata_dict['batch_token'] = [self.token_dict['batch']] * n_cells
-        adata_dict['gene_panel_token'] = [self.token_dict['gene_panel']] * n_cells
-        adata_dict['assay_token'] = [self.token_dict['assay']] * n_cells
-        adata_dict['species_token'] = [self.token_dict['species']] * n_cells
-        adata_dict['tissue_token'] = [self.token_dict['tissue']] * n_cells
-
         batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
-        adata_dict['batch_value'] = [self.token_dict[batch_id_key]] * n_cells
-        adata_dict['gene_panel_value'] = [
-            self.token_dict[
-                self.file_path_to_gene_panel_ID_dict[
-                    str(adata_file_path)]]] * n_cells
+
+        adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
+        adata_dict['gene_panel_token'] = [
+            self.token_dict['spt_gene_panel']] * n_cells
+        adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
+        adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
+        adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
+
+        adata_dict['batch_value_token'] = [
+            self.token_dict[f'spv_{batch_id_key}']] * n_cells
+        adata_dict['gene_panel_value_token'] = [self.token_dict[
+            f'spv_{self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]}']
+            ] * n_cells
+        adata_dict['assay_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
+        adata_dict['species_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
+        adata_dict['tissue_value_token'] = [
+            self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
+
+        # Store values with right embedding index for count tokenizer
+        spv_dict = {
+            k: v for k, v in self.token_dict.items() if k.startswith('spv_')}
+        spv_start_idx = min(spv_dict.values())
+        spv_idx_subtract = spv_start_idx - 4 # leave space for <cls> tokens
+
+        adata_dict['batch_value'] = [
+            self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
+        adata_dict['gene_panel_value'] = [self.token_dict[
+            f'spv_{self.file_path_to_gene_panel_ID_dict[str(adata_file_path)]}']
+            - spv_idx_subtract] * n_cells
         adata_dict['assay_value'] = [
-            self.token_dict[adata.uns['assay']]] * n_cells
-        adata_dict['species_value'] = [
-            self.token_dict[adata.uns['species']]] * n_cells
-        adata_dict['tissue_value'] = [
-            self.token_dict[adata.uns['tissue']]] * n_cells
+            self.token_dict[
+                f'spv_{adata.uns["assay"]}'] - spv_idx_subtract] * n_cells
+        adata_dict['species_value'] = [self.token_dict[
+            f'spv_{adata.uns["species"]}'] - spv_idx_subtract] * n_cells
+        adata_dict['tissue_value'] = [self.token_dict[
+            f'spv_{adata.uns["tissue"]}'] - spv_idx_subtract] * n_cells
 
         return adata_dict
             

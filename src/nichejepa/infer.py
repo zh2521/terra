@@ -19,8 +19,8 @@ from tqdm import tqdm
 from .datasets.cell_datasets import CellBaseDataset, make_cell_dataset
 from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import init_model, load_checkpoint
-from .masks.multigene import MaskCollator
 from .masks.block_masking  import BlockMaskCollator
+from .masks.random_masking import RandomMaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -172,7 +172,7 @@ def infer(args: dict,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio = per_block_mask_ratio)
     else:
-        mask_collator = MaskCollator(
+        mask_collator = RandomMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
