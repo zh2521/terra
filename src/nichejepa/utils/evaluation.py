@@ -17,23 +17,27 @@ def classification_metrics(adata: anndata.AnnData,
                            n_neighbors: Optional[int]=5
                            ) -> dict:
     """
-    Train and evaluate a classifier (KNN or Logistic Regression) on learned embeddings.
+    Train and evaluate a classifier (KNN or Logistic Regression) on learned
+    embeddings.
 
     Parameters
     -----------
     adata:
         Annotated data object containing the features and labels.
     label_col:
-        The name of the column in `adata.obs` containing the categorical labels for classification.
+        The name of the column in `adata.obs` containing the categorical labels
+        for classification.
     classifier:
         The type of classifier to use ('knn' or 'logistic').
     n_neighbors:
-        Number of neighbors to use in KNN classification. Only applicable if `classifier` is 'knn'.
+        Number of neighbors to use in KNN classification. Only applicable if
+        `classifier` is 'knn'.
 
     Returns
     --------
     metrics:
-        A dictionary containing accuracy and F1 scores for both the training and test sets.
+        A dictionary containing accuracy and F1 scores for both the training and
+        test sets.
     """
     # Split the data into training and testing sets
     X = adata.obsm['jepa_emb']
@@ -85,7 +89,8 @@ def clustering_metrics(adata: anndata.AnnData,
     emb_key:
         The key in `adata.obsm` containing the embeddings to use for clustering.
     label_col:
-        The name of the column in `adata.obs` containing the ground truth labels for comparison.
+        The name of the column in `adata.obs` containing the ground truth labels
+        for comparison.
 
     Returns
     --------
@@ -94,9 +99,11 @@ def clustering_metrics(adata: anndata.AnnData,
     """
     # Validate input
     if emb_key not in adata.obsm:
-        raise ValueError(f"Embedding key '{emb_key}' not found in `adata.obsm`.")
+        raise ValueError(
+            f"Embedding key '{emb_key}' not found in `adata.obsm`.")
     if label_col not in adata.obs:
-        raise ValueError(f"Label column '{label_col}' not found in `adata.obs`.")
+        raise ValueError(
+            f"Label column '{label_col}' not found in `adata.obs`.")
 
     # Calculate NMI and ARI using K-Means clustering
     embeddings = adata.obsm[emb_key]

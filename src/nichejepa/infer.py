@@ -166,11 +166,11 @@ def infer(args: dict,
     if block_masking:
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
-            n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio = per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            separate_cls=separate_cls)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
