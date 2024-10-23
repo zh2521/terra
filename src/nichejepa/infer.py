@@ -188,6 +188,7 @@ def infer(args: dict,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         tokenizer_type=tokenizer_type,
+        gt_type=gt_type,
         special_tokens=special_tokens,
         sampling_strategy=None)
 

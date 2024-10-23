@@ -103,7 +103,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
 
         # Initialize segment embeddings
         self.seg_embed = nn.Embedding(
-            n_segments + 1 + 10, # include <pad> and reserved special token segments
+            n_segments + 1 + 10, # include <pad> and reserved special segments
             embed_dim,
             padding_idx=0)
 
@@ -206,7 +206,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             SEQ_LEN, EMBED_DIM).
         """
         # Retrieve segment embeddings
-        seg_emb = self.seg_embed(x)
+        seg_emb = self.seg_embed(segments)
 
         return seg_emb
 
@@ -507,7 +507,10 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         
         # Replace special tokens (except <cls> tokens) with pad tokens for
         # inference
-        tokens[:, 2:self.n_special_tokens] = 0
+        if self.n_special_tokens > 2:
+            tokens[:, 2:self.n_special_tokens] = 0
+            segments[:, 2:self.n_special_tokens] = 0
+            positions[:, 2:self.n_special_tokens] = 0
 
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
@@ -563,7 +566,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         self.special_value_embed = nn.Embedding(self.n_special_values,
                                                 self.embed_dim,
                                                 padding_idx=0)
-        self.count_projection = ValueEmbWeightsProjection(
+        self.value_emb_weights_projection = ValueEmbWeightsProjection(
             dim=self.n_value_bins)
 
     def forward(self,
@@ -606,11 +609,14 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 if not isinstance(masks, list):
                     masks = [masks]
 
-            # Get token embeddings for sequence of tokens
+            # Get embeddings for sequence of tokens
             token_emb = self.token_embed(tokens)
 
+            # Get embeddings for sequence of segments
+            seg_emb = self.seg_embed(segments)
+
             # Get value embeddings
-            value_emb_weights = self.count_projection(
+            value_emb_weights = self.value_emb_weights_projection(
                 counts.unsqueeze(dim=-1))
             value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
 
@@ -625,16 +631,15 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 torch.tensor([2, 3], device=tokens.device)).to(value_emb.dtype)
             value_emb[:, :2, :] = cls_value_embed
 
-            # Assign special value embeddings to other special tokens
-            spt_value_embed = self.special_value_embed(
-                counts[:, 2:self.n_special_tokens]).to(value_emb.dtype)
-            value_emb[:, 2:self.n_special_tokens, :] = spt_value_embed
+            if self.n_special_tokens > 2:
+                # Assign special value embeddings to other special tokens
+                spt_value_embed = self.special_value_embed(
+                    counts[:, 2:self.n_special_tokens].int()).to(
+                        value_emb.dtype)
+                value_emb[:, 2:self.n_special_tokens, :] = spt_value_embed
 
-            # Get embeddings for segments
-            seg_emb = self.seg_embed(segments)
-            
             # Add token and segment embeddings to value embeddings
-            x = token_emb + value_emb + seg_emb
+            x = token_emb + seg_emb + value_emb
 
             B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
                 
@@ -691,59 +696,39 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             if not isinstance(masks, list):
                 masks = [masks]
 
-        tokens[:, 2] = 0
-        segments[:, 2] = 0
-        #counts[:, :3] = 0.0
+        # During inference, replace special tokens (except <cls> tokens) with
+        # pad tokens
+        if self.n_special_tokens > 2:
+            tokens[:, 2:self.n_special_tokens] = 0
+            segments[:, 2:self.n_special_tokens] = 0
 
-        # Get token embeddings for sequence of tokens
+        # Get embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
 
-        a = self.count_projection(counts.unsqueeze(dim=-1))
-        value_emb = torch.matmul(a, self.value_embed.weight)
+        # Get embeddings for sequence of segments
+        seg_emb = self.seg_embed(segments)
 
-        zero_counts_mask = counts == 0.0 # 0 counts have a separate
-                                         # embedding
+        # Get value embeddings
+        value_emb_weights = self.value_emb_weights_projection(
+            counts.unsqueeze(dim=-1))
+        value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
 
+        # Assign padding value embedding to 0 counts 
+        zero_counts_mask = counts == 0.0
         zero_value_embed = self.special_value_embed(
             torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
         value_emb[zero_counts_mask] = zero_value_embed
         
+        # Assign special value embeddings to <cls> tokens
         cls_value_embed = self.special_value_embed(
-            torch.tensor([1, 2], device=tokens.device)).to(value_emb.dtype)
+            torch.tensor([2, 3], device=tokens.device)).to(value_emb.dtype)
         value_emb[:, :2, :] = cls_value_embed
-        #value_emb[zero_counts_mask] = self.special_value_embed.weight[0, :].to(value_emb.dtype) # special_value_embed[0, :] # self.special_value_embed.weight[0, :]
-        #value_emb[:, 0, :] = self.special_value_embed.weight[1, :].to(value_emb.dtype)
-        #value_emb[:, 1, :] = self.special_value_embed.weight[2, :].to(value_emb.dtype)
-        #value_emb[:, 0, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
-        #value_emb[:, 1, :] = self.special_value_embed.weight[0, :].to(value_emb.dtype)
 
-        batch1_value_embed = self.special_value_embed(
-            torch.tensor([3], device=tokens.device)).to(value_emb.dtype)
-        batch2_value_embed = self.special_value_embed(
-            torch.tensor([4], device=tokens.device)).to(value_emb.dtype)
-        batch0_mask = counts == 1673 # 435, 1673
-        batch1_mask = counts == 1674 # 436, 1674
+        # Assign zero value embeddings to other special tokens
+        value_emb[:, 2:self.n_special_tokens, :] = zero_value_embed
 
-        value_emb[batch0_mask] = zero_value_embed # batch1_value_embed, zero_value_embed
-        value_emb[batch1_mask] = zero_value_embed # batch2_value_embed, zero_value_embed
-
-        #special_mask = torch.zeros(counts.shape[0], counts.shape[1], dtype=torch.bool, device=counts.device)
-        #special_mask[:, 2] = True
-        #special_value_embed = self.special_value_embed(counts[:, 3].int()).to(value_emb.dtype)
-        #value_embed[:, 3, :] = special_value_embed
-
-        # Get embeddings for segments
-        seg_emb = self.seg_embed(segments)
-        
         # Add token and segment embeddings to value embeddings
-        x = token_emb + value_emb + seg_emb
-
-        #print(self.special_value_embed.weight.shape)
-        #print(self.special_value_embed.weight[0, :])
-        #print(value_emb[0, 2, :])
-        #print(seg_emb[0, 2, :])
-        #print(token_emb[0, 2, :])
-        #print(x[0, 2, :])
+        x = token_emb + seg_emb + value_emb
 
         B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
