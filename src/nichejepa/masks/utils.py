@@ -32,32 +32,33 @@ def apply_masks(x, masks):
     return torch.cat(all_x, dim=0)
 
 
-def apply_attention_mask(attention_matrix, mask_indices):
+def apply_attention_mask(attention_matrix, indices):
+
     """
-    Apply  mask indices to the attention matrix and return the selected submatrix.
+    Apply  given indices to the attention matrix and return the selected submatrix.
 
     Parameters
     ----------
     attention_matrix : Tensor of shape (B, N, N)
         The input attention matrix.
 
-    mask_indices : Tensor of shape (B, M)
-        Indices of tokens for which the attention mask should happen.
+    indices : Tensor of shape (B, M)
+        Indices of tokens for which the attention should happen.
 
     Returns
     -------
     Tensor
-        The submatrix from the attention matrix after applying the mask indices.
+        The submatrix from the attention matrix after applying the indices.
     """
 
     # Step 2: Expand combined indices for row selection
-    row_indices_expanded = mask_indices.unsqueeze(-1).expand(-1, -1, attention_matrix.size(-1))
+    row_indices_expanded = indices.unsqueeze(-1).expand(-1, -1, attention_matrix.size(-1))
 
     # Step 3: Gather the rows from the attention matrix based on the expanded indices
     selected_rows = torch.gather(attention_matrix, 1, row_indices_expanded)
 
     # Step 4: Expand combined indices for column selection
-    column_indices_expanded = mask_indices.unsqueeze(1).expand(-1, selected_rows.size(1), -1)
+    column_indices_expanded = indices.unsqueeze(1).expand(-1, selected_rows.size(1), -1)
 
     # Step 5: Gather columns from the selected rows based on the expanded indices
     selected_submatrix = torch.gather(selected_rows, 2, column_indices_expanded)
@@ -67,19 +68,19 @@ def apply_attention_mask(attention_matrix, mask_indices):
 
 def create_controlled_mask(attention_matrix, target_masks=None, context_masks=None):
     """
-    Apply predicted masks to the input attention matrix by gathering rows and columns based 
+    Apply context_masks and/or target_masks to the input attention matrix by gathering rows and columns based 
     on the given indices.
 
     Parameters
     ----------
-    attention_matrix : Tensor of shape (B, N, N)
+    attention_matrix : Tensor of shape (B, 1, N, N)
         The input attention matrix where B is the batch size and N is the sequence length.
 
     target_masks : List[Tensor]
-        A list of tensors containing indices for the target masks.
+        A list of tensors containing indices for the target tokens.
 
     context_masks: List[Tensor]
-        A list of tensors containing indices of context tokens to keep.
+        A list of tensors containing indices of context tokens.
 
     Returns
     -------
@@ -108,7 +109,7 @@ def create_controlled_mask(attention_matrix, target_masks=None, context_masks=No
         for mask_indices in target_masks:
             # Step 1: Concatenate context and target indices together
             combined_indices = torch.cat((context_indices, mask_indices), dim=1)
-            # Call the helper function to create the attention mask for the given indices
+            # Call the helper function to create the attention matrices for the given indices
             selected_submatrix = apply_attention_mask(attention_matrix, combined_indices)
             
             # Append the resulting submatrix to the list
