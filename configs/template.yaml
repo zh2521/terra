@@ -35,12 +35,14 @@ mask:
   context_mask_size: 1220 # this doesn't have meaning in block masking.
   target_mask_size: 10 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.5
-  controlled_attention_pattern: # Similarly, for the columns, we have the same order, and a 1 indicates attention get masked  between those two parts.
-    - [0, 1, 0, 1]  # cls_cell
-    - [1, 0, 1, 0]  # cls_neighborhood
-    - [0, 1, 0, 1]  # cell
-    - [1, 0, 1, 0]  # neighborhood
-
+  #controlled_attention_pattern: 
+    # Similarly, for the columns, we have the same order, and a 1 indicates attention get masked  between those two parts.
+     # 'Matrix', 'null'
+    #- [0, 1, 0, 1]  # cls_cell
+    #- [1, 0, 1, 0]  # cls_neighborhood
+    #- [0, 1, 0, 1]  # cell
+    #- [1, 0, 1, 0]  # neighborhood
+  controlled_attention_pattern: null
 optimization:
   warmup: 1
   epochs: 1

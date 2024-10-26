@@ -152,32 +152,32 @@ def configure_attention_masks(controlled_attention_pattern, collated_masks_atten
         collated_masks_attention[:, :, 0, 1] = 0
     
     # Mask: Cls_cell should not attend to neighborhood
-    elif controlled_attention_pattern[0][3]:
+    if controlled_attention_pattern[0][3]:
         collated_masks_attention[:, :, 0, seq_len_cell + valid_min_start:] = 0
     
     # Mask: Cls_neighborhood should not attend to Cls_cell
-    elif controlled_attention_pattern[1][0]:
+    if controlled_attention_pattern[1][0]:
         collated_masks_attention[:, :, 1, 0] = 0
     
     # Mask: Cls_neighborhood should not attend to cell
-    elif controlled_attention_pattern[1][2]:
+    if controlled_attention_pattern[1][2]:
         collated_masks_attention[:, :, 1, valid_min_start:valid_min_start + seq_len_cell] = 0
     
     # Mask: cell should not attend to Cls_neighborhood
-    elif controlled_attention_pattern[2][1]:
+    if controlled_attention_pattern[2][1]:
         collated_masks_attention[:, :, valid_min_start:valid_min_start + seq_len_cell, 1] = 0
     
     # Mask: cell should not attend to neighborhood
-    elif controlled_attention_pattern[2][3]:
+    if controlled_attention_pattern[2][3]:
         collated_masks_attention[:, :, valid_min_start:valid_min_start + seq_len_cell, 
                                  seq_len_cell + valid_min_start:] = 0
     
     # Mask: neighborhood should not attend to Cls_cell
-    elif controlled_attention_pattern[3][0]:
+    if controlled_attention_pattern[3][0]:
         collated_masks_attention[:, :, seq_len_cell + valid_min_start:, 0] = 0
     
     # Mask: neighborhood should not attend to cell
-    elif controlled_attention_pattern[3][2]:
+    if controlled_attention_pattern[3][2]:
         collated_masks_attention[:, :, seq_len_cell + valid_min_start:, 
                                  valid_min_start:valid_min_start + seq_len_cell] = 0
 

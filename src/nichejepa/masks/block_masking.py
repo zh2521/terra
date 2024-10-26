@@ -1,6 +1,7 @@
 from typing import List, Literal, Optional, Tuple
 
 from logging import getLogger
+from ..masks.utils import configure_attention_masks
 
 import numpy as np
 import torch
@@ -215,7 +216,10 @@ class BlockMaskCollator:
         collated_masks_context = [[cm[:keep_tokens_context] for cm in cm_list] for cm_list in collated_masks_context]
         # Step 2: Use default_collate to create a batch
         collated_masks_context = torch.utils.data.default_collate(collated_masks_context)
-
         collated_masks_attention = torch.utils.data.default_collate(collated_masks_attention).unsqueeze(1).unsqueeze(1)
-        
+        if self.controlled_attention_pattern is not None:
+            collated_masks_attention = collated_masks_attention.expand(collated_masks_attention.shape[0], 1, collated_masks_attention.shape[-1],collated_masks_attention.shape[-1]).clone()
+            if torch.sum(self.controlled_attention_pattern)!=0:
+               configure_attention_masks(self.controlled_attention_pattern,collated_masks_attention,self.seq_len_cell,self.valid_min_start)
+               
         return collated_batch, collated_masks_context, collated_masks_target, collated_masks_attention

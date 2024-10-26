@@ -124,8 +124,11 @@ def train(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
-    controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
-    
+    if args['mask']['controlled_attention_pattern'] is not None:
+        controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
+    else:
+        controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
     if isinstance(args['optimization']['ema'], list):
