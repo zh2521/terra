@@ -120,12 +120,15 @@ class BlockMaskCollator:
                 masked_indices = block_non_zero_indices[mask_indices].tolist()  # Convert to list.
                 context_mask[masked_indices] = 0  # Set masked indices to 0 in the context mask.
                 max_index, min_index = max(masked_indices), min(masked_indices) # Find the maximum and minimum index positions in the mask.  
-                if min_index > self.seq_len_cell and self.separate_cls: # If the min_index is greater than self.seq_len_cell and self.separate_cls is True.
+                if not self.separate_cls: # if self.separate_cls is False.
+                   masked_indices = list(range(self.n_special_tokens)) + masked_indices # include special tokens including both cls_neighborhood and cls_cell.
+                elif min_index > self.seq_len_cell: # If the min_index is greater than self.seq_len_cell and self.separate_cls is True.
                    masked_indices = list(range(1,self.n_special_tokens)) + masked_indices # Include special tokens, excluding cls_cell.
-                elif self.seq_len_cell > max_index and self.separate_cls: # If the max_index is smaller than self.seq_len_cell and self.separate_cls is True.
+                elif self.seq_len_cell > max_index: # If the max_index is smaller than self.seq_len_cell and self.separate_cls is True.
                     masked_indices = [0] + list(range(2,self.n_special_tokens)) + masked_indices # include special tokens excluding cls_neighborhood.
-                else: # This means the block is in both neighborhood  and cell or and self.separate_cls is False.
-                    masked_indices = list(range(self.n_special_tokens)) + masked_indices # include special tokens including both cls_neighborhood and cls_cell.
+                else: # This means the block is in both neighborhood  and cell and and self.separate_cls is True.
+                    masked_indices = list(range(1,self.n_special_tokens)) + masked_indices # include special tokens including cls_neighborhood.
+                    #masked_indices = list(range(self.n_special_tokens)) + masked_indices # include special tokens including both cls_neighborhood and cls_cell.
                 keep_tokens_target = min(keep_tokens_target, len(masked_indices))  # Update minimum tokens target
                 block_masks.append(torch.tensor(masked_indices))  # Append the masked indices io the list
             else:
