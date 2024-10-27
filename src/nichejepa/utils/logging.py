@@ -9,8 +9,10 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 import torch
 
 
-def gpu_timer(closure, log_timings=True):
-    """ Helper to time gpu-time to execute closure() """
+def gpu_timer(closure, log_timings: bool=True):
+    """
+    Helper to time gpu-time to execute closure().
+    """
     log_timings = log_timings and torch.cuda.is_available()
 
     elapsed_time = -1.
@@ -50,7 +52,9 @@ class CSVLogger(object):
 
 
 class AverageMeter(object):
-    """computes and stores the average and current value"""
+    """
+    Computes and stores the average and current value.
+    """
 
     def __init__(self):
         self.reset()

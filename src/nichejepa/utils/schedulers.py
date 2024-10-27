@@ -10,16 +10,17 @@ import math
 
 
 class WarmupCosineSchedule(object):
-    def __init__(
-        self,
-        optimizer,
-        warmup_steps,
-        start_lr,
-        ref_lr,
-        T_max,
-        last_epoch=-1,
-        final_lr=0.
-    ):
+    def __init__(self,
+                 optimizer,
+                 warmup_steps: int,
+                 start_lr: float,
+                 ref_lr: float,
+                 T_max,
+                 last_epoch: int=-1,
+                 final_lr: float=0.):
+        """
+        WarmupCosineSchedule class to schedule learning rate.
+        """ 
         self.optimizer = optimizer
         self.start_lr = start_lr
         self.ref_lr = ref_lr
@@ -35,9 +36,11 @@ class WarmupCosineSchedule(object):
             new_lr = self.start_lr + progress * (self.ref_lr - self.start_lr)
         else:
             # -- progress after warmup
-            progress = float(self._step - self.warmup_steps) / float(max(1, self.T_max))
+            progress = float(self._step - self.warmup_steps) / float(
+                max(1, self.T_max))
             new_lr = max(self.final_lr,
-                         self.final_lr + (self.ref_lr - self.final_lr) * 0.5 * (1. + math.cos(math.pi * progress)))
+                         self.final_lr + (self.ref_lr - self.final_lr) * 0.5 * (
+                            1. + math.cos(math.pi * progress)))
 
         for group in self.optimizer.param_groups:
             group['lr'] = new_lr
@@ -46,13 +49,14 @@ class WarmupCosineSchedule(object):
 
 
 class CosineWDSchedule(object):
-    def __init__(
-        self,
-        optimizer,
-        ref_wd,
-        T_max,
-        final_wd=0.
-    ):
+    def __init__(self,
+                 optimizer,
+                 ref_wd,
+                 T_max,
+                 final_wd: float=0.):
+        """
+        CosineWDSchedule class to schedule weight decay.
+        """
         self.optimizer = optimizer
         self.ref_wd = ref_wd
         self.final_wd = final_wd
@@ -62,7 +66,8 @@ class CosineWDSchedule(object):
     def step(self):
         self._step += 1
         progress = self._step / self.T_max
-        new_wd = self.final_wd + (self.ref_wd - self.final_wd) * 0.5 * (1. + math.cos(math.pi * progress))
+        new_wd = self.final_wd + (self.ref_wd - self.final_wd) * 0.5 * (
+            1. + math.cos(math.pi * progress))
 
         if self.final_wd <= self.ref_wd:
             new_wd = max(self.final_wd, new_wd)

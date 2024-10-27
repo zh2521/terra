@@ -201,7 +201,7 @@ def create_binary_selection_mask(tokens: torch.Tensor,
 
 def retrieve_gene_emb(tokens: torch.Tensor,
                       seq_len_cell: int,
-                      has_cls: bool,
+                      n_special_tokens: int,
                       emb: torch.Tensor,
                       gene_type: Literal["cell", "neighborhood"],
                       gene_id: int,
@@ -216,8 +216,8 @@ def retrieve_gene_emb(tokens: torch.Tensor,
         A 2D tensor where each row represents a sequence of tokens.
     seq_len_cell:
         The length of cell tokens in the sequence.
-    has_cls:
-        If 'True', sequence contains a <cls> token at position 0.
+    n_special_tokens:
+        Number of special tokens.
     emb:
         A 3D tensor containg the embeddings of all genes.
     gene_type:
@@ -234,7 +234,7 @@ def retrieve_gene_emb(tokens: torch.Tensor,
     gene_mask = create_binary_selection_mask(
         tokens=tokens,
         seq_len_cell=seq_len_cell,
-        has_cls=has_cls,
+        n_special_tokens=n_special_tokens,
         selection_type=f"gene_{gene_type}",
         gene_id=gene_id)
 
@@ -276,9 +276,6 @@ def collect_adata_from_folder(load_folder_path: str) -> ad.AnnData:
             if file.endswith('.h5ad'):
                 file_path = os.path.join(subdir, file)
                 adata = sc.read_h5ad(file_path)
-                adata.obs['cell_id'] = [
-                    str(1 - file_idx) + '_' + row['batch'] + '_' + str(row_idx)
-                    for row_idx, (_, row) in enumerate(adata.obs.iterrows())] # temp, should be added in silver data 
                 adata_list.append(adata)
 
     concatenated_adata = ad.concat(adata_list, join='outer', index_unique=None)

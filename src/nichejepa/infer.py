@@ -19,8 +19,8 @@ from tqdm import tqdm
 from .datasets.cell_datasets import CellBaseDataset, make_cell_dataset
 from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import init_model, load_checkpoint
-from .masks.multigene import MaskCollator
 from .masks.block_masking  import BlockMaskCollator
+from .masks.random_masking import RandomMaskCollator
 from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -50,7 +50,8 @@ def infer(args: dict,
                             'cls_neighborhood',
                             'avg',
                             'weighted_avg']='avg',
-          agg_excluded_tokens: Optional[List]=None,
+          masked_tokens: Optional[List[int]]=None,
+          agg_excluded_tokens: Optional[List[int]]=None,
           feature_norm: bool=False
           ) -> ad.AnnData:
     """
@@ -72,6 +73,8 @@ def infer(args: dict,
     agg_type:
         Specifies how (aggregated) cell and neighborhood embeddings are computed
         from individual gene embeddings.
+    masked_tokens:
+        List of tokens to be masked by the attention mask during inference.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
     feature_norm:
@@ -90,6 +93,7 @@ def infer(args: dict,
         torch.cuda.set_device(device)
 
     # Load params from config file
+    gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
@@ -109,6 +113,7 @@ def infer(args: dict,
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
+    separate_cls = args['data']['separate_cls']
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -143,6 +148,7 @@ def infer(args: dict,
 
     # Initialize encoder, predictor, and target encoder
     encoder, predictor = init_model(
+        gt_type=gt_type,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -164,13 +170,13 @@ def infer(args: dict,
     if block_masking:
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
-            n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio = per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            separate_cls=separate_cls)
     else:
-        mask_collator = MaskCollator(
+        mask_collator = RandomMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
@@ -186,6 +192,7 @@ def infer(args: dict,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         tokenizer_type=tokenizer_type,
+        gt_type=gt_type,
         special_tokens=special_tokens,
         sampling_strategy=None)
 
@@ -222,22 +229,37 @@ def infer(args: dict,
     for itr, (udata, masks_enc, masks_pred, masks_attention) in tqdm(enumerate(loader)):
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
-        seg_label = udata[1].to(device, non_blocking=True)
-        counts = udata[2].to(device, non_blocking=True)
+        segments = udata[1].to(device, non_blocking=True)
+        positions = udata[2].to(device, non_blocking=True)
+        counts = udata[3].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
-        all_cell_ids.extend(udata[3])
+        all_cell_ids.extend(udata[-1])
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
-            emb_list = target_encoder.module.return_multi_layer_emb(
-                tokens,
-                counts,
-                seg_label,
-                masks_attention=masks_attention)
+            if masked_tokens is not None:
+                mask_indices = torch.isin(
+                    tokens,
+                    torch.tensor(masked_tokens, device=tokens.device)
+                    ).unsqueeze(1).unsqueeze(1)
+                masks_attention[mask_indices] = 0
+
+            if gt_type == 'rank':
+                emb_list = target_encoder.module.return_multi_layer_emb(
+                    tokens=tokens,
+                    segments=segments,
+                    positions=positions,
+                    masks_attention=masks_attention)
+            elif gt_type == 'counts':
+                emb_list = target_encoder.module.return_multi_layer_emb(
+                    tokens=tokens,
+                    segments=segments,
+                    counts=counts,
+                    masks_attention=masks_attention)
         
             if feature_norm:
                 # Normalize last layer like in training
@@ -341,6 +363,7 @@ def infer(args: dict,
     merged_obs = pd.merge(adata.obs,
                           adata_metadata.obs,
                           on='cell_id')
+
     adata.obs = merged_obs.set_index('cell_id')
    
     # Store cell and neighborhood embeddings of all observations across layers  

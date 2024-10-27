@@ -40,7 +40,7 @@ from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import (init_model,
                      init_opt,
                      load_checkpoint)
-from .masks.multigene import MaskCollator
+from .masks.random_masking import RandomMaskCollator
 from .masks.block_masking  import BlockMaskCollator
 from .masks.utils import apply_masks
 from .models.utils import repeat_interleave_batch
@@ -108,6 +108,7 @@ def train(args: dict,
     pin_memory = args['data']['pin_memory']
     separate_cls = args['data']['separate_cls']
 
+    gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
@@ -198,6 +199,7 @@ def train(args: dict,
 
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
+        gt_type=gt_type,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -215,14 +217,13 @@ def train(args: dict,
     if block_masking:
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
-            n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
             separate_cls=separate_cls)
     else:
-        mask_collator = MaskCollator(
+        mask_collator = RandomMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
@@ -238,6 +239,7 @@ def train(args: dict,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         tokenizer_type=tokenizer_type,
+        gt_type=gt_type,
         special_tokens=special_tokens,
         sampling_strategy=sampling_strategy)
 
@@ -247,6 +249,7 @@ def train(args: dict,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
         tokenizer_type=tokenizer_type,
+        gt_type=gt_type,
         special_tokens=special_tokens,
         sampling_strategy=sampling_strategy)
 
@@ -349,8 +352,9 @@ def train(args: dict,
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
-            seg_label = udata[1].to(device, non_blocking=True)
-            counts = udata[2].to(device, non_blocking=True)
+            segments = udata[1].to(device, non_blocking=True)
+            positions = udata[2].to(device, non_blocking=True)
+            counts = udata[3].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -365,10 +369,16 @@ def train(args: dict,
                     with torch.no_grad(): # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                        h = target_encoder(tokens=tokens,
-                                           segments=seg_label,
-                                           counts=counts,
-                                           masks_attention=masks_attention)
+                        if gt_type == 'rank':
+                            h = target_encoder(tokens=tokens,
+                                               segments=segments,
+                                               positions=positions,
+                                               masks_attention=masks_attention)
+                        elif gt_type == 'counts':
+                            h = target_encoder(tokens=tokens,
+                                               segments=segments,
+                                               counts=counts,
+                                               masks_attention=masks_attention)
 
                         # Normalize over feature dim
                         h = F.layer_norm(h, (h.size(-1),))
@@ -395,23 +405,36 @@ def train(args: dict,
                     # MIN_CONTEXT_SIZE, EMB_DIM) where MIN_CONTEXT_SIZE is
                     # minmum context size in the batch after removal of
                     # overlapping targets
-                    z = encoder(
-                        tokens=tokens,
-                        segments=seg_label,
-                        counts=counts,
-                        masks=masks_enc)
+                    if gt_type == 'rank':
+                        z = encoder(tokens=tokens,
+                                    segments=segments,
+                                    positions=positions,
+                                    masks=masks_enc)                       
+                    elif gt_type == 'counts':
+                        z = encoder(tokens=tokens,
+                                    segments=segments,
+                                    counts=counts,
+                                    masks=masks_enc)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
-                    z = predictor(
-                        tokens,
-                        z,
-                        seg_label,
-                        encoder.module.gene_embed,
-                        encoder.module.seg_embed,
-                        masks_enc,
-                        masks_pred) # output 
-                    return z
+                    if gt_type == 'rank':
+                        x = predictor(z=z,
+                                      segments=segments,
+                                      positions=positions,
+                                      masks_enc=masks_enc,
+                                      masks_pred=masks_pred,
+                                      enc_seg_embed=encoder.module.seg_embed,
+                                      enc_pos_embed=encoder.module.pos_embed)
+                    elif gt_type == 'counts':
+                        x = predictor(z=z,
+                                      segments=segments,
+                                      tokens=tokens,
+                                      masks_enc=masks_enc,
+                                      masks_pred=masks_pred,
+                                      enc_seg_embed=encoder.module.seg_embed,
+                                      enc_token_embed=encoder.module.token_embed)
+                    return x
 
                 def loss_fn(z, h):
                     loss = F.smooth_l1_loss(z, h)
@@ -422,8 +445,8 @@ def train(args: dict,
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
                     h = forward_target()
-                    z = forward_context()
-                    loss = loss_fn(z, h)
+                    x = forward_context()
+                    loss = loss_fn(x, h)
 
                 # Step 2: backward pass and step
                 if use_bfloat16:
