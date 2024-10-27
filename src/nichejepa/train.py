@@ -50,7 +50,7 @@ from .utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,
                             grad_logger)
-
+from .masks.utils import create_controlled_mask_context_target 
 
 _GLOBAL_SEED = 0
 
@@ -124,6 +124,10 @@ def train(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
+    if args['mask']['controlled_attention_pattern'] is not None:
+        controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
+    else:
+        controlled_attention_pattern = args['mask']['controlled_attention_pattern']
 
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
@@ -221,7 +225,8 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            separate_cls=separate_cls)
+            separate_cls=separate_cls,
+            controlled_attention_pattern=controlled_attention_pattern)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -358,6 +363,12 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
+            if args['mask']['controlled_attention_pattern'] is not None:
+                masks_attention_enc = create_controlled_mask_context_target(masks_attention, context_masks=masks_enc)
+                masks_attention_pred = create_controlled_mask_context_target(masks_attention, masks_pred, masks_enc)
+            else:
+                masks_attention_enc = None
+                masks_attention_pred = None
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -409,12 +420,14 @@ def train(args: dict,
                         z = encoder(tokens=tokens,
                                     segments=segments,
                                     positions=positions,
-                                    masks=masks_enc)                       
+                                    masks=masks_enc,
+                                    masks_attention=masks_attention_enc)                       
                     elif gt_type == 'counts':
                         z = encoder(tokens=tokens,
                                     segments=segments,
                                     counts=counts,
-                                    masks=masks_enc)
+                                    masks=masks_enc,
+                                    masks_attention=masks_attention_enc)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
@@ -425,7 +438,8 @@ def train(args: dict,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
-                                      enc_pos_embed=encoder.module.pos_embed)
+                                      enc_pos_embed=encoder.module.pos_embed,
+                                      masks_attention_pred=masks_attention_pred)
                     elif gt_type == 'counts':
                         x = predictor(z=z,
                                       segments=segments,
@@ -433,7 +447,8 @@ def train(args: dict,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
-                                      enc_token_embed=encoder.module.token_embed)
+                                      enc_token_embed=encoder.module.token_embed,
+                                      masks_attention_pred=masks_attention_pred)
                     return x
 
                 def loss_fn(z, h):

@@ -425,7 +425,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
                 List of N_MASKS tensors containing indices (within the sequence)
                 of tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
             masks_attention:
-                Tensor containing input for mask attention.
+                An attention tensor that controls how different tokens attend to
+                each other within a sequence.
             
             Returns
             -----------
@@ -459,10 +460,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             
             # Run forward prop
             for i, blk in enumerate(self.blocks):
-                if masks_attention is not None:
-                    x = blk(x, masks=masks_attention)
-                else:
-                    x = blk(x)
+                x = blk(x, masks=masks_attention)
             if self.norm is not None:
                 x = self.norm(x)
 
@@ -494,7 +492,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             List of N_MASKS tensors containing indices (within the sequence) of
             tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
         masks_attention:
-            Tensor containing input for mask attention.
+            An attention tensor that controls how different tokens attend to
+            each other within a sequence.
 
         Returns
         -----------
@@ -537,10 +536,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         n_blocks = len(self.blocks)
         emb_list = []
         for i, blk in enumerate(self.blocks):
-            if masks_attention is not None:
-               x = blk(x, masks=masks_attention)
-            else:
-               x = blk(x) 
+            x = blk(x, masks=masks_attention)
             if (i == (n_blocks - 1)) and (self.norm is not None):
                 x = self.norm(x)
             emb_list.append(x)
@@ -598,7 +594,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 List of N_MASKS tensors containing indices (within the sequence)
                 of tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
             masks_attention:
-                Tensor containing input for mask attention.
+                An attention tensor that controls how different tokens attend to
+                each other within a sequence.
 
             Returns
             -----------
@@ -652,10 +649,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             
             # Run forward prop
             for i, blk in enumerate(self.blocks):
-                if masks_attention is not None:
-                    x = blk(x, masks=masks_attention)
-                else:
-                    x = blk(x)
+                x = blk(x, masks=masks_attention)
             if self.norm is not None:
                 x = self.norm(x)
 
@@ -685,7 +679,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             List of N_MASKS tensors containing indices (within the sequence) of
             tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
         masks_attention:
-            Tensor containing input for mask attention 
+            An attention tensor that controls how different tokens attend to
+            each other within a sequence.
 
         Returns
         -----------
@@ -743,10 +738,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         n_blocks = len(self.blocks)
         emb_list = []
         for i, blk in enumerate(self.blocks):
-            if masks_attention is not None:
-               x = blk(x, masks=masks_attention)
-            else:
-               x = blk(x) 
+            x = blk(x, masks=masks_attention)
             if (i == (n_blocks - 1)) and (self.norm is not None):
                 x = self.norm(x)
             emb_list.append(x)
@@ -770,7 +762,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 enc_pos_embed: nn.Embedding,
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
-                masks_pred: Union[List[torch.Tensor], torch.Tensor]
+                masks_pred: Union[List[torch.Tensor], torch.Tensor],
+                masks_attention_pred: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
             Run predictor forward pass for a batch of input tokens.
@@ -798,7 +791,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
-
+            masks_attention_pred:
+                An attention tensor that controls how different tokens attend to
+                each other within a sequence.
             Returns
             -----------
             z:
@@ -869,7 +864,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
             # Run forward prop
             for blk in self.predictor_blocks:
-                z = blk(z)
+                z = blk(z, masks=masks_attention_pred)
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
@@ -899,6 +894,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
+                masks_attention_pred: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
             Run predictor forward pass for a batch of input tokens.
@@ -921,7 +917,9 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
-
+            masks_attention_pred:
+                An attention tensor that controls how different tokens attend to
+                each other within a sequence.
             Returns
             -----------
             z:
@@ -992,7 +990,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Run forward prop
             for blk in self.predictor_blocks:
-                z = blk(z)
+                z = blk(z, masks=masks_attention_pred)
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
