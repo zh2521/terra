@@ -5,8 +5,7 @@ import logging
 def create_params_from_YAML_wandb_config(YAML_file:str,
                                          logger: logging.RootLogger,
                                          sweep_config=None,
-                                         is_training: bool=True,
-                                         has_same_dimention: bool=True,
+                                         has_same_dimension: bool=True,
                                          update_from_sweep: bool=False
                                          ):
     """
@@ -24,10 +23,7 @@ def create_params_from_YAML_wandb_config(YAML_file:str,
     sweep_config:
         A configuration object (such as one from wandb) containing the
         parameters to update in `params` for dynamic change.
-    is_training:
-        Indicates if the model is in training mode (True) or evaluation mode
-        (False).
-    has_same_dimention:
+    has_same_dimension:
         Indicates if the pred_emb_dim and enc_emb_dim should be the same.
     update_from_sweep:
         Flag to determine whether to update parameters from the sweep_config
@@ -56,7 +52,7 @@ def create_params_from_YAML_wandb_config(YAML_file:str,
         params['meta']['pred_depth'] = int(sweep_config.enc_pred_depth % 10)
         params['meta']['enc_depth'] = int(sweep_config.enc_pred_depth // 10)
         params['meta']['enc_emb_dim'] = sweep_config.enc_emb_dim
-        if has_same_dimention:
+        if has_same_dimension:
             params['meta']['pred_emb_dim'] = sweep_config.enc_emb_dim
         params['meta']['top_layer'] = sweep_config.top_layer
         params['meta']['top_k'] = sweep_config.top_k

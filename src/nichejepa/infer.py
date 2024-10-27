@@ -50,7 +50,8 @@ def infer(args: dict,
                             'cls_neighborhood',
                             'avg',
                             'weighted_avg']='avg',
-          agg_excluded_tokens: Optional[List]=None,
+          masked_tokens: Optional[List[int]]=None,
+          agg_excluded_tokens: Optional[List[int]]=None,
           feature_norm: bool=False
           ) -> ad.AnnData:
     """
@@ -72,6 +73,8 @@ def infer(args: dict,
     agg_type:
         Specifies how (aggregated) cell and neighborhood embeddings are computed
         from individual gene embeddings.
+    masked_tokens:
+        List of tokens to be masked by the attention mask during inference.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
     feature_norm:
@@ -110,6 +113,7 @@ def infer(args: dict,
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
+    separate_cls = args['data']['separate_cls']
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -166,11 +170,11 @@ def infer(args: dict,
     if block_masking:
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
-            n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio = per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            separate_cls=separate_cls)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -236,6 +240,13 @@ def infer(args: dict,
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
+
+            if masked_tokens is not None:
+                mask_indices = torch.isin(
+                    tokens,
+                    torch.tensor(masked_tokens, device=tokens.device)
+                    ).unsqueeze(1).unsqueeze(1)
+                masks_attention[mask_indices] = 0
 
             if gt_type == 'rank':
                 emb_list = target_encoder.module.return_multi_layer_emb(
