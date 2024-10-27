@@ -1,11 +1,3 @@
-"""
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture.
-Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/masks/utils.py
-(05.06.2024).
-"""
-
 import torch
 
 

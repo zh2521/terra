@@ -20,7 +20,7 @@ from logging import getLogger
 logger = getLogger()
 
 
-def init_distributed(port=40112, rank_and_world_size=(None, None)):
+def init_distributed(port: int=40112, rank_and_world_size=(None, None)):
 
     if dist.is_available() and dist.is_initialized():
         return dist.get_world_size(), dist.get_rank()
@@ -34,7 +34,8 @@ def init_distributed(port=40112, rank_and_world_size=(None, None)):
             rank = int(os.environ['SLURM_PROCID'])
             os.environ['MASTER_ADDR'] = os.environ['HOSTNAME']
         except Exception:
-            logger.info('SLURM vars not set (distributed training not available)')
+            logger.info(
+                'SLURM vars not set (distributed training not available)')
             world_size, rank = 1, 0
             return world_size, rank
 
@@ -52,7 +53,6 @@ def init_distributed(port=40112, rank_and_world_size=(None, None)):
 
 
 class AllGather(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, x):
         if (
@@ -83,7 +83,6 @@ class AllGather(torch.autograd.Function):
 
 
 class AllReduceSum(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, x):
         if (
@@ -101,7 +100,6 @@ class AllReduceSum(torch.autograd.Function):
 
 
 class AllReduce(torch.autograd.Function):
-
     @staticmethod
     def forward(ctx, x):
         if (

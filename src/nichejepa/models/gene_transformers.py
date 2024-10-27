@@ -1,10 +1,13 @@
 """
+Gene transformers.
+
 Adapted from Assran, M. et al. Self-supervised learning from images with a
 Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf. Comput.
 Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transformer.py
 (05.06.2024).
 """
+
 
 import math
 from abc import ABC, abstractmethod
