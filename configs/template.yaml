@@ -5,7 +5,7 @@ data:
   tokenizer_type: 'cell_neighborhood' # 'cell_neighborhood', 'cell_graph'
   random_state: 0
   sample_size: 500
-  sample_subset: False
+  sample_subset: True
   split: 0.2
   stratify: False
   vocab_size: 1671 # from token dictionary ('/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/cell-neighborhood-tokenizer/mmb0-1b_smb1-1b_1p/token_dictionary.pkl')
@@ -18,7 +18,7 @@ data:
   pin_memory: True
   separate_cls: True
 meta:
-  gt_type: 'counts' # 'rank', 'counts'
+  gt_type: 'rank' # 'rank', 'counts'
   enc_depth: 3
   enc_emb_dim: 768
   pred_depth: 1
@@ -35,14 +35,14 @@ mask:
   context_mask_size: 1220 # this doesn't have meaning in block masking.
   target_mask_size: 10 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.5
-  #controlled_attention_pattern: 
+  controlled_attention_pattern: 
     # Similarly, for the columns, we have the same order, and a 1 indicates attention get masked  between those two parts.
     # 'Matrix', 'null'
-    #- [0, 1, 0, 1]  # cls_cell
-    #- [1, 0, 1, 0]  # cls_neighborhood
-    #- [0, 1, 0, 1]  # cell
-    #- [1, 0, 1, 0]  # neighborhood
-  controlled_attention_pattern: null
+    - [0, 1, 0, 1]  # cls_cell
+    - [1, 0, 1, 0]  # cls_neighborhood
+    - [0, 1, 0, 1]  # cell
+    - [1, 0, 1, 0]  # neighborhood
+  #controlled_attention_pattern: null
 optimization:
   warmup: 1
   epochs: 1
