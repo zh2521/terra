@@ -362,6 +362,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
             Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
+        self.n_max_special_tokens = 105
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str
@@ -630,7 +631,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
-            for segment in range(11, n_gene_segments + 10):
+            # for segment in range(11, n_gene_segments + 10):
+            for segment in range(self.n_max_special_tokens+1, n_gene_segments + self.n_max_special_tokens):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -674,7 +676,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Define segments
         seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
-            (np.array([10 if gene_token != 0 else 0 for gene_token in
+            # (np.array([10 if gene_token != 0 else 0 for gene_token in
+            (np.array([self.n_max_special_tokens if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
