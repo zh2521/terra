@@ -170,12 +170,6 @@ class CellBaseTokenizer(ABC):
         self.coding_miRNA_dict = dict(
             zip(self.coding_miRNA_ids, [True] * len(self.vocab)))
 
-        # Define special tokens
-        self.special_token_keys = ['batch_token',
-                                   'gene_panel_token',
-                                   'assay_token',
-                                   'species_token',
-                                   'tissue_token']      
 
     def tokenize_data(self,
                       input_directory: Path | str,
@@ -418,11 +412,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata = filter_poor_quality_cells(adata)
 
         print('Computing spatial neighborhood graph.')
-        # Compute spatial neighborhood graph with delaunay triangulation
-        sq.gr.spatial_neighbors(adata,
-                                coord_type='generic',
-                                spatial_key='spatial',
-                                delaunay=True)
+        adata = aggregate_neighbors(adata)
 
         print('Normalizing gene expression counts.')
         # Perform normalization of total counts per cell
@@ -488,8 +478,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         coding_miRNA_tokens_cell = np.array(
             [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
-        coding_miRNA_tokens_neighborhood = np.array(
-            [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
 
         # Prepare gene tokens for cell and neighborhood for this file
         adata_dict['gene_tokens_cell'] = []
@@ -536,10 +524,18 @@ class CellGraphTokenizer(CellBaseTokenizer):
             np.array([]) for i in range(len(adata))]
         adata_dict['seg_tokens_neighborhood'] = [
             np.array([]) for i in range(len(adata))]
+        
+        adata_dict['cell_degrees'] = []
+        
         # Loop through all cells to add neighbor cell gene tokens based on
         # position of cell compared to index cell. Gene tokens of cells that are
         # closer to the index cell will be added first.
         for i in range(len(adata)):
+
+            # Store cell degree
+            adata_dict['cell_degrees'].append(
+                int(adata.obsp['spatial_connectivities'][i].sum()))
+            
             # Get sorted indices of neighbor cells based on distance to index
             # cell
             row_start = adata.obsp['spatial_distances'].indptr[i]
@@ -698,9 +694,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 (self.model_input_size - len(example['gene_expr']))))
         
         # Retrieve special tokens
-        example['cls_cell_token'] = [self.token_dict['<cls_cell>']]
-        example['cls_neighborhood_token'] = [
-            self.token_dict['<cls_neighborhood>']]
+        example['cls'] = [self.token_dict[f'<cls_{i}>'] for i in range(example['cell_degrees'])]
+
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
         example['tissue_token'] = [example['tissue_token']]
