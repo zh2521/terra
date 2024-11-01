@@ -106,7 +106,6 @@ def train(args: dict,
     batch_size = args['data']['batch_size']
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
-    separate_cls = args['data']['separate_cls']
 
     gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth'] 
@@ -225,7 +224,6 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            separate_cls=separate_cls,
             controlled_attention_pattern=controlled_attention_pattern)
     else:
         mask_collator = RandomMaskCollator(
