@@ -468,8 +468,8 @@ def train(args: dict,
                                       masks_attention_pred=masks_attention_pred)
                     return x
 
-                def loss_fn(z, h):
-                    loss = F.smooth_l1_loss(z, h)
+                def loss_fn(x, h):
+                    loss = F.smooth_l1_loss(x, h)
                     loss = AllReduce.apply(loss)
                     return loss
 
