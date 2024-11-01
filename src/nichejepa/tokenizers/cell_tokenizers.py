@@ -364,9 +364,12 @@ class CellGraphTokenizer(CellBaseTokenizer):
             Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
+        self.n_max_special_tokens = 105
 
     def _tokenize_adata(self,
-                        adata_file_path: Path | str
+                        adata_file_path: Path | str,
+                        radius: Optional[float]=None,
+                        delaunay_radius_union: bool=False,
                         ) -> dict:
         """
         Tokenize cells from an '.h5ad' (anndata) file.
@@ -375,6 +378,13 @@ class CellGraphTokenizer(CellBaseTokenizer):
         ----------
         adata_file_path:
             Path to anndata file containing cells to be tokenized.
+        radius:
+            If specified, use `radius` to compute the neighborhood graph, else
+            use delaunay triangulation.
+        delaunay_radius_union:
+            If 'True', compute the neighborhood graph by delaunay triangulation
+            but exclude observations that are outside of the radius with size
+            `radius`.
 
         Returns
         ----------
@@ -414,11 +424,9 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata = filter_poor_quality_cells(adata)
 
         print('Computing spatial neighborhood graph.')
-        # Compute spatial neighborhood graph with delaunay triangulation
-        sq.gr.spatial_neighbors(adata,
-                                coord_type='generic',
-                                spatial_key='spatial',
-                                delaunay=True)
+        adata = aggregate_neighbors(adata,
+                                    radius=radius,
+                                    delaunay_radius_union=delaunay_radius_union)
 
         print('Normalizing gene expression counts.')
         # Perform normalization of total counts per cell
@@ -484,8 +492,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         coding_miRNA_tokens_cell = np.array(
             [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
-        coding_miRNA_tokens_neighborhood = np.array(
-            [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
 
         # Prepare gene tokens for cell and neighborhood for this file
         adata_dict['gene_tokens_cell'] = []
@@ -532,10 +538,18 @@ class CellGraphTokenizer(CellBaseTokenizer):
             np.array([]) for i in range(len(adata))]
         adata_dict['seg_tokens_neighborhood'] = [
             np.array([]) for i in range(len(adata))]
+        
+        adata_dict['cell_degrees'] = []
+        
         # Loop through all cells to add neighbor cell gene tokens based on
         # position of cell compared to index cell. Gene tokens of cells that are
         # closer to the index cell will be added first.
         for i in range(len(adata)):
+
+            # Store cell degree
+            adata_dict['cell_degrees'].append(
+                int(adata.obsp['spatial_connectivities'][i].sum()))
+            
             # Get sorted indices of neighbor cells based on distance to index
             # cell
             row_start = adata.obsp['spatial_distances'].indptr[i]
@@ -630,7 +644,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
-            for segment in range(11, n_gene_segments + 10):
+            # for segment in range(11, n_gene_segments + 10):
+            for segment in range(self.n_max_special_tokens+1, n_gene_segments + self.n_max_special_tokens):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -674,7 +689,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Define segments
         seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
-            (np.array([10 if gene_token != 0 else 0 for gene_token in
+            # (np.array([10 if gene_token != 0 else 0 for gene_token in
+            (np.array([self.n_max_special_tokens if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
@@ -694,9 +710,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 (self.model_input_size - len(example['gene_expr']))))
         
         # Retrieve special tokens
-        example['cls_cell_token'] = [self.token_dict['<cls_cell>']]
-        example['cls_neighborhood_token'] = [
-            self.token_dict['<cls_neighborhood>']]
+        example['cls'] = [self.token_dict[f'<cls_{i}>'] for i in range(example['cell_degrees'])]
+
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
         example['tissue_token'] = [example['tissue_token']]
