@@ -151,6 +151,14 @@ def train(args: dict,
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
 
+    # Get first cell segment
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
+
     # Create folder to store artifacts
     if not save_folder_path:
         artifact_folder_path = os.path.join(
@@ -206,6 +214,7 @@ def train(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
         enc_emb_dim=enc_emb_dim,
@@ -222,7 +231,9 @@ def train(args: dict,
             n_targets=n_targets,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
+            max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
+            max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
             controlled_attention_pattern=controlled_attention_pattern)
     else:
@@ -241,6 +252,8 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -251,6 +264,8 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -362,6 +377,8 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
             masks_controlled_attention = masks_controlled_attention.to(device, non_blocking=True)
+
+            # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
 
             if args['mask']['controlled_attention_pattern'] is not None:
                 if args['mask']['controlled_attention_type'] == 'enc':

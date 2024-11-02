@@ -212,40 +212,14 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
             valid_min_start + seq_len_cell:,
             valid_min_start: valid_min_start + seq_len_cell] = 0
 
-    # Temp Batch token only attends to itself
-    collated_masks_attention[
-            :,
-            :,
-            2,
-            0:2] = 0
-    collated_masks_attention[
-            :,
-            :,
-            2,
-            3] = 0
-    collated_masks_attention[
-            :,
-            :,
-            3,
-            0:3] = 0
-    collated_masks_attention[
-            :,
-            :,
-            2,
-            valid_min_start + seq_len_cell:] = 0
-    collated_masks_attention[
-            :,
-            :,
-            3,
-            valid_min_start: valid_min_start + seq_len_cell] = 0
-
+    # TODO TEMP BATCH TOKEN
     collated_masks_attention[
         :,
         :,
-        valid_min_start: valid_min_start + seq_len_cell,
-        3] = 0
+        2,
+        0:2] = 0
     collated_masks_attention[
         :,
         :,
-        valid_min_start + seq_len_cell:,
-        2] = 0
+        2,
+        3:] = 0

@@ -35,6 +35,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences.
+    max_special_tokens:
+        Maximum number of special tokens to determine first cell segment.
     n_special_tokens:
         Number of special tokens included in a token sequence.
     n_segments:
@@ -74,6 +76,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
     def __init__(self,
                  vocab_size: int,
                  seq_len: int,
+                 max_special_tokens: int,
                  n_special_tokens: int,
                  n_segments: int,
                  seg_learnable: bool=False,
@@ -94,6 +97,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  ):
         super().__init__()
         self.seq_len = seq_len
+        self.max_special_tokens = max_special_tokens
         self.n_special_tokens = n_special_tokens
         self.embed_dim = embed_dim
         self.num_heads = num_heads
@@ -104,19 +108,20 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                                         embed_dim,
                                         padding_idx=0)
 
-        # Initialize segment embeddings
+        # Initialize segment embeddings (include <pad> and special segments)
         self.seg_embed = nn.Embedding(
-            n_segments + 1 + 10, # include <pad> and reserved special segments
+            n_segments + 1 + self.max_special_tokens,
             embed_dim,
             padding_idx=0)
 
         if not seg_learnable:
-            # Prevent gradient updates and initialize with sincos embedding
+            # Prevent gradient updates and initialize with sincos embedding,
+            # including special segments
             self.seg_embed.weight.requires_grad = False
             seg_embed = get_1d_sincos_pos_embed(
                 embed_dim=embed_dim,
                 n_zero_pos=0,
-                n_sincos_pos=n_segments + 10) # reserved special token segments
+                n_sincos_pos=n_segments + self.max_special_tokens)
             self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
         # Define decaying drop path rate (higher drop rate in deeper blocks)
@@ -626,17 +631,11 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
             value_emb[zero_counts_mask] = zero_value_embed
             
-            # Assign special value embeddings to <cls> tokens
-            cls_value_embed = self.special_value_embed(
-                torch.tensor([2, 3], device=tokens.device)).to(value_emb.dtype)
-            value_emb[:, :2, :] = cls_value_embed
-
-            if self.n_special_tokens > 2:
-                # Assign special value embeddings to other special tokens
-                spt_value_embed = self.special_value_embed(
-                    counts[:, 2:self.n_special_tokens].int()).to(
-                        value_emb.dtype)
-                value_emb[:, 2:self.n_special_tokens, :] = spt_value_embed
+            # Assign special value embeddings to <cls> and other special tokens
+            sp_value_embed = self.special_value_embed(
+                counts[:, :self.n_special_tokens].int()).to(
+                    value_emb.dtype)
+            value_emb[:, :self.n_special_tokens, :] = sp_value_embed
 
             # Add token and segment embeddings to value embeddings
             x = token_emb + seg_emb + value_emb
@@ -719,11 +718,12 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         
         # Assign special value embeddings to <cls> tokens
         cls_value_embed = self.special_value_embed(
-            torch.tensor([2, 3], device=tokens.device)).to(value_emb.dtype)
-        value_emb[:, :2, :] = cls_value_embed
+            counts[:, :self.n_cls_tokens].int()).to(value_emb.dtype)
+        value_emb[:, :self.n_cls_tokens, :] = cls_value_embed
 
         # Assign zero value embeddings to other special tokens
-        value_emb[:, 2:self.n_special_tokens, :] = zero_value_embed
+        value_emb[
+            :, self.n_cls_tokens:self.n_special_tokens, :] = zero_value_embed
 
         # Add token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb

@@ -30,12 +30,9 @@ class BlockMaskCollator:
         The length of the token sequence representing the cell segment.
     seq_len_neighborhood:
         The length of the token sequence representing the neighborhood segments.
-    max_special_tokens:
-        Maximum number of special tokens to determine first segment
-        corresponding to a cell.
     n_special_tokens:
         Number of special tokens in each token sequence, including <cls> tokens.
-    max_cls_tokens:
+    n_cls_tokens:
         Number of <cls> tokens in each token sequence.
     per_block_mask_ratio:
         Ratio of elements to be masked in each block. A list with min and
@@ -48,18 +45,18 @@ class BlockMaskCollator:
                  n_targets: int,
                  seq_len_cell: int,
                  seq_len_neighborhood: int,
-                 max_special_tokens: int,
                  n_special_tokens: int,
-                 max_cls_tokens: int,
+                 n_contexts:int=5,
+                 n_cls_tokens: int=2,
                  per_block_mask_ratio: float=0.5,
                  controlled_attention_pattern: Optional[torch.Tensor]=None):
         self.n_targets = n_targets
+        self.n_contexts = n_contexts
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len_genes = self.seq_len_cell + self.seq_len_neighborhood
         self.n_special_tokens = n_special_tokens
-        self.max_special_tokens = max_special_tokens
-        self.max_cls_tokens = max_cls_tokens
+        self.n_cls_tokens = n_cls_tokens
         self.per_block_mask_ratio = per_block_mask_ratio
         self.controlled_attention_pattern = controlled_attention_pattern
 
@@ -130,11 +127,7 @@ class BlockMaskCollator:
             # Extract segments for the current block to determine which <cls>
             # are to be included
             # 10 is index cell segment, corresponding to <cls> token at index 0
-            block_segments = nz_ns_segments[start_idx: end_idx]
-            block_unique_segments = torch.unique(block_segments)
-            cls_tokens = [
-                seg - self.max_special_tokens for seg in
-                block_unique_segments.tolist()]
+            block_nz_ns_segments = nz_ns_segments[start_idx: end_idx]
             
             # Determine number of elements to mask
             block_size = len(block_nz_ns_indices)
@@ -145,13 +138,17 @@ class BlockMaskCollator:
                 # DON'T USE torch.rand as it could produce repeated indices
                 mask_indices = torch.randperm(block_size)[:num_to_mask]
                 masked_indices = block_nz_ns_indices[mask_indices].tolist()
+                masked_segments = block_nz_ns_segments[mask_indices].tolist()
+                masked_unique_segments = list(set(masked_segments))
+                cls_tokens = [
+                    seg - 10 for seg in masked_unique_segments.tolist()]
                 
                 # Set masked indices to 0 in the context mask
                 context_mask[masked_indices] = 0
 
                 # Add <cls> and special tokens to mask indices
                 masked_indices = cls_tokens + list(
-                    range(self.max_cls_tokens, self.n_special_tokens)
+                    range(self.n_cls_tokens, self.n_special_tokens)
                     ) + masked_indices
 
                 # Update minimum tokens target and append masked indices
@@ -166,14 +163,38 @@ class BlockMaskCollator:
         # keep_tokens_context, we avoid always discarding the last items of a
         # sequence
         # DON'T USE torch.rand as it could produce repeated indice
-        context_mask = torch.nonzero(context_mask).squeeze()
-        context_mask = context_mask[torch.randperm(len(context_mask))]
+        perm_idx = torch.randperm(len(context_mask))
+
+        context_nz_ns_indices = torch.nonzero(context_mask).squeeze()
+        nz_ns_context_length = len(context_nz_ns_indices)
+        context_nz_ns_indices = context_nz_ns_indices[perm_idx]
+        context_nz_ns_segments = segments[perm_idx]
+
+        context_block_length = nz_ns_context_length // self.n_contexts
+
+        for i in range(self.n_contexts):
+            start_idx = i * context_block_length
+            end_idx = min(
+                start_idx + context_block_length, nz_ns_context_length)
+
+            context_block_nz_ns_indices = context_nz_ns_indices[
+                start_idx:end_idx]
+            context_block_nz_ns_segments = context_nz_ns_segments[
+                start_idx: end_idx]
+
+            # Add <cls> and special tokens to mask indices
+            context_indices = cls_tokens + list(
+                range(self.n_cls_tokens, self.n_special_tokens)
+                ) + context_indices
+
+            context_masks.append(torch.tensor(context_indices))
+
         
         # Add special tokens to context
         context_mask = torch.cat(
             (torch.arange(self.n_special_tokens), context_mask))
 
-        context_masks = [context_mask]
+        context_masks = [context_indices]
 
         return target_masks, context_masks, keep_tokens_target
 

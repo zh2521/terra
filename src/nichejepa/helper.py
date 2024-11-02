@@ -122,6 +122,7 @@ def init_model(gt_type: Literal['rank', 'count'],
                device: str,
                vocab_size: int,
                seq_len: int,
+               max_special_tokens: int,
                n_special_tokens: int,
                n_segments: int,
                enc_emb_dim: int=768, 
@@ -145,6 +146,9 @@ def init_model(gt_type: Literal['rank', 'count'],
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences (w/o <cls> token).
+    max_special_tokens:
+    n_special_tokens:
+    n_segments:
     enc_emb_dim:
         Dimension of the encoder embedding.
     enc_depth:
@@ -159,8 +163,6 @@ def init_model(gt_type: Literal['rank', 'count'],
     seg_learnable:
         If 'True', segment embeddings are learnable, otherwise use fixed
         segment embeddings.
-    has_cls:
-        If 'True', sequences include a <cls> token at the start.
 
     Returns
     -----------
@@ -173,6 +175,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         encoder_type=gt_type,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
         pos_learnable=pos_learnable,
@@ -183,6 +186,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         predictor_type=gt_type,
         embed_dim=enc_emb_dim,
         seq_len=seq_len,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
         pos_learnable=pos_learnable,

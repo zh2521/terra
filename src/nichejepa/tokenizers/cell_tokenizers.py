@@ -154,6 +154,10 @@ class CellBaseTokenizer(ABC):
         with open(token_dictionary_file, 'rb') as f:
             self.token_dict = pickle.load(f)
 
+        self.max_cls_tokens = sum(1 for key in self.token_dict if "cls" in key)
+        self.max_special_tokens = self.max_cls_tokens + sum(
+            1 for key in self.token_dict if "spt" in key)
+
         # Load gene panel ID to gene panel dictionary
         logger.info('Loading gene panel ID to gene panel dictionary from '
                     f'{self.gene_panel_ID_to_gene_panel_dict_file}.')
@@ -364,7 +368,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
             Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
-        self.n_max_special_tokens = 105
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str,
@@ -545,7 +548,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # position of cell compared to index cell. Gene tokens of cells that are
         # closer to the index cell will be added first.
         for i in range(len(adata)):
-
             # Store cell degree
             adata_dict['cell_degrees'].append(
                 int(adata.obsp['spatial_connectivities'][i].sum()))
@@ -568,7 +570,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
                      adata_dict['gene_expr_cell'][k]))
                 adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['seg_tokens_neighborhood'][i],
-                     [j+11] * len(adata_dict['gene_tokens_cell'][k])))
+                     [j + self.max_special_tokens + 1] * len(
+                        adata_dict['gene_tokens_cell'][k])))
 
         # Add cell IDs for collecting metadata at inference time
         adata_dict['cell_id'] = adata.obs['cell_id'].values.tolist()
@@ -597,11 +600,12 @@ class CellGraphTokenizer(CellBaseTokenizer):
             self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
 
         # Store values with right embedding index for count tokenizer
+        # Leave space for <pad>, (optional) zero count embedding, and
+        # <cls> tokens
         spv_dict = {
             k: v for k, v in self.token_dict.items() if k.startswith('spv_')}
         spv_start_idx = min(spv_dict.values())
-        spv_idx_subtract = spv_start_idx - 4 # leave space for <cls> tokens
-
+        spv_idx_subtract = spv_start_idx - 2 - self.max_cls_tokens
         adata_dict['batch_value'] = [
             self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
         adata_dict['gene_panel_value'] = [self.token_dict[
@@ -644,8 +648,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
-            # for segment in range(11, n_gene_segments + 10):
-            for segment in range(self.n_max_special_tokens+1, n_gene_segments + self.n_max_special_tokens):
+            for segment in range(self.max_special_tokens + 1, n_gene_segments + self.max_special_tokens):
                 gene_tokens_neighborhood_segment = [
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
@@ -690,7 +693,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         seg_tokens_neighborhood_iter = iter(example['seg_tokens_neighborhood'])
         example['seg_tokens'] = np.concatenate(
             # (np.array([10 if gene_token != 0 else 0 for gene_token in
-            (np.array([self.n_max_special_tokens if gene_token != 0 else 0 for gene_token in
+            (np.array([self.max_special_tokens if gene_token != 0 else 0 for gene_token in
                        gene_tokens_cell]),
              [next(seg_tokens_neighborhood_iter) if gene_token != 0 else 0 for
               gene_token in gene_tokens_neighborhood])).astype(int)
@@ -710,7 +713,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 (self.model_input_size - len(example['gene_expr']))))
         
         # Retrieve special tokens
-        example['cls'] = [self.token_dict[f'<cls_{i}>'] for i in range(example['cell_degrees'])]
+        example['cls_tokens'] = [
+            self.token_dict[f'<cls_{i}>'] for i in range(example['cell_degrees'])]
+        example['cls_tokens'] += [0] * (
+            self.max_cls_tokens - len(example['cls_tokens']))    
 
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
@@ -747,7 +753,6 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             Keyword arguments for the initialization of the CellBaseTokenizer.
         """
         super().__init__(**base_tokenizer_kwargs)
-        self.n_max_special_tokens = 7
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str,
@@ -989,10 +994,11 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
 
         # Store values with right embedding index for count tokenizer
+        # Leave space for <pad>, <mask> and <cls> tokens
         spv_dict = {
             k: v for k, v in self.token_dict.items() if k.startswith('spv_')}
         spv_start_idx = min(spv_dict.values())
-        spv_idx_subtract = spv_start_idx - 4 # leave space for <cls> tokens
+        spv_idx_subtract = (spv_start_idx - 2 - self.max_cls_tokens)
 
         adata_dict['batch_value'] = [
             self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
@@ -1048,15 +1054,15 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Define segments (leave space for special token segments)
         example['seg_tokens'] = np.concatenate(
-            (np.array([self.n_max_special_tokens if gene_token != 0 else 0 for 
+            (np.array([self.max_special_tokens if gene_token != 0 else 0 for 
                        gene_token in gene_tokens_cell]),
-             np.array([self.n_max_special_tokens + 1 if gene_token != 0 else 0
+             np.array([self.max_special_tokens + 1 if gene_token != 0 else 0
                        for gene_token in gene_tokens_neighborhood])
                        )).astype(int)
         
         # Retrieve special tokens
-        example['cls'] = [self.token_dict['<cls_cell>'],
-                          self.token_dict['<cls_neighborhood>']]
+        example['cls_tokens'] = [self.token_dict['<cls_cell>'],
+                                 self.token_dict['<cls_neighborhood>']]
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
         example['tissue_token'] = [example['tissue_token']]
