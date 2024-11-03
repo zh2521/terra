@@ -110,7 +110,7 @@ class CellBaseTokenizer(ABC):
             'parallel', 'sequential']]='sequential',
         chunk_size: int=512,
         model_input_size: int=2048,
-        include_zero_expr_genes: bool=True,
+        include_zero_expr_genes: bool=False,
         norm_factor: Optional[Literal['read_depth', 'cell_area']]=None,
         norm_method: Optional[Literal['analytic_pearson_residuals',
                                       'mean',

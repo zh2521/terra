@@ -380,11 +380,14 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
-            masks_controlled_attention = masks_controlled_attention.to(device, non_blocking=True)
+
+            print(masks_enc)
+            print(masks_pred)
 
             # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
 
             if args['mask']['controlled_attention_pattern'] is not None:
+                masks_controlled_attention = masks_controlled_attention.to(device, non_blocking=True)
                 if args['mask']['controlled_attention_type'] == 'enc':
                     masks_attention_enc = create_controlled_mask_context_target(
                         masks_controlled_attention,

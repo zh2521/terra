@@ -137,12 +137,24 @@ class CellBaseDataset(Dataset):
                 tokens = self.dataset[item]["assay_token"] + tokens
             gene_expr = self.dataset[item]["assay_value"] + gene_expr
             
+        n_cls_tokens = len(self.dataset[item]["cls_tokens"])
+        n_nz_cls_tokens = sum(
+            1 for token in self.dataset[item]["cls_tokens"] if token != 0)
+        n_zero_cls_tokens = n_cls_tokens - n_nz_cls_tokens
         tokens = self.dataset[item]["cls_tokens"] + tokens
         gene_expr = list(
-            range(2, 2 + len(self.dataset[item]["cls_tokens"]))) + gene_expr
+            range(2, 2 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + gene_expr
+
+        segments = list(
+            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
+            range(1 + n_nz_cls_tokens,  1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + segments
+        positions = list(
+            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
+            range(1 + n_nz_cls_tokens, 1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + positions
+ 
                 
-        segments = list(range(1, self.n_special_tokens + 1)) + segments
-        positions = list(range(1, self.n_special_tokens + 1)) + positions
+        #segments = list(range(1, self.n_special_tokens + 1)) + segments
+        #positions = list(range(1, self.n_special_tokens + 1)) + positions
 
         return tokens, segments, positions, gene_expr
 
@@ -271,14 +283,15 @@ class CellBaseDataset(Dataset):
                     tokens=segment_gene_tokens,
                     counts=segment_gene_expr,
                     n_nonzero_tokens=segment_n_nonzero_tokens,
-                    size=segment_seq_len)            
+                    size=segment_seq_len)       
                     
             return segment_gene_tokens, segment_gene_expr
 
 
 class CellGraphDataset(CellBaseDataset):
     def __init__(self,
-                 **base_dataset_kwargs
+                 tokens_per_cell: int=64,
+                 **base_dataset_kwargs,
                  ):
         """
         Torch CellGraphDataset class.
@@ -289,6 +302,7 @@ class CellGraphDataset(CellBaseDataset):
             Keyword arguments for the initialization of the CellBaseDataset.
         """
         super().__init__(**base_dataset_kwargs)
+        self.tokens_per_cell = tokens_per_cell
          
     def __getitem__(self,
                     item: int
@@ -311,7 +325,7 @@ class CellGraphDataset(CellBaseDataset):
                 segment_gene_tokens, segment_gene_expr = self._get_gene_tokens_and_counts_for_segment(
                     item=item,
                     segment=segment, # neighbor cell segs
-                    segment_seq_len=self.seq_len_neighborhood)
+                    segment_seq_len=self.tokens_per_cell)
                 gene_tokens_neighborhood.extend(segment_gene_tokens)
                 gene_expr_neighborhood.extend(segment_gene_expr)
                 segments.extend([segment if gene_token != 0 else 0 for
@@ -321,6 +335,17 @@ class CellGraphDataset(CellBaseDataset):
         positions = [position if tokens[i] != 0 else 0 for i, position in 
                      enumerate(positions)]
         gene_expr = gene_expr_cell + gene_expr_neighborhood
+
+        if len(tokens) > (self.seq_len_cell + self.seq_len_neighborhood):
+            tokens = tokens[:self.seq_len_cell + self.seq_len_neighborhood]
+            segments = segments[:self.seq_len_cell + self.seq_len_neighborhood]
+            positions = positions[:self.seq_len_cell + self.seq_len_neighborhood]
+            gene_expr = gene_expr[:self.seq_len_cell + self.seq_len_neighborhood]
+        elif len(tokens) < (self.seq_len_cell + self.seq_len_neighborhood):
+            tokens += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(tokens))
+            segments += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(segments))
+            positions += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(positions))
+            gene_expr += [0.0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(gene_expr))
 
         # Add special tokens
         tokens, segments, positions, gene_expr = self._add_special_tokens_to_seq(
@@ -334,10 +359,6 @@ class CellGraphDataset(CellBaseDataset):
         segments = torch.tensor(segments)
         positions = torch.tensor(positions)
         gene_expr = torch.tensor(gene_expr)
-
-        print(tokens, "------------")
-        print(segments, "------------")
-        print(tokens, "------------")
 
         return tokens, segments, positions, gene_expr, self.dataset[item]["cell_id"]
 

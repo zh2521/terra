@@ -518,9 +518,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         # Replace special tokens (except <cls> tokens) with pad tokens for
         # inference
         if self.n_special_tokens > 2:
-            tokens[:, 2:self.n_special_tokens] = 0
-            segments[:, 2:self.n_special_tokens] = 0
-            positions[:, 2:self.n_special_tokens] = 0
+            tokens[:, self.max_cls_tokens:self.n_special_tokens] = 0
+            segments[:, self.max_cls_tokens:self.n_special_tokens] = 0
+            positions[:, self.max_cls_tokens:self.n_special_tokens] = 0
 
         # Get token embeddings for sequence of tokens
         token_emb = self.token_embed(tokens)
@@ -559,20 +559,19 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     """
     def __init__(self,
                  n_value_bins: int=100,
-                 n_special_values: int=10,
                  **base_encoder_kwargs,
                  ):
         super().__init__(**base_encoder_kwargs)
         self.n_value_bins = n_value_bins
-        self.n_special_values = n_special_values
 
         # Initialize value embeddings and value embedding weight projection
         # layer
         self.value_embed = nn.Embedding(self.n_value_bins,
                                         self.embed_dim)
-        self.special_value_embed = nn.Embedding(self.n_special_values,
-                                                self.embed_dim,
-                                                padding_idx=0)
+        self.special_value_embed = nn.Embedding(
+            2 + self.max_special_tokens, # include <pad> and zero expression
+            self.embed_dim,
+            padding_idx=0)
         self.value_emb_weights_projection = ValueEmbWeightsProjection(
             dim=self.n_value_bins)
 
