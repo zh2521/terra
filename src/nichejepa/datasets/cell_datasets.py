@@ -17,6 +17,8 @@ class CellBaseDataset(Dataset):
                  tokenizer_type: Literal['cell_neighborhood', 'cell_graph'],
                  gt_type: Literal['rank', 'counts'],
                  special_tokens: List=[
+                    'cls_cell',
+                    'cls_neighborhood',
                     'assay',
                     'species',
                     'tissue',
@@ -55,13 +57,6 @@ class CellBaseDataset(Dataset):
         """
         if gt_type not in ['rank', 'counts']:
             raise ValueError(f'Invalid "gt_type": {gt_type}.')
-
-        # Add <cls> tokens to special tokens
-        if tokenizer_type == 'cell_neighborhood':
-            special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
-        elif tokenizer_type == 'cell_graph':
-            special_tokens = [
-                f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
 
         self.dataset = dataset
         self.len = len(self.dataset)
@@ -148,9 +143,6 @@ class CellBaseDataset(Dataset):
                 
         segments = list(range(1, self.n_special_tokens + 1)) + segments
         positions = list(range(1, self.n_special_tokens + 1)) + positions
-
-        print(tokens)
-        print(segments)
 
         return tokens, segments, positions, gene_expr
 

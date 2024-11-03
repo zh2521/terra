@@ -128,9 +128,28 @@ def infer(args: dict,
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
     
+    # Define tokenizer-specific params
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
+        special_tokens = [
+            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
+
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
+
+    # Define tokenizer-specific params
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
@@ -155,6 +174,8 @@ def infer(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
         enc_emb_dim=enc_emb_dim,
@@ -175,7 +196,9 @@ def infer(args: dict,
             n_targets=n_targets,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
+            max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
+            max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio = per_block_mask_ratio,
             controlled_attention_pattern = controlled_attention_pattern)
     else:
@@ -194,6 +217,8 @@ def infer(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,

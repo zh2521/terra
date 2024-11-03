@@ -147,17 +147,20 @@ def train(args: dict,
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
 
-    # Get token sequence length and number of special tokens
-    n_special_tokens = len(special_tokens)
-    seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
-
-    # Get first cell segment
+    # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
         max_special_tokens = 7
         max_cls_tokens = 2
+        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
     elif tokenizer_type == 'cell_graph':
         max_special_tokens = 105
         max_cls_tokens = 100
+        special_tokens = [
+            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
+
+    # Get token sequence length and number of special tokens
+    n_special_tokens = len(special_tokens)
+    seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
 
     # Create folder to store artifacts
     if not save_folder_path:
@@ -214,6 +217,7 @@ def train(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_cls_tokens=max_cls_tokens,
         max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,

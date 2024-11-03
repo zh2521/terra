@@ -35,6 +35,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences.
+    max_cls_tokens:
     max_special_tokens:
         Maximum number of special tokens to determine first cell segment.
     n_special_tokens:
@@ -76,6 +77,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
     def __init__(self,
                  vocab_size: int,
                  seq_len: int,
+                 max_cls_tokens: int,
                  max_special_tokens: int,
                  n_special_tokens: int,
                  n_segments: int,
@@ -97,6 +99,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  ):
         super().__init__()
         self.seq_len = seq_len
+        self.max_cls_tokens = max_cls_tokens
         self.max_special_tokens = max_special_tokens
         self.n_special_tokens = n_special_tokens
         self.embed_dim = embed_dim
@@ -718,12 +721,12 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         
         # Assign special value embeddings to <cls> tokens
         cls_value_embed = self.special_value_embed(
-            counts[:, :self.n_cls_tokens].int()).to(value_emb.dtype)
-        value_emb[:, :self.n_cls_tokens, :] = cls_value_embed
+            counts[:, :self.max_cls_tokens].int()).to(value_emb.dtype)
+        value_emb[:, :self.max_cls_tokens, :] = cls_value_embed
 
         # Assign zero value embeddings to other special tokens
         value_emb[
-            :, self.n_cls_tokens:self.n_special_tokens, :] = zero_value_embed
+            :, self.max_cls_tokens:self.n_special_tokens, :] = zero_value_embed
 
         # Add token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
