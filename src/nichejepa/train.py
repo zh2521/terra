@@ -381,8 +381,17 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
-            print(masks_enc)
-            print(masks_pred)
+            """
+            print(torch.count_nonzero(tokens[0]))
+            if masks_enc[0].shape[1] < 3:
+                print("CONTEXT")
+                print(masks_enc[0].shape)
+                print(masks_enc)
+            if masks_pred[0].shape[1] < 3:
+                print("TARGET")
+                print(masks_pred[0].shape)
+                print(masks_pred)
+            """ 
 
             # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
 

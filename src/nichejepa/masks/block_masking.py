@@ -103,9 +103,11 @@ class BlockMaskCollator:
             mask_ratio = self.per_block_mask_ratio
 
         # Get non-zero indices and segments excluding special tokens
-        nz_ns_indices = torch.nonzero(tokens).squeeze()[self.n_special_tokens:]
+        ns_tokens = tokens[self.n_special_tokens:]
+        nz_ns_indices = torch.nonzero(ns_tokens).squeeze()
         total_nz_ns = len(nz_ns_indices)
-        nz_ns_segments = segments[segments != 0][self.n_special_tokens:]
+        ns_segments = segments[self.n_special_tokens:]
+        nz_ns_segments = ns_segments[ns_segments != 0]
     
         # Initialize masks
         target_masks = []
@@ -129,7 +131,6 @@ class BlockMaskCollator:
 
             # Extract segments for the current block to determine which <cls>
             # are to be included
-            # 10 is index cell segment, corresponding to <cls> token at index 0
             block_segments = nz_ns_segments[start_idx: end_idx]
             block_unique_segments = torch.unique(block_segments)
             cls_tokens = [

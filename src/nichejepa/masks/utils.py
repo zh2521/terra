@@ -123,7 +123,9 @@ def create_controlled_mask_context_target(
 def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
                               collated_masks_attention: torch.Tensor, 
                               seq_len_cell: int,
-                              valid_min_start: int):
+                              valid_min_start: int,
+                              max_cls_tokens,
+                              max_special_tokens):
     """
     Configures attention masks based on the controlled attention pattern.
 
@@ -147,25 +149,25 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
     valid_min_start:
         The starting index of valid tokens for masking, excluding special
         tokens, within the attention matrix.
+    max_cls_tokens:
+    max_special_tokens:
     """
-    # <cls_cell> token does not attend to <cls_neighborhood> token
+    # <cls> tokens do not attend to other <cls> tokens
     if controlled_attention_pattern[0][1]:
-        collated_masks_attention[
-            :,
-            :,
-            0,
-            1] = 0
-    
-    # <cls_cell> token does not attend to neighborhood gene tokens
-    if controlled_attention_pattern[0][3]:
-        collated_masks_attention[
-            :,
-            :,
-            0,
-            valid_min_start + seq_len_cell:] = 0
+        for i in range(max_cls_tokens):
+            collated_masks_attention[
+                :,
+                :,
+                i,
+                :i] = 0
+            collated_masks_attention[
+                :,
+                :,
+                i,
+                i+1:max_cls_tokens] = 0
     
     # <cls_neighborhood> token does not attend to <cls_cell> token
-    if controlled_attention_pattern[1][0]:
+    if controlled_attention_pattern[1][1]:
         collated_masks_attention[
             :,
             :,
@@ -212,11 +214,11 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
             valid_min_start + seq_len_cell:,
             valid_min_start: valid_min_start + seq_len_cell] = 0
 
-    # TODO TEMP BATCH TOKEN
+    # Special tokens (not <cls>)
     collated_masks_attention[
         :,
         :,
-        2,
+        max_cls_tokens:max_special_tokens,
         0:2] = 0
     collated_masks_attention[
         :,
