@@ -123,9 +123,9 @@ def create_controlled_mask_context_target(
 def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
                               collated_masks_attention: torch.Tensor, 
                               seq_len_cell: int,
-                              valid_min_start: int,
-                              max_cls_tokens,
-                              max_special_tokens):
+                              n_special_tokens: int,
+                              max_cls_tokens: int,
+                              ):
     """
     Configures attention masks based on the controlled attention pattern.
 
@@ -146,13 +146,12 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
         will be updated based on the pattern.
     seq_len_cell:
         The sequence length associated with the `cell` segment.
-    valid_min_start:
+    n_special_tokens:
         The starting index of valid tokens for masking, excluding special
         tokens, within the attention matrix.
     max_cls_tokens:
-    max_special_tokens:
     """
-    # <cls> tokens do not attend to other <cls> tokens
+    # <cls> tokens do not attent to other <cls> tokens
     if controlled_attention_pattern[0][1]:
         for i in range(max_cls_tokens):
             collated_masks_attention[
@@ -165,63 +164,59 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
                 :,
                 i,
                 i+1:max_cls_tokens] = 0
-    
-    # <cls_neighborhood> token does not attend to <cls_cell> token
-    if controlled_attention_pattern[1][1]:
-        collated_masks_attention[
-            :,
-            :,
-            1,
-            0] = 0
-    
-    # <cls_neighborhood> token does not attend to cell gene tokens
-    if controlled_attention_pattern[1][2]:
-        collated_masks_attention[
-            :,
-            :,
-            1,
-            valid_min_start: valid_min_start + seq_len_cell] = 0
-    
-    # Cell gene tokens do not attend to <cls_neighborhood> token
-    if controlled_attention_pattern[2][1]:
-        collated_masks_attention[
-            :,
-            :,
-            valid_min_start: valid_min_start + seq_len_cell,
-            1] = 0
-    
-    # Cell gene tokens do not attend to neighborhood gene tokens
-    if controlled_attention_pattern[2][3]:
-        collated_masks_attention[
-            :,
-            :,
-            valid_min_start: valid_min_start + seq_len_cell,
-            valid_min_start + seq_len_cell:] = 0
-    
-    # Neighborhood gene tokens do not attend to <cls_cell> token
-    if controlled_attention_pattern[3][0]:
-        collated_masks_attention[
-            :,
-            :,
-            valid_min_start + seq_len_cell:,
-            0] = 0
-    
-    # Neighborhood gene tokens do not attend to cell gene tokens
-    if controlled_attention_pattern[3][2]:
-        collated_masks_attention[
-            :,
-            :,
-            valid_min_start + seq_len_cell:,
-            valid_min_start: valid_min_start + seq_len_cell] = 0
 
-    # Special tokens (not <cls>)
+    # <cls> tokens do not attent to other gene tokens
+    if controlled_attention_pattern[0][3]:
+        for i in range(max_cls_tokens):
+            if i != 0:
+                collated_masks_attention[
+                    :,
+                    :,
+                    i,
+                    n_special_tokens: n_special_tokens + (i * seq_len_cell)] = 0          
+            collated_masks_attention[
+                :,
+                :,
+                i,
+                n_special_tokens + ((i + 1) * seq_len_cell):] = 0
+      
+    # Gene tokens do not attent to other <cls> tokens
+    if controlled_attention_pattern[1][1]:
+        for i in range(max_cls_tokens):
+            collated_masks_attention[
+                :,
+                :,
+                n_special_tokens + (i * seq_len_cell): n_special_tokens + ((i + 1) * seq_len_cell),
+                :i] = 0
+            collated_masks_attention[
+                :,
+                :,
+                n_special_tokens + (i * seq_len_cell): n_special_tokens + ((i + 1) * seq_len_cell),
+                i+1:max_cls_tokens] = 0
+
+    # Gene tokens do not attent to other gene tokens
+    if controlled_attention_pattern[1][3]:
+        for i in range(max_cls_tokens):
+            if i != 0:
+                collated_masks_attention[
+                    :,
+                    :,
+                    n_special_tokens + (i * seq_len_cell): n_special_tokens + ((i + 1) * seq_len_cell),
+                    n_special_tokens: n_special_tokens + (i * seq_len_cell)] = 0                   
+            collated_masks_attention[
+                :,
+                :,
+                n_special_tokens + (i * seq_len_cell): n_special_tokens + ((i + 1) * seq_len_cell),
+                n_special_tokens + ((i + 1) * seq_len_cell):] = 0    
+
+    # Special tokens do not attent to other tokens
     collated_masks_attention[
         :,
         :,
-        max_cls_tokens:max_special_tokens,
-        0:2] = 0
+        max_cls_tokens:n_special_tokens,
+        :max_cls_tokens] = 0
     collated_masks_attention[
         :,
         :,
-        2,
-        3:] = 0
+        max_cls_tokens:n_special_tokens,
+        max_cls_tokens:n_special_tokens:] = 0

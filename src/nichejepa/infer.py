@@ -261,7 +261,9 @@ def infer(args: dict,
         positions = udata[2].to(device, non_blocking=True)
         counts = udata[3].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
-        masks_controlled_attention = masks_controlled_attention.to(device, non_blocking=True)
+
+        if args['mask']['controlled_attention_pattern'] is not None:
+            masks_controlled_attention = masks_controlled_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
         all_cell_ids.extend(udata[-1])
@@ -301,14 +303,24 @@ def infer(args: dict,
             if agg_type == 'cls':
                 cell_mask = create_binary_selection_mask(
                     tokens,
-                    selection_type='cls_cell',
+                    selection_type='cls_0',
                     seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
-                neighborhood_mask = create_binary_selection_mask(
-                    tokens,
-                    selection_type='cls_neighborhood',
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
+                    n_special_tokens=n_special_tokens,
+                    max_cls_tokens=max_cls_tokens)
+                if tokenizer_type == 'cell_neighborhood':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type='cls_1',
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)
+                elif tokenizer_type == 'cell_graph':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type='cls_all',
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)
 
                 cell_emb = compute_mean_unmasked_emb(emb,
                                                      cell_mask)

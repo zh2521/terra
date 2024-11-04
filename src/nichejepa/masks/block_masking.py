@@ -266,7 +266,9 @@ class BlockMaskCollator:
                     self.controlled_attention_pattern,
                     collated_masks_controlled_attention,
                     self.seq_len_cell,
-                    self.n_special_tokens)
+                    self.n_special_tokens,
+                    self.max_cls_tokens,
+                    )
         else:
             collated_masks_controlled_attention = None
                

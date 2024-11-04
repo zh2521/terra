@@ -290,7 +290,6 @@ class CellBaseDataset(Dataset):
 
 class CellGraphDataset(CellBaseDataset):
     def __init__(self,
-                 tokens_per_cell: int=64,
                  **base_dataset_kwargs,
                  ):
         """
@@ -302,7 +301,6 @@ class CellGraphDataset(CellBaseDataset):
             Keyword arguments for the initialization of the CellBaseDataset.
         """
         super().__init__(**base_dataset_kwargs)
-        self.tokens_per_cell = tokens_per_cell
          
     def __getitem__(self,
                     item: int
@@ -325,7 +323,7 @@ class CellGraphDataset(CellBaseDataset):
                 segment_gene_tokens, segment_gene_expr = self._get_gene_tokens_and_counts_for_segment(
                     item=item,
                     segment=segment, # neighbor cell segs
-                    segment_seq_len=self.tokens_per_cell)
+                    segment_seq_len=self.seq_len_cell)
                 gene_tokens_neighborhood.extend(segment_gene_tokens)
                 gene_expr_neighborhood.extend(segment_gene_expr)
                 segments.extend([segment if gene_token != 0 else 0 for
