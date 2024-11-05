@@ -219,4 +219,4 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
         :,
         :,
         max_cls_tokens:n_special_tokens,
-        max_cls_tokens:n_special_tokens:] = 0
+        n_special_tokens:] = 0

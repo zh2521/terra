@@ -391,7 +391,7 @@ def train(args: dict,
                 print("TARGET")
                 print(masks_pred[0].shape)
                 print(masks_pred)
-            """ 
+            """
 
             # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
 
