@@ -111,6 +111,8 @@ class CellBaseTokenizer(ABC):
         chunk_size: int=512,
         model_input_size: int=2048,
         include_zero_expr_genes: bool=False,
+        radius: Optional[float]=None,
+        delaunay_radius_union: bool=False,
         norm_factor: Optional[Literal['read_depth', 'cell_area']]=None,
         norm_method: Optional[Literal['analytic_pearson_residuals',
                                       'mean',
@@ -130,12 +132,27 @@ class CellBaseTokenizer(ABC):
         ):
         """
         CellBaseTokenizer class.
+
+        Parameters
+        ----------
+        radius:
+            If specified, use `radius` to compute the neighborhood graph, else
+            use delaunay triangulation.
+        delaunay_radius_union:
+            If 'True', compute the neighborhood graph by delaunay triangulation
+            but exclude observations that are outside of the radius with size
+            `radius`.
+
+        Returns
+        ----------
         """
         self.nproc = nproc
         self.processing_mode = processing_mode
         self.chunk_size = chunk_size
         self.model_input_size = model_input_size
         self.include_zero_expr_genes = include_zero_expr_genes
+        self.radius = radius
+        self.delaunay_radius_union = delaunay_radius_union
         self.norm_factor = norm_factor
         self.norm_method = norm_method
         self.cell_gene_means_file = cell_gene_means_file
@@ -371,8 +388,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str,
-                        radius: Optional[float]=None,
-                        delaunay_radius_union: bool=False,
                         ) -> dict:
         """
         Tokenize cells from an '.h5ad' (anndata) file.
@@ -381,13 +396,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
         ----------
         adata_file_path:
             Path to anndata file containing cells to be tokenized.
-        radius:
-            If specified, use `radius` to compute the neighborhood graph, else
-            use delaunay triangulation.
-        delaunay_radius_union:
-            If 'True', compute the neighborhood graph by delaunay triangulation
-            but exclude observations that are outside of the radius with size
-            `radius`.
 
         Returns
         ----------
@@ -427,9 +435,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata = filter_poor_quality_cells(adata)
 
         print('Computing spatial neighborhood graph.')
-        adata = aggregate_neighbors(adata,
-                                    radius=radius,
-                                    delaunay_radius_union=delaunay_radius_union)
+        adata = aggregate_neighbors(
+            adata,
+            radius=self.radius,
+            delaunay_radius_union=self.delaunay_radius_union)
 
         print('Normalizing gene expression counts.')
         # Perform normalization of total counts per cell
@@ -756,8 +765,6 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
     def _tokenize_adata(self,
                         adata_file_path: Path | str,
-                        radius: Optional[float]=None,
-                        delaunay_radius_union: bool=False,
                         ) -> dict:
         """
         Tokenize cells from an '.h5ad' (anndata) file.
@@ -766,13 +773,6 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         ----------
         adata_file_path:
             Path to anndata file containing cells to be tokenized.
-        radius:
-            If specified, use `radius` to compute the neighborhood graph, else
-            use delaunay triangulation.
-        delaunay_radius_union:
-            If 'True', compute the neighborhood graph by delaunay triangulation
-            but exclude observations that are outside of the radius with size
-            `radius`.
 
         Returns
         ----------
@@ -810,9 +810,10 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         print('Computing spatial neighborhood graph and aggregating counts.')
         # Aggregate neighborhood cell gene expression
-        adata = aggregate_neighbors(adata,
-                                    radius=radius,
-                                    delaunay_radius_union=delaunay_radius_union)
+        adata = aggregate_neighbors(
+            adata,
+            radius=self.radius,
+            delaunay_radius_union=self.delaunay_radius_union)
 
         print('Normalizing gene expression counts.')
         # Perform normalization of total counts per cell

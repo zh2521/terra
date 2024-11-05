@@ -209,6 +209,7 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
                 n_special_tokens + (i * seq_len_cell): n_special_tokens + ((i + 1) * seq_len_cell),
                 n_special_tokens + ((i + 1) * seq_len_cell):] = 0    
 
+    """
     # Special tokens do not attent to other tokens
     collated_masks_attention[
         :,
@@ -220,3 +221,4 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
         :,
         max_cls_tokens:n_special_tokens,
         n_special_tokens:] = 0
+    """
