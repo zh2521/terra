@@ -256,7 +256,7 @@ class BlockMaskCollator:
 
         # Apply controlled attention
         if self.controlled_attention_pattern is not None:
-            collated_masks_controlled_attention = collated_masks_attention.expand(
+            collated_masks_attention = collated_masks_attention.expand(
                 collated_masks_attention.shape[0],
                 1,
                 collated_masks_attention.shape[-1],
@@ -264,12 +264,10 @@ class BlockMaskCollator:
             if torch.sum(self.controlled_attention_pattern) != 0:
                 configure_attention_masks(
                     self.controlled_attention_pattern,
-                    collated_masks_controlled_attention,
+                    collated_masks_attention,
                     self.seq_len_cell,
                     self.n_special_tokens,
                     self.max_cls_tokens,
                     )
-        else:
-            collated_masks_controlled_attention = None
                
-        return collated_batch, collated_masks_context, collated_masks_target, collated_masks_attention, collated_masks_controlled_attention
+        return collated_batch, collated_masks_context, collated_masks_target, collated_masks_attention
