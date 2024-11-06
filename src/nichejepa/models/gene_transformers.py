@@ -616,10 +616,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 if not isinstance(masks, list):
                     masks = [masks]
 
-            # Get embeddings for sequence of tokens
+            # Get embeddings for sequence of tokens and segments
             token_emb = self.token_embed(tokens)
-
-            # Get embeddings for sequence of segments
             seg_emb = self.seg_embed(segments)
 
             # Get value embeddings
@@ -676,6 +674,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN). 
         segments:
             Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
+        counts:
+            Tensor containing the counts/values corresponding to tokens with
+            shape (BATCH_SIZE, SEQ_LEN).        
         masks:
             List of N_MASKS tensors containing indices (within the sequence) of
             tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
@@ -696,15 +697,12 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 masks = [masks]
 
         # During inference, replace special tokens (except <cls> tokens) with
-        # pad tokens
-        if self.n_special_tokens > 2:
-            tokens[:, 2:self.n_special_tokens] = 0
-            segments[:, 2:self.n_special_tokens] = 0
+        # <pad> tokens
+        tokens[:, self.max_cls_tokens:self.n_special_tokens] = 0
+        segments[:, self.max_cls_tokens:self.n_special_tokens] = 0
 
-        # Get embeddings for sequence of tokens
+        # Get embeddings for sequence of tokens and segments
         token_emb = self.token_embed(tokens)
-
-        # Get embeddings for sequence of segments
         seg_emb = self.seg_embed(segments)
 
         # Get value embeddings
@@ -759,8 +757,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
     def forward(self,
                 z: torch.Tensor,
-                segments: torch.Tensor,
                 positions: torch.Tensor,
+                segments: torch.Tensor,
                 enc_pos_embed: nn.Embedding,
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
@@ -775,11 +773,11 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z:
                 Embeddings from the encoder with shape (
                 BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
-            segments:
-                Tensor containing segment labels with shape (BATCH_SIZE,
-                SEQ_LEN).
             positions:
                 Tensor containing position labels with shape (BATCH_SIZE,
+                SEQ_LEN).
+            segments:
+                Tensor containing segment labels with shape (BATCH_SIZE,
                 SEQ_LEN).
             enc_pos_embed:
                 Positional embeddings from the encoder.
@@ -794,8 +792,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
             masks_attention_pred:
-                An attention tensor that controls how different tokens attend to
+                An attention mask that controls how different tokens attend to
                 each other within a sequence.
+
             Returns
             -----------
             z:
@@ -812,40 +811,39 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             if not isinstance(masks_pred, list):
                 masks_pred = [masks_pred]
 
-            # Retrieve batch size
-            B = len(z) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
+            # Retrieve batch size (len(z) is BATCH_SIZE*N_CONTEXT_MASKS)
+            B = len(z) // len(masks_enc)
 
-            # Map from encoder dim to pedictor dim
+            # MLP projection layer
             z = self.predictor_embed(z)
 
-            # Add positional embeddings to tokens from context masks
+            # Add positional embeddings to tokens from context masks (only
+            # keep context mask indices and sum positional and segment
+            # embeddings without token embeddings)
             z_pos_embed = enc_pos_embed(positions)
             z_seg_embed = enc_seg_embed(segments)
-            z += apply_masks(z_pos_embed, masks_enc) # only keep pos from encoder
-                                                    # masks
+            z += apply_masks(z_pos_embed, masks_enc)
+            z += apply_masks(z_seg_embed, masks_enc)
 
-            z += apply_masks(z_seg_embed, masks_enc) # only keep seg from encoder
-                                                    # masks
+            _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: EMBED_DIM
 
-            _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
-
-            # Create positional embeddings for tokens from target masks
+            # Create positional embeddings for tokens from target masks (only
+            # keep target mask indices and sum positional and segment embeddings
+            # without token embeddings; the latter are to be predicted)
             pos_embs = enc_pos_embed(positions)
             seg_embs = enc_seg_embed(segments)
-
-            pos_embs = apply_masks(pos_embs, masks_pred) # only keep pos from
-                                                        # predictor masks
-            seg_embs = apply_masks(seg_embs, masks_pred) # only keep seg from
-                                                        # predictor masks
+            pos_embs = apply_masks(pos_embs, masks_pred)
+            seg_embs = apply_masks(seg_embs, masks_pred)
             
+            # Repeat embeddings for all context masks
             pos_embs = repeat_interleave_batch(
                 pos_embs,
                 B,
-                repeat=len(masks_enc)) # repeat pos embeddings for all encoder masks
+                repeat=len(masks_enc))
             seg_embs = repeat_interleave_batch(
                 seg_embs,
                 B,
-                repeat=len(masks_enc)) # repeat seg embeddings for all encoder masks
+                repeat=len(masks_enc))
 
             # Repeat mask token for all batches, masks and positions from
             # predictor masks
@@ -855,7 +853,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 1)
 
             # Add positional and segment embeddings to mask tokens                  
-            pred_tokens += seg_embs + pos_embs
+            pred_tokens += pos_embs + seg_embs
 
             # Repeat context embeddings for all target masks
             z = z.repeat(len(masks_pred), 1, 1)
@@ -872,7 +870,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # Return predictions for (target) mask tokens
             z = z[:, N_ctxt:]
 
-            # Map back from predictor dim to encoder dim
+            # MLP projection layer
             z = self.predictor_proj(z)
 
             return z
@@ -883,15 +881,14 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
     GeneTransformerCountPredictor class.
     """
     def __init__(self,
-                 pos_learnable: bool=False,
                  **base_predictor_kwargs
                  ):
         super().__init__(**base_predictor_kwargs)
 
     def forward(self,
                 z: torch.Tensor,
-                segments: torch.Tensor,
                 tokens: torch.Tensor,
+                segments: torch.Tensor,
                 enc_token_embed: nn.Embedding,
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
@@ -906,11 +903,15 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z:
                 Embeddings from the encoder with shape (
                 BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
+            tokens:
+                Tensor containing tokens with shape (BATCH_SIZE, SEQ_LEN).
             segments:
                 Tensor containing segment labels with shape (BATCH_SIZE,
                 SEQ_LEN).
-            tokens:
-                Tensor containing tokens with shape (BATCH_SIZE, SEQ_LEN).
+            enc_token_embed:
+                Token embeddings from the encoder.
+            enc_seg_embed:
+                Segment embeddings from the encoder.
             masks_enc:
                 List of N_CONTEXT_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
@@ -920,8 +921,9 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
             masks_attention_pred:
-                An attention tensor that controls how different tokens attend to
+                An attention mask that controls how different tokens attend to
                 each other within a sequence.
+
             Returns
             -----------
             z:
@@ -938,42 +940,41 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             if not isinstance(masks_pred, list):
                 masks_pred = [masks_pred]
 
-            # Retrieve batch size
-            B = len(z) // len(masks_enc) # len(x) is BATCH_SIZE*N_CONTEXT_MASKS
+            # Retrieve batch size (len(z) is BATCH_SIZE*N_CONTEXT_MASKS)
+            B = len(z) // len(masks_enc)
 
-            # Map from encoder dim to pedictor dim
+            # MLP projection layer
             z = self.predictor_embed(z)
 
+            # Add "positional" embeddings to tokens from context masks (only
+            # keep context mask indices and sum token and segment embeddings
+            # without value embeddings)
+            z_token_embs = enc_token_embed(tokens)
+            z_seg_embs = enc_seg_embed(segments)
+            z += apply_masks(z_token_embs, masks_enc)
+            z += apply_masks(z_seg_embs, masks_enc)
+
+            _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: EMBED_DIM
+
+            # Create "positional" embeddings for tokens from target masks (only
+            # keep target mask indices and sum token and segment embeddings
+            # without value embeddings; the latter are to be predicted)
             token_embs = enc_token_embed(tokens)
             seg_embs = enc_seg_embed(segments)
-
-            # Add positional embeddings to tokens from context masks
-            z_gene_embed = enc_token_embed(tokens)
-            z_seg_embed = enc_seg_embed(segments)
-            z += apply_masks(z_gene_embed, masks_enc) # only keep pos from encoder
-                                                    # masks
-
-            z += apply_masks(z_seg_embed, masks_enc) # only keep seg from encoder
-                                                    # masks
-
-            _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: PRED_EMBED_DIM
-
-            # Create positional embeddings for tokens from target masks
-            token_embs = apply_masks(token_embs, masks_pred) # only keep pos from
-                                                        # predictor masks
-            seg_embs = apply_masks(seg_embs, masks_pred) # only keep seg from
-                                                        # predictor masks
-            
+            token_embs = apply_masks(token_embs, masks_pred)
+            seg_embs = apply_masks(seg_embs, masks_pred)
+    
+            # Repeat embeddings for all context masks
             token_embs = repeat_interleave_batch(
                 token_embs,
                 B,
-                repeat=len(masks_enc)) # repeat pos embeddings for all encoder masks
+                repeat=len(masks_enc))
             seg_embs = repeat_interleave_batch(
                 seg_embs,
                 B,
-                repeat=len(masks_enc)) # repeat seg embeddings for all encoder masks
+                repeat=len(masks_enc))
 
-            # Repeat mask token for all batches, masks and positions from
+            # Repeat mask token for all batches, masks and "positions" from
             # predictor masks
             pred_tokens = self.mask_token.repeat(
                 token_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
@@ -998,7 +999,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Return predictions for (target) mask tokens
             z = z[:, N_ctxt:]
 
-            # Map back from predictor dim to encoder dim
+            # MLP projection layer
             z = self.predictor_proj(z)
 
             return z

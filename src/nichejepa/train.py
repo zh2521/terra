@@ -461,27 +461,27 @@ def train(args: dict,
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     if gt_type == 'rank':
-                        x = predictor(z=z,
-                                      segments=segments,
+                        z = predictor(z=z,
                                       positions=positions,
+                                      segments=segments,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_pos_embed=encoder.module.pos_embed,
                                       masks_attention_pred=masks_attention_pred)
                     elif gt_type == 'counts':
-                        x = predictor(z=z,
-                                      segments=segments,
+                        z = predictor(z=z,
                                       tokens=tokens,
+                                      segments=segments,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_token_embed=encoder.module.token_embed,
                                       masks_attention_pred=masks_attention_pred)
-                    return x
+                    return z
 
-                def loss_fn(x, h):
-                    loss = F.smooth_l1_loss(x, h)
+                def loss_fn(z, h):
+                    loss = F.smooth_l1_loss(z, h)
                     loss = AllReduce.apply(loss)
                     return loss
 
@@ -489,8 +489,8 @@ def train(args: dict,
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
                     h = forward_target()
-                    x = forward_context()
-                    loss = loss_fn(x, h)
+                    z = forward_context()
+                    loss = loss_fn(z, h)
 
                 # Step 2: backward pass and step
                 if use_bfloat16:
