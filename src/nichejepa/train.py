@@ -389,10 +389,10 @@ def train(args: dict,
 
             if args['mask']['controlled_attention_pattern'] is not None:
                 masks_attention_enc = create_controlled_mask_context_target(
-                    masks_controlled_attention,
+                    masks_attention,
                     context_masks=masks_enc)
                 masks_attention_pred = create_controlled_mask_context_target(
-                    masks_controlled_attention,
+                    masks_attention,
                     target_masks=masks_pred,
                     context_masks=masks_enc)
             else:

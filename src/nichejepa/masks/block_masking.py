@@ -53,7 +53,7 @@ class BlockMaskCollator:
                  max_cls_tokens: int,
                  per_block_mask_ratio: float=0.5,
                  controlled_attention_pattern: Optional[torch.Tensor]=None,
-                 constrain_special_tokens: bool=True):
+                 constrain_special_tokens: bool=False):
         self.n_targets = n_targets
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
