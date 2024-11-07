@@ -127,6 +127,7 @@ def train(args: dict,
         controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
     else:
         controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+    restrict_special_attention = args['mask']['restrict_special_attention']
 
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
@@ -239,7 +240,8 @@ def train(args: dict,
             n_special_tokens=n_special_tokens,
             max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            controlled_attention_pattern=controlled_attention_pattern)
+            controlled_attention_pattern=controlled_attention_pattern,
+            restrict_special_attention=restrict_special_attention)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -341,7 +343,6 @@ def train(args: dict,
             scheduler.step()
             wd_scheduler.step()
             next(momentum_scheduler)
-            mask_collator.step()
 
     def save_checkpoint(epoch):
         save_dict = {'encoder': encoder.state_dict(),
