@@ -248,6 +248,8 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         Dimension of the predictor embedding.
     seq_len:
         Length of the token sequences.
+    max_cls_tokens:
+        Number of <cls> tokens.
     n_special_tokens:
         Number of special tokens included in a token sequence.
     n_segments:
@@ -283,6 +285,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
     def __init__(self,
                  embed_dim: int,
                  seq_len: int,
+                 max_cls_tokens: int,
                  n_special_tokens: int,
                  n_segments: int,
                  seg_learnable: bool=False,
@@ -301,6 +304,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  ):
         super().__init__()
         self.seq_len = seq_len
+        self.max_cls_tokens = max_cls_tokens
         self.n_special_tokens = n_special_tokens
         self.predictor_embed_dim = predictor_embed_dim
         self.num_heads = num_heads
@@ -959,6 +963,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             seg_embs = enc_seg_embed(segments)
             token_embs = apply_masks(token_embs, masks_pred)
             seg_embs = apply_masks(seg_embs, masks_pred)
+
+            print(masks_pred[0])
     
             # Repeat embeddings for all context masks
             token_embs = repeat_interleave_batch(
