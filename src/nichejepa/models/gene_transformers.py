@@ -763,6 +763,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
+                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
@@ -791,6 +792,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
+            keep_tokens_special:
             masks_attention:
                 An attention mask that controls how different tokens attend to
                 each other within a sequence.
@@ -860,9 +862,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([z[:, :self.n_special_tokens, :],
+            z = torch.cat([z[:, :keep_tokens_special, :],
                            pred_tokens,
-                           z[:, self.n_special_tokens:, :]], dim=1)
+                           z[:, keep_tokens_special:, :]], dim=1) # temp
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -870,7 +872,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
-            z = z[:, :-N_ctxt+self.n_special_tokens]
+            z = z[:, :-N_ctxt+keep_tokens_special]
 
             # MLP projection layer
             z = self.predictor_proj(z)
@@ -923,6 +925,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
+            keep_tokens_special:
             masks_attention:
                 An attention mask that controls how different tokens attend to
                 each other within a sequence.
