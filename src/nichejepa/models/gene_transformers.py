@@ -248,6 +248,8 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         Dimension of the predictor embedding.
     seq_len:
         Length of the token sequences.
+    max_cls_tokens:
+        Number of <cls> tokens.
     n_special_tokens:
         Number of special tokens included in a token sequence.
     n_segments:
@@ -283,6 +285,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
     def __init__(self,
                  embed_dim: int,
                  seq_len: int,
+                 max_cls_tokens: int,
                  n_special_tokens: int,
                  n_segments: int,
                  seg_learnable: bool=False,
@@ -301,6 +304,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  ):
         super().__init__()
         self.seq_len = seq_len
+        self.max_cls_tokens = max_cls_tokens
         self.n_special_tokens = n_special_tokens
         self.predictor_embed_dim = predictor_embed_dim
         self.num_heads = num_heads
@@ -759,6 +763,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
+                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
@@ -787,6 +792,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
+            keep_tokens_special:
             masks_attention:
                 An attention mask that controls how different tokens attend to
                 each other within a sequence.
@@ -856,7 +862,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([z, pred_tokens], dim=1)
+            z = torch.cat([z[:, :keep_tokens_special, :],
+                           pred_tokens,
+                           z[:, keep_tokens_special:, :]], dim=1) # temp
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -864,7 +872,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
-            z = z[:, N_ctxt:]
+            z = z[:, :-N_ctxt+keep_tokens_special]
 
             # MLP projection layer
             z = self.predictor_proj(z)
@@ -889,6 +897,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
+                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
@@ -916,6 +925,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 List of N_TARGET_MASKS tensors containing indices (within the
                 sequence) of tokens to keep with shape (BATCH_SIZE,
                 TARGET_MASK_SIZE).
+            keep_tokens_special:
             masks_attention:
                 An attention mask that controls how different tokens attend to
                 each other within a sequence.
@@ -985,7 +995,9 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([z, pred_tokens], dim=1)
+            z = torch.cat([z[:, :keep_tokens_special, :],
+                           pred_tokens,
+                           z[:, keep_tokens_special:, :]], dim=1) # temp
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -993,7 +1005,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
-            z = z[:, N_ctxt:]
+            z = z[:, :-N_ctxt+keep_tokens_special]
 
             # MLP projection layer
             z = self.predictor_proj(z)
