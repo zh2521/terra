@@ -110,10 +110,10 @@ def infer(args: dict,
     pin_memory = args['data']['pin_memory']
     num_workers = args['data']['num_workers']
     tokenizer_type = args['data']['tokenizer_type']
+    n_special_values = args['data']['n_special_values']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
-    separate_cls = args['data']['separate_cls']
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -125,13 +125,33 @@ def infer(args: dict,
         controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
     else:
         controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+    restrict_special_attention = args['mask']['restrict_special_attention']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
     
+    # Define tokenizer-specific params
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
+        special_tokens = [
+            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
+
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
+
+    # Define tokenizer-specific params
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
@@ -156,8 +176,11 @@ def infer(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
+        n_special_values=n_special_values,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
@@ -176,9 +199,12 @@ def infer(args: dict,
             n_targets=n_targets,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
+            max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio = per_block_mask_ratio,
-            controlled_attention_pattern = controlled_attention_pattern)
+            max_cls_tokens=max_cls_tokens,
+            per_block_mask_ratio=per_block_mask_ratio,
+            controlled_attention_pattern=controlled_attention_pattern,
+            restrict_special_attention=restrict_special_attention)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -195,6 +221,8 @@ def infer(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -249,14 +277,14 @@ def infer(args: dict,
                 mask_indices = torch.isin(
                     tokens,
                     torch.tensor(masked_tokens, device=tokens.device)
-                    ).unsqueeze(1).unsqueeze(1)
+                    ).unsqueeze(1).unsqueeze(1).expand(-1, -1, 1108, -1)
                 masks_attention[mask_indices] = 0
 
             if gt_type == 'rank':
                 emb_list = target_encoder.module.return_multi_layer_emb(
-                    tokens=tokens,
-                    segments=segments,
                     positions=positions,
+                    segments=segments,
+                    tokens=tokens,
                     masks_attention=masks_attention)
             elif gt_type == 'counts':
                 emb_list = target_encoder.module.return_multi_layer_emb(
@@ -276,14 +304,24 @@ def infer(args: dict,
             if agg_type == 'cls':
                 cell_mask = create_binary_selection_mask(
                     tokens,
-                    selection_type='cls_cell',
+                    selection_type='cls_0',
                     seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
-                neighborhood_mask = create_binary_selection_mask(
-                    tokens,
-                    selection_type='cls_neighborhood',
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
+                    n_special_tokens=n_special_tokens,
+                    max_cls_tokens=max_cls_tokens)
+                if tokenizer_type == 'cell_neighborhood':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type='cls_1',
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)
+                elif tokenizer_type == 'cell_graph':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type='cls_all',
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)
 
                 cell_emb = compute_mean_unmasked_emb(emb,
                                                      cell_mask)

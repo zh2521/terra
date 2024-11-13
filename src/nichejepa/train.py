@@ -98,6 +98,7 @@ def train(args: dict,
     # Load params from config file
     dataset_name = args['data']['dataset_name']
     tokenizer_type = args['data']['tokenizer_type']
+    n_special_values = args['data']['n_special_values']
     vocab_size = args['data']['vocab_size']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
@@ -106,7 +107,6 @@ def train(args: dict,
     batch_size = args['data']['batch_size']
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
-    separate_cls = args['data']['separate_cls']
 
     gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth'] 
@@ -128,6 +128,7 @@ def train(args: dict,
         controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
     else:
         controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+    restrict_special_attention = args['mask']['restrict_special_attention']
 
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
@@ -147,6 +148,17 @@ def train(args: dict,
     write_tag = args['state']['write_tag']
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
+
+    # Define tokenizer-specific params
+    if tokenizer_type == 'cell_neighborhood':
+        max_special_tokens = 7
+        max_cls_tokens = 2
+        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
+    elif tokenizer_type == 'cell_graph':
+        max_special_tokens = 105
+        max_cls_tokens = 100
+        special_tokens = [
+            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
 
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
@@ -207,8 +219,11 @@ def train(args: dict,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
+        n_special_values=n_special_values,
         enc_emb_dim=enc_emb_dim,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
@@ -223,10 +238,12 @@ def train(args: dict,
             n_targets=n_targets,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
+            max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
+            max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            separate_cls=separate_cls,
-            controlled_attention_pattern=controlled_attention_pattern)
+            controlled_attention_pattern=controlled_attention_pattern,
+            restrict_special_attention=restrict_special_attention)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -243,6 +260,8 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -253,6 +272,8 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
+        max_cls_tokens=max_cls_tokens,
+        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -324,7 +345,6 @@ def train(args: dict,
             scheduler.step()
             wd_scheduler.step()
             next(momentum_scheduler)
-            mask_collator.step()
 
     def save_checkpoint(epoch):
         save_dict = {'encoder': encoder.state_dict(),
@@ -363,9 +383,24 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
+
+            #print(masks_attention[0, 0, 0, :])
+            #print(masks_attention[0, 0, 1, :])
+            #print(masks_attention[0, 0, 2, :])
+
+            # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
+
             if args['mask']['controlled_attention_pattern'] is not None:
-                masks_attention_enc = create_controlled_mask_context_target(masks_attention, context_masks=masks_enc)
-                masks_attention_pred = create_controlled_mask_context_target(masks_attention, masks_pred, masks_enc)
+                masks_attention_enc = create_controlled_mask_context_target(
+                    masks_attention,
+                    context_masks=masks_enc)
+                if args['mask']['controlled_attention_pred']:
+                    masks_attention_pred = create_controlled_mask_context_target(
+                        masks_attention,
+                        target_masks=masks_pred,
+                        context_masks=masks_enc)
+                else:
+                    masks_attention_pred = None
             else:
                 masks_attention_enc = None
                 masks_attention_pred = None
@@ -417,9 +452,9 @@ def train(args: dict,
                     # minmum context size in the batch after removal of
                     # overlapping targets
                     if gt_type == 'rank':
-                        z = encoder(tokens=tokens,
+                        z = encoder(positions=positions,
                                     segments=segments,
-                                    positions=positions,
+                                    tokens=tokens,
                                     masks=masks_enc,
                                     masks_attention=masks_attention_enc)                       
                     elif gt_type == 'counts':
@@ -432,24 +467,24 @@ def train(args: dict,
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     if gt_type == 'rank':
-                        x = predictor(z=z,
-                                      segments=segments,
+                        z = predictor(z=z,
                                       positions=positions,
+                                      segments=segments,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_pos_embed=encoder.module.pos_embed,
-                                      masks_attention_pred=masks_attention_pred)
+                                      masks_attention=masks_attention_pred)
                     elif gt_type == 'counts':
-                        x = predictor(z=z,
-                                      segments=segments,
+                        z = predictor(z=z,
                                       tokens=tokens,
+                                      segments=segments,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_token_embed=encoder.module.token_embed,
-                                      masks_attention_pred=masks_attention_pred)
-                    return x
+                                      masks_attention=masks_attention_pred)
+                    return z
 
                 def loss_fn(z, h):
                     loss = F.smooth_l1_loss(z, h)
@@ -460,8 +495,8 @@ def train(args: dict,
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
                     h = forward_target()
-                    x = forward_context()
-                    loss = loss_fn(x, h)
+                    z = forward_context()
+                    loss = loss_fn(z, h)
 
                 # Step 2: backward pass and step
                 if use_bfloat16:

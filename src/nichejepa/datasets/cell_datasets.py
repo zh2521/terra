@@ -12,6 +12,9 @@ class CellBaseDataset(Dataset):
                  vocab_size: int,
                  seq_len_cell: int,
                  seq_len_neighborhood: int,
+                 max_cls_tokens: int,
+                 max_special_tokens: int,
+                 tokenizer_type: Literal['cell_neighborhood', 'cell_graph'],
                  gt_type: Literal['rank', 'counts'],
                  special_tokens: List=[
                     'cls_cell',
@@ -41,6 +44,9 @@ class CellBaseDataset(Dataset):
             Sequence length of the (index) cell tokens.
         seq_len_neighborhood:
             Sequence length of the neighborhood tokens.
+        max_cls_tokens:
+        max_special_tokens:
+        tokenizer_type;
         gt_type:
             Gene transformer type.
         special_tokens:
@@ -58,6 +64,7 @@ class CellBaseDataset(Dataset):
         self.vocab_size = vocab_size
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
+        self.max_special_tokens = max_special_tokens
         self.gt_type = gt_type
         self.n_special_tokens = len(special_tokens)
         self.seq_len = (seq_len_cell +
@@ -129,15 +136,21 @@ class CellBaseDataset(Dataset):
             elif self.gt_type == 'counts':
                 tokens = self.dataset[item]["assay_token"] + tokens
             gene_expr = self.dataset[item]["assay_value"] + gene_expr
-        if 'cls_neighborhood' in self.special_tokens:
-            tokens = self.dataset[item]["cls_neighborhood_token"] + tokens
-            gene_expr = [0] + gene_expr
-        if 'cls_cell' in self.special_tokens:
-            tokens = self.dataset[item]["cls_cell_token"] + tokens
-            gene_expr = [0] + gene_expr
-                
-        segments = list(range(1, self.n_special_tokens + 1)) + segments
-        positions = list(range(1, self.n_special_tokens + 1)) + positions
+            
+        n_cls_tokens = len(self.dataset[item]["cls_tokens"])
+        n_nz_cls_tokens = sum(
+            1 for token in self.dataset[item]["cls_tokens"] if token != 0)
+        n_zero_cls_tokens = n_cls_tokens - n_nz_cls_tokens
+        tokens = self.dataset[item]["cls_tokens"] + tokens
+        gene_expr = list(
+            range(2, 2 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + gene_expr
+
+        segments = list(
+            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
+            range(1 + n_nz_cls_tokens,  1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + segments
+        positions = list(
+            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
+            range(1 + n_nz_cls_tokens, 1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + positions
 
         return tokens, segments, positions, gene_expr
 
@@ -266,14 +279,14 @@ class CellBaseDataset(Dataset):
                     tokens=segment_gene_tokens,
                     counts=segment_gene_expr,
                     n_nonzero_tokens=segment_n_nonzero_tokens,
-                    size=segment_seq_len)            
+                    size=segment_seq_len)       
                     
             return segment_gene_tokens, segment_gene_expr
 
 
 class CellGraphDataset(CellBaseDataset):
     def __init__(self,
-                 **base_dataset_kwargs
+                 **base_dataset_kwargs,
                  ):
         """
         Torch CellGraphDataset class.
@@ -294,20 +307,19 @@ class CellGraphDataset(CellBaseDataset):
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=2, # index cell seg
+            segment=self.max_special_tokens, # index cell seg
             segment_seq_len=self.seq_len_cell)
-        segments = [10 if gene_token != 0 else 0 for gene_token in
-                    gene_tokens_cell]
+        segments = [self.max_special_tokens if gene_token != 0 else 0 for
+                    gene_token in gene_tokens_cell]
         positions = list(range(1, len(gene_tokens_cell) + 1))
         gene_tokens_neighborhood = []
         gene_expr_neighborhood = []
         for segment in np.unique(self.dataset[item]["seg_tokens"]):
-            if segment > 10: # 10 is index cell segment, higher segments are
-                             # neighbor cell segments
+            if segment > self.max_special_tokens: # neighbor cell segments
                 segment_gene_tokens, segment_gene_expr = self._get_gene_tokens_and_counts_for_segment(
                     item=item,
                     segment=segment, # neighbor cell segs
-                    segment_seq_len=self.seq_len_neighborhood)
+                    segment_seq_len=self.seq_len_cell)
                 gene_tokens_neighborhood.extend(segment_gene_tokens)
                 gene_expr_neighborhood.extend(segment_gene_expr)
                 segments.extend([segment if gene_token != 0 else 0 for
@@ -318,11 +330,23 @@ class CellGraphDataset(CellBaseDataset):
                      enumerate(positions)]
         gene_expr = gene_expr_cell + gene_expr_neighborhood
 
+        if len(tokens) > (self.seq_len_cell + self.seq_len_neighborhood):
+            tokens = tokens[:self.seq_len_cell + self.seq_len_neighborhood]
+            segments = segments[:self.seq_len_cell + self.seq_len_neighborhood]
+            positions = positions[:self.seq_len_cell + self.seq_len_neighborhood]
+            gene_expr = gene_expr[:self.seq_len_cell + self.seq_len_neighborhood]
+        elif len(tokens) < (self.seq_len_cell + self.seq_len_neighborhood):
+            tokens += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(tokens))
+            segments += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(segments))
+            positions += [0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(positions))
+            gene_expr += [0.0] * ((self.seq_len_cell + self.seq_len_neighborhood) - len(gene_expr))
+
         # Add special tokens
-        tokens, segments, positions = self._add_special_tokens_to_seq(
+        tokens, segments, positions, gene_expr = self._add_special_tokens_to_seq(
             tokens=tokens,
             segments=segments,
             positions=positions,
+            gene_expr=gene_expr,
             item=item)
 
         tokens = torch.tensor(tokens)
@@ -356,17 +380,20 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=10, # cell seg
+            segment=self.max_special_tokens, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neighborhood, gene_expr_neighborhood = self._get_gene_tokens_and_counts_for_segment(
             item=item,
-            segment=11, # neighborhood seg
+            segment=self.max_special_tokens + 1, # neighborhood seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neighborhood
         gene_expr = gene_expr_cell + gene_expr_neighborhood
-        segments = [10 if gene_token != 0 else 0 for gene_token in
-                    gene_tokens_cell] + [11 if gene_token != 0 else 0 for
-                    gene_token in gene_tokens_neighborhood]
+        segments = [
+            self.max_special_tokens if gene_token != 0 else 0 for gene_token
+            in gene_tokens_cell
+            ] + [
+            self.max_special_tokens + 1 if gene_token != 0 else 0 for
+            gene_token in gene_tokens_neighborhood]
         positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
             range(1, len(gene_tokens_neighborhood) + 1))
         positions = [position if tokens[i] != 0 else 0 for i, position in 
@@ -397,8 +424,10 @@ def make_cell_dataset(tokenizer_type: Literal['cell_graph',
     Based on tokenizer type, return CellGraphDataset or CellNeighborhoodDataset.
     """
     if tokenizer_type == 'cell_graph':
-        cell_dataset = CellGraphDataset(**cell_dataset_kwargs)
+        cell_dataset = CellGraphDataset(tokenizer_type=tokenizer_type,
+                                        **cell_dataset_kwargs)
     elif tokenizer_type  == 'cell_neighborhood':
-        cell_dataset = CellNeighborhoodDataset(**cell_dataset_kwargs)
+        cell_dataset = CellNeighborhoodDataset(tokenizer_type=tokenizer_type,
+                                               **cell_dataset_kwargs)
 
     return cell_dataset

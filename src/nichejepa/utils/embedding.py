@@ -106,6 +106,7 @@ def compute_mean_unmasked_emb(emb: torch.Tensor,
 def create_binary_selection_mask(tokens: torch.Tensor,
                                  seq_len_cell: int,
                                  n_special_tokens: int,
+                                 max_cls_tokens: int,
                                  selection_type: Literal['cls_cell',
                                                          'cls_neighborhood',
                                                          'agg_cell',
@@ -126,6 +127,9 @@ def create_binary_selection_mask(tokens: torch.Tensor,
         A 2D tensor where each row represents a sequence of tokens.
     seq_len_cell:
         The length of cell tokens in the sequence.
+    n_special_tokens:
+    max_cls_tokens:
+        Number of <cls> tokens.
     selection_type:
         Defines the type of embedding, which is relevant for the mask creation.
     excluded_tokens:
@@ -141,58 +145,73 @@ def create_binary_selection_mask(tokens: torch.Tensor,
     selection_mask:
         The resulting 2D selection mask tensor.
     """
-    selection_start_idx = n_special_tokens
+    selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
 
-    if selection_type == 'cls_cell':
-        # Select only the first token in each sequence
-        selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
+    if selection_type == 'cls_0':
+        # Select only the first <cls> token
         selection_mask[:, 0] = True
         return selection_mask
-    elif selection_type == 'cls_neighborhood':
-        # Select only the first token in each sequence
-        selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
+    elif selection_type == 'cls_1':
+        # Select only the second <cls> token
         selection_mask[:, 1] = True
         return selection_mask
+    elif selection_type == 'cls_all':
+         # Select all <cls> tokens
+        selection_mask[:, :max_cls_tokens] = True
+        return selection_mask       
     elif selection_type == 'agg_cell':
-        selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
         # Select non-padding tokens in the cell segment
-        selection_mask[:, selection_start_idx:
-                          selection_start_idx + seq_len_cell] = True
+        selection_mask[:, n_special_tokens:
+                          n_special_tokens + seq_len_cell] = True
         selection_mask[tokens == 0] = False # exclude padding tokens
         if excluded_tokens: # exclude other excluded tokens
-            selection_mask[
-                torch.isin(
-                    tokens,
-                    torch.tensor(excluded_tokens).to(tokens.device))] = False
+            selection_mask[torch.isin(
+                tokens,
+                torch.tensor(excluded_tokens).to(tokens.device))] = False
         if top_k:
             # Exclude tokens beyond the top_k positions in the cell segment
-            selection_mask[:, selection_start_idx + top_k:] = False
+            selection_mask[:, n_special_tokens + top_k:] = False
     elif selection_type == 'agg_neighborhood':
-        # Select non-padding tokens in the neighborhood segment
-        selection_mask = torch.zeros_like(tokens, dtype=torch.bool)
-        selection_mask[:, selection_start_idx + seq_len_cell:] = True
+        # Select non-padding tokens in the neighborhood segments
+        selection_mask[:, n_special_tokens + seq_len_cell:] = True
         selection_mask[tokens == 0] = False # exclude padding tokens
         if excluded_tokens: # exclude other excluded tokens
-            selection_mask[
-                torch.isin(
-                    tokens,
-                    torch.tensor(excluded_tokens).to(tokens.device))] = False
+            selection_mask[torch.isin(
+                tokens,
+                torch.tensor(excluded_tokens).to(tokens.device))] = False
         if top_k:
             # Exclude tokens beyond the top_k positions in the neighborhood
-            # segment
+            # segments
             selection_mask[
-                :, selection_start_idx + seq_len_cell + top_k:] = False    
+                :, n_special_tokens + seq_len_cell + top_k:] = False
+    elif selection_type == 'agg_graph':
+        # Select non-padding tokens in all segments
+        selection_mask[:, n_special_tokens:] = True
+        selection_mask[tokens == 0] = False # exclude padding tokens
+        if excluded_tokens: # exclude other excluded tokens
+            selection_mask[torch.isin(
+                tokens,
+                torch.tensor(excluded_tokens).to(tokens.device))] = False
+        if top_k:
+            # Exclude tokens beyond the top_k positions in all segments
+            selection_mask[
+                :, n_special_tokens + top_k:] = False        
     elif selection_type == 'gene_cell':
         # Select only positions corresponding to the specified gene_id in the
         # cell segment
         selection_mask = tokens == gene_id
-        selection_mask[:, selection_start_idx + seq_len_cell:] = False
+        selection_mask[:, n_special_tokens + seq_len_cell:] = False
     elif selection_type == 'gene_neighborhood':
         # Select only positions corresponding to the specified gene_id in the
-        # neighborhood segment
+        # neighborhood segments
         selection_mask = tokens == gene_id
-        selection_mask[:, selection_start_idx:
-                          selection_start_idx + seq_len_cell] = False
+        selection_mask[:, n_special_tokens:
+                          n_special_tokens + seq_len_cell] = False
+    elif selection_type == 'gene_graph':
+        # Select only positions corresponding to the specified gene_id in all
+        # segments
+        selection_mask = tokens == gene_id
+        selection_mask[:, n_special_tokens:] = False
     else:
         raise ValueError('The "selection_type" is not valid.')
 
