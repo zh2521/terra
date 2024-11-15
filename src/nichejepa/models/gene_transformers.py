@@ -852,7 +852,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                            z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
                            pred_tokens[:, keep_tokens_special:, :], # target gene tokens
                            z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, keep_tokens_special:, :]], dim=1) # context gene tokens
+                           z[:, keep_tokens_special:, :] # context gene tokens
+                           ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -973,7 +974,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                            z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
                            pred_tokens[:, keep_tokens_special:, :], # target gene tokens
                            z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, keep_tokens_special:, :]], dim=1) # context gene tokens
+                           z[:, keep_tokens_special:, :] # context gene tokens
+                           ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
