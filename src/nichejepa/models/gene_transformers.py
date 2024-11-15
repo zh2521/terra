@@ -850,16 +850,17 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # embedding)
             z = torch.cat([pred_tokens[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
                            z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
-                           pred_tokens[:, keep_tokens_special:, :],
-                           z[:, keep_tokens_special:, :]], dim=1)
+                           pred_tokens[:, keep_tokens_special:, :], # target gene tokens
+                           z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
+                           z[:, keep_tokens_special:, :]], dim=1) # context gene tokens
 
             # Run forward prop
             for blk in self.predictor_blocks:
                 z = blk(z, masks=masks_attention)
             z = self.predictor_norm(z)
 
-            # Return predictions for (target) mask tokens
-            z = z[:, :-N_ctxt+keep_tokens_special]
+            # Return predictions for (target) mask and special tokens
+            z = z[:, :pred_tokens.size(1)]
 
             # MLP projection layer
             z = self.predictor_proj(z)
@@ -966,35 +967,21 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Add gene and segment embeddings to mask tokens                  
             pred_tokens += token_embs + seg_embs
 
-            #print(len(batch_num_special_tokens))
-            #print(batch_num_special_tokens)
-
-            #print(pred_tokens.shape)
-            #print(z.shape)
-            #print(masks_enc[0].shape)
-            #print(masks_pred[0].shape)
-            #print(len(masks_enc))
-
-            #print(masks_enc[0][0])
-            #print(masks_pred[0][0])
-
-            #print("YOO", masks_enc[7][0])
-            #print(masks_pred[6][0])
-
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
             z = torch.cat([pred_tokens[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
                            z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
-                           pred_tokens[:, keep_tokens_special:, :],
-                           z[:, keep_tokens_special:, :]], dim=1)
+                           pred_tokens[:, keep_tokens_special:, :], # target gene tokens
+                           z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
+                           z[:, keep_tokens_special:, :]], dim=1) # context gene tokens
 
             # Run forward prop
             for blk in self.predictor_blocks:
                 z = blk(z, masks=masks_attention)
             z = self.predictor_norm(z)
 
-            # Return predictions for (target) mask tokens
-            z = z[:, :-N_ctxt+keep_tokens_special]
+            # Return predictions for (target) mask and special tokens
+            z = z[:, :pred_tokens.size(1)]
 
             # MLP projection layer
             z = self.predictor_proj(z)
