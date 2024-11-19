@@ -658,6 +658,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         # Retrieve neighborhood gene tokens and gene expression
         gene_tokens_neighborhood = np.array([])
+        seg_tokens_neighborhood = np.array([])
         gene_expr_neighborhood = np.array([])
         n_nonzero_neighborhood_tokens = 0
 
@@ -667,14 +668,24 @@ class CellGraphTokenizer(CellBaseTokenizer):
                     example['gene_tokens_neighborhood'][i] for i in range(
                         len(example['gene_tokens_neighborhood']))
                         if example['seg_tokens_neighborhood'][i] == segment]
+                seg_tokens_neighborhood_segment = example[
+                    'seg_tokens_neighborhood'][
+                        example['seg_tokens_neighborhood'] == segment]
 
                 gene_tokens_neighborhood_segment, n_nonzero_neighborhood_segment_tokens = process_gene_tokens(
                     gene_tokens_neighborhood_segment,
                     int(self.model_input_size / n_gene_segments),
                     self.token_dict)
 
+                seg_tokens_neighborhood_segment, _ = process_gene_tokens(
+                    seg_tokens_neighborhood_segment,
+                    int(self.model_input_size / n_gene_segments),
+                    self.token_dict)
+
                 gene_tokens_neighborhood = np.hstack(
                     (gene_tokens_neighborhood, gene_tokens_neighborhood_segment))
+                seg_tokens_neighborhood = np.hstack(
+                    (seg_tokens_neighborhood, seg_tokens_neighborhood_segment))
 
                 n_nonzero_neighborhood_tokens += n_nonzero_neighborhood_segment_tokens
 
@@ -692,28 +703,21 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         del example['gene_tokens_neighborhood']
         del example['gene_expr_neighborhood']
+        del example['seg_tokens_neighborhood']
         example['gene_tokens'] = np.concatenate(
             (gene_tokens_cell.copy(), gene_tokens_neighborhood.copy())).astype(
                 int)
         example['gene_expr'] = np.concatenate(
             (gene_expr_cell.copy(), gene_expr_neighborhood.copy())).astype(
                 float)
+        example['seg_tokens'] = np.concatenate(
+            (np.array([self.max_special_tokens if gene_token != 0 else 0 for gene_token in
+                       gene_tokens_cell]),
+             seg_tokens_neighborhood.copy())).astype(int)
 
         # Retrieve attributes
         example['n_nonzero_tokens'] = (
             n_nonzero_cell_tokens + n_nonzero_neighborhood_tokens)
-
-        print(example['seg_tokens_neighborhood'])
-
-        # Define segments
-        example['seg_tokens'] = np.concatenate(
-            # (np.array([10 if gene_token != 0 else 0 for gene_token in
-            (np.where(gene_tokens_cell != 0, self.max_special_tokens, 0),
-             np.where(gene_tokens_neighborhood != 0,
-                      np.array(example['seg_tokens_neighborhood']),
-                      0)
-            )).astype(int)
-        del example['seg_tokens_neighborhood']
 
         # Add padding to make all sequences have length 'model_input_size'
         if len(example['gene_tokens']) < self.model_input_size:
