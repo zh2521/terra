@@ -385,7 +385,7 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
-            print(masks_attention[0, 0, 0, :])
+            #print(masks_attention[0, 0, 0, :])
             #print(masks_attention[0, 0, 1, :])
             #print(masks_attention[0, 0, 2, :])
 

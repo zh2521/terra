@@ -109,7 +109,6 @@ def create_controlled_mask_context_target(
     # Iterate through the context and target masks
     for context_indices in context_masks:
         for mask_indices in target_masks:
-            print(context_indices.shape)
             # Step 1: Concatenate context and target indices together (exclude cls tokens)
             combined_indices = torch.cat((mask_indices, context_indices[:, (n_special_tokens-max_cls_tokens):]), dim=1)
             # Call the helper function to create the attention matrices for the given indices

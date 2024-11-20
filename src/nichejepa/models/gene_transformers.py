@@ -856,6 +856,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # Add positional and segment embeddings to mask tokens                  
             pred_tokens += pos_embs + seg_embs
 
+            # Repeat context embeddings for all target masks
+            z = z.repeat(len(masks_pred), 1, 1)
+
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
             z = torch.cat([
@@ -987,6 +990,9 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Add gene and segment embeddings to mask tokens                  
             pred_tokens += token_embs + seg_embs
+
+            # Repeat context embeddings for all target masks
+            z = z.repeat(len(masks_pred), 1, 1)
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
