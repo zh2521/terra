@@ -156,15 +156,17 @@ def create_binary_selection_mask(tokens: torch.Tensor,
         selection_mask[:, 1] = True
         return selection_mask
     elif selection_type == 'cls_all':
-         # Select all <cls> tokens
+         # Select non-padding <cls> tokens
         selection_mask[:, :max_cls_tokens] = True
+        selection_mask[tokens == 0] = False
         return selection_mask       
     elif selection_type == 'agg_cell':
         # Select non-padding tokens in the cell segment
         selection_mask[:, n_special_tokens:
                           n_special_tokens + seq_len_cell] = True
-        selection_mask[tokens == 0] = False # exclude padding tokens
-        if excluded_tokens: # exclude other excluded tokens
+        selection_mask[tokens == 0] = False
+        if excluded_tokens:
+            # Exclude other excluded tokens
             selection_mask[torch.isin(
                 tokens,
                 torch.tensor(excluded_tokens).to(tokens.device))] = False
@@ -174,8 +176,9 @@ def create_binary_selection_mask(tokens: torch.Tensor,
     elif selection_type == 'agg_neighborhood':
         # Select non-padding tokens in the neighborhood segments
         selection_mask[:, n_special_tokens + seq_len_cell:] = True
-        selection_mask[tokens == 0] = False # exclude padding tokens
-        if excluded_tokens: # exclude other excluded tokens
+        selection_mask[tokens == 0] = False
+        if excluded_tokens:
+            # Exclude other excluded tokens
             selection_mask[torch.isin(
                 tokens,
                 torch.tensor(excluded_tokens).to(tokens.device))] = False
@@ -187,8 +190,9 @@ def create_binary_selection_mask(tokens: torch.Tensor,
     elif selection_type == 'agg_graph':
         # Select non-padding tokens in all segments
         selection_mask[:, n_special_tokens:] = True
-        selection_mask[tokens == 0] = False # exclude padding tokens
-        if excluded_tokens: # exclude other excluded tokens
+        selection_mask[tokens == 0] = False
+        if excluded_tokens:
+            # Exclude other excluded tokens
             selection_mask[torch.isin(
                 tokens,
                 torch.tensor(excluded_tokens).to(tokens.device))] = False
@@ -211,7 +215,6 @@ def create_binary_selection_mask(tokens: torch.Tensor,
         # Select only positions corresponding to the specified gene_id in all
         # segments
         selection_mask = tokens == gene_id
-        selection_mask[:, n_special_tokens:] = False
     else:
         raise ValueError('The "selection_type" is not valid.')
 
