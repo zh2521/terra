@@ -159,7 +159,7 @@ class BlockMaskCollator:
                     torch.tensor(target_mask)))
 
                 # Append masked indices
-                target_masks.append(torch.tensor(target_mask))
+                target_masks.append(target_mask)
             else:
                 # No elements to mask
                 target_masks.append(torch.tensor([]))
