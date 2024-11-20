@@ -763,7 +763,6 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
-                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
