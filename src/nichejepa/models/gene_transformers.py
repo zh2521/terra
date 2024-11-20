@@ -991,10 +991,6 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Add gene and segment embeddings to mask tokens                  
             pred_tokens += token_embs + seg_embs
 
-            print(pred_tokens.shape)
-            print(z.shape)
-            raise ValueError
-
             # Repeat context embeddings for all target masks
             z = z.repeat(len(masks_pred), 1, 1)
 

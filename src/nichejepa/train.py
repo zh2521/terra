@@ -385,13 +385,6 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
-            print(len(masks_enc))
-            print(len(masks_pred))
-            print(masks_enc[0].shape)
-            print(masks_pred[0].shape)
-            print(masks_attention.shape)
-            raise ValueError
-
             if (tokenizer_type == 'cell_graph' or 
             args['mask']['controlled_attention_pattern'] is not None):
                 # otherwise this is not needed as attention masks are all 1s
