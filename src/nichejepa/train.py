@@ -383,8 +383,10 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
-            masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
-            masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
+            if masks_attention_enc is not None:
+                masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
+            if masks_attention_pred is not None:
+                masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
 
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
