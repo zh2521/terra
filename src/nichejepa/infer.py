@@ -411,6 +411,8 @@ def infer(args: dict,
                           adata_metadata_subset.obs,
                           on='cell_id')
     adata.obs = merged_obs.set_index('cell_id')
+    adata_metadata_subset.obs = adata_metadata_subset.obs.set_index('cell_id')
+    adata_metadata_subset = adata_metadata_subset[adata.obs.index, :].copy()
     adata.obsm['spatial'] = adata_metadata_subset.obsm['spatial']
    
     # Store cell and neighborhood embeddings of all observations across layers  

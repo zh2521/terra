@@ -156,8 +156,8 @@ def create_binary_selection_mask(tokens: torch.Tensor,
         selection_mask[:, 1] = True
         return selection_mask
     elif selection_type == 'cls_all':
-         # Select non-padding <cls> tokens
-        selection_mask[:, :max_cls_tokens] = True
+        # Select non-padding <cls> tokens
+        selection_mask[:, :self.max_cls_tokens] = True
         selection_mask[tokens == 0] = False
         return selection_mask       
     elif selection_type == 'agg_cell':
