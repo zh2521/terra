@@ -50,7 +50,6 @@ from .utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,
                             grad_logger)
-from .masks.utils import create_controlled_mask_context_target 
 
 _GLOBAL_SEED = 0
 
@@ -375,7 +374,7 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(
+        for itr, (udata, masks_enc, masks_pred, masks_attention, masks_attention_enc, masks_attention_pred) in enumerate(
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
@@ -384,7 +383,10 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
+            masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
+            masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
 
+            """
             if (tokenizer_type == 'cell_graph' or 
             args['mask']['controlled_attention_pattern'] is not None):
                 # otherwise this is not needed as attention masks are all 1s
@@ -400,6 +402,7 @@ def train(args: dict,
             else:
                 masks_attention_enc = None
                 masks_attention_pred = None
+            """
 
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))

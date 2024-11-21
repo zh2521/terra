@@ -14,7 +14,7 @@ from typing import List, Literal, Optional, Tuple, Union
 import numpy as np
 import torch
 
-from ..masks.utils import configure_attention_masks
+from ..masks.utils import create_controlled_mask_context_target, configure_attention_masks
 
 
 class BlockMaskCollator:
@@ -277,16 +277,6 @@ class BlockMaskCollator:
             collated_masks_attention.shape[-1],
             collated_masks_attention.shape[-1]).clone()
 
-        # Apply controlled attention
-        if self.controlled_attention_pattern is not None:
-            if torch.sum(self.controlled_attention_pattern) != 0:
-                configure_attention_masks(
-                    self.controlled_attention_pattern,
-                    collated_masks_attention,
-                    self.seq_len_cell,
-                    self.n_special_tokens,
-                    self.max_cls_tokens)
-
         if self.restrict_special_attention:
             for i in range(self.max_cls_tokens, self.n_special_tokens):
                 # Special tokens only attent to themselves
@@ -301,4 +291,33 @@ class BlockMaskCollator:
                     i,
                     (i+1):] = 0
 
-        return collated_batch, collated_context_masks, collated_target_masks, collated_masks_attention
+        # Create predictor attention mask (without controlled attention)
+        if (self.controlled_attention_pattern is not None) or (max_cls_tokens > 2):
+            collated_masks_attention_pred = create_controlled_mask_context_target(
+                collated_masks_attention,
+                n_special_tokens=self.n_special_tokens,
+                max_cls_tokens=self.max_cls_tokens,
+                target_masks=collated_target_masks,
+                context_masks=collated_context_masks)
+        else:
+            collated_masks_attention_pred = None
+
+        # Apply controlled attention
+        if self.controlled_attention_pattern is not None:
+            if torch.sum(self.controlled_attention_pattern) != 0:
+                configure_attention_masks(
+                    self.controlled_attention_pattern,
+                    collated_masks_attention,
+                    self.seq_len_cell,
+                    self.n_special_tokens,
+                    self.max_cls_tokens)
+
+        # Create encoder attention mask (with controlled attention)
+        if (self.controlled_attention_pattern is not None) or (max_cls_tokens > 2):
+            collated_masks_attention_enc = create_controlled_mask_context_target(
+                collated_masks_attention,
+                context_masks=collated_context_masks)
+        else:
+            collated_masks_attention_enc = None
+
+        return collated_batch, collated_context_masks, collated_target_masks, collated_masks_attention, collated_masks_attention_enc, collated_masks_attention_pred
