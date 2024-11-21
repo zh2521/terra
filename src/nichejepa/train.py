@@ -386,24 +386,6 @@ def train(args: dict,
             masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
             masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
 
-            """
-            if (tokenizer_type == 'cell_graph' or 
-            args['mask']['controlled_attention_pattern'] is not None):
-                # otherwise this is not needed as attention masks are all 1s
-                masks_attention_enc = create_controlled_mask_context_target(
-                    masks_attention,
-                    context_masks=masks_enc)
-                masks_attention_pred = create_controlled_mask_context_target(
-                    masks_attention,
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens,
-                    target_masks=masks_pred,
-                    context_masks=masks_enc)
-            else:
-                masks_attention_enc = None
-                masks_attention_pred = None
-            """
-
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
