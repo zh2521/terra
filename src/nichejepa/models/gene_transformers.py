@@ -864,7 +864,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 z[:, :self.max_cls_tokens, :], # <cls> tokens
                 pred_tokens[:, self.max_cls_tokens:, :],
                 # non <cls> special tokens and target gene tokens
-                z[:, (self.n_special_tokens-self.max_cls_tokens):, :]
+                z[:, self.max_cls_tokens:, :]
                 # non <cls> special tokens and context gene tokens
                 ], dim=1)
 
@@ -874,7 +874,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask and special tokens
-            z = z[:, :pred_tokens.size(1)]
+            z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
             z = self.predictor_proj(z)
@@ -999,7 +999,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 z[:, :self.max_cls_tokens, :], # <cls> tokens
                 pred_tokens[:, self.max_cls_tokens:, :],
                 # non <cls> special tokens and target gene tokens
-                z[:, (self.n_special_tokens-self.max_cls_tokens):, :]
+                z[:, self.max_cls_tokens:, :]
                 # non <cls> special tokens and context gene tokens
                 ], dim=1)
 
@@ -1009,7 +1009,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask and special tokens
-            z = z[:, :pred_tokens.size(1)]
+            z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
             z = self.predictor_proj(z)
