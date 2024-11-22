@@ -568,6 +568,18 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
             # Store cell degree (number of neighbors excluding cell i)
             adata_dict['cell_degrees'].append(int(len(neighbors_i)))
+
+            # Take into account case where neighbor cells can have 0 distance
+            if (adata.obsp['spatial_connectivities'].getnnz(axis=1)[i] != 
+            adata.obsp['spatial_distances'].getnnz(axis=1)[i]):
+                cell_con_nz = np.nonzero(
+                    adata.obsp['spatial_connectivities'][i])[1]
+                cell_dist_nz = np.nonzero(
+                    adata.obsp['spatial_distances'][i])[1]
+                zero_dist_idx = set(cell_con_nz) - set(cell_dist_nz)
+                for idx in zero_dist_idx:
+                    adata.obsp['spatial_distances'][i, idx] = adata.obsp[
+                        'spatial_distances'][i, idx] + 10**(-9)
             
             # Get sorted indices of neighbor cells based on (lower) distance to
             # index cell
@@ -575,6 +587,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
             cell_end = adata.obsp['spatial_distances'].indptr[i+1]
             cell_distances = adata.obsp[
                 'spatial_distances'].data[cell_start:cell_end]
+
             sorted_indices = np.argsort(cell_distances)
             assert len(neighbors_i) == len(cell_distances), (
                 'Number of neighbors (excluding cell i) does not equal number '
