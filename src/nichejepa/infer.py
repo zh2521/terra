@@ -197,6 +197,7 @@ def infer(args: dict,
     if block_masking:
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
+            n_contexts=n_contexts,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             max_special_tokens=max_special_tokens,
@@ -258,7 +259,7 @@ def infer(args: dict,
     all_cell_gene_emb_dict = {}
     all_neighborhood_gene_emb_dict = {}
 
-    for itr, (udata, masks_enc, masks_pred, masks_attention) in tqdm(enumerate(loader)):
+    for itr, (udata, _, _, masks_attention, _, _) in tqdm(enumerate(loader)):
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
         segments = udata[1].to(device, non_blocking=True)
@@ -277,7 +278,7 @@ def infer(args: dict,
                 mask_indices = torch.isin(
                     tokens,
                     torch.tensor(masked_tokens, device=tokens.device)
-                    ).unsqueeze(1).unsqueeze(1).expand(-1, -1, 1108, -1)
+                    ).unsqueeze(1).unsqueeze(1).expand(-1, -1, 1108, -1) # temp
                 masks_attention[mask_indices] = 0
 
             if gt_type == 'rank':
@@ -335,13 +336,15 @@ def infer(args: dict,
                     selection_type="agg_cell",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
+                    n_special_tokens=n_special_tokens,
+                    max_cls_tokens=max_cls_tokens)
                 neighborhood_mask = create_binary_selection_mask(
                     tokens,
                     selection_type="agg_neighborhood",
                     excluded_tokens=agg_excluded_tokens,
                     seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
+                    n_special_tokens=n_special_tokens,
+                    max_cls_tokens=max_cls_tokens)
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,
@@ -402,11 +405,15 @@ def infer(args: dict,
 
     # Add metadata
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
+    adata_metadata_subset = adata_metadata[
+        adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
     merged_obs = pd.merge(adata.obs,
-                          adata_metadata.obs,
+                          adata_metadata_subset.obs,
                           on='cell_id')
-
     adata.obs = merged_obs.set_index('cell_id')
+    adata_metadata_subset.obs = adata_metadata_subset.obs.set_index('cell_id')
+    adata_metadata_subset = adata_metadata_subset[adata.obs.index, :].copy()
+    adata.obsm['spatial'] = adata_metadata_subset.obsm['spatial']
    
     # Store cell and neighborhood embeddings of all observations across layers  
     for i in range(len(all_cell_emb_list)):
