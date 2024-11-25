@@ -50,7 +50,6 @@ from .utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,
                             grad_logger)
-from .masks.utils import create_controlled_mask_context_target 
 
 _GLOBAL_SEED = 0
 
@@ -375,7 +374,7 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred, masks_attention, keep_tokens_special) in enumerate(
+        for itr, (udata, masks_enc, masks_pred, masks_attention, masks_attention_enc, masks_attention_pred) in enumerate(
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
@@ -384,27 +383,18 @@ def train(args: dict,
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
+            if masks_attention_enc is not None:
+                masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
+            if masks_attention_pred is not None:
+                masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
 
-            #print(masks_attention[0, 0, 0, :])
-            #print(masks_attention[0, 0, 1, :])
-            #print(masks_attention[0, 0, 2, :])
+            #torch.set_printoptions(threshold=float('inf'))
+            #print(tokens[0, :])
+            #print(segments[0, :])
+            #print(counts[0, :])
+            #print(udata[-1])
+            #raise ValueError
 
-            # masks_pred = [masks_pred[0], masks_pred[-1]] # TEMP TODO
-
-            if args['mask']['controlled_attention_pattern'] is not None:
-                masks_attention_enc = create_controlled_mask_context_target(
-                    masks_attention,
-                    context_masks=masks_enc)
-                if args['mask']['controlled_attention_pred']:
-                    masks_attention_pred = create_controlled_mask_context_target(
-                        masks_attention,
-                        target_masks=masks_pred,
-                        context_masks=masks_enc)
-                else:
-                    masks_attention_pred = None
-            else:
-                masks_attention_enc = None
-                masks_attention_pred = None
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -438,6 +428,14 @@ def train(args: dict,
                             masks_pred)
                         B = len(h)
 
+                        # Repeat targets if multiple contexts; output dim 
+                        # (BATCH_SIZE * N_TARGETS * N_CONTEXTS, 
+                        # TARGET_MASK_SIZE, EMB_DIM)
+                        h = repeat_interleave_batch(
+                            h,
+                            B,
+                            repeat=len(masks_enc))
+
                         return h
 
                 def forward_context():
@@ -468,8 +466,7 @@ def train(args: dict,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_pos_embed=encoder.module.pos_embed,
-                                      masks_attention=masks_attention_pred,
-                                      keep_tokens_special=keep_tokens_special)
+                                      masks_attention=masks_attention_pred)
                     elif gt_type == 'counts':
                         z = predictor(z=z,
                                       tokens=tokens,
@@ -478,8 +475,7 @@ def train(args: dict,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
                                       enc_token_embed=encoder.module.token_embed,
-                                      masks_attention=masks_attention_pred,
-                                      keep_tokens_special=keep_tokens_special)
+                                      masks_attention=masks_attention_pred)
                     return z
 
                 def loss_fn(z, h):

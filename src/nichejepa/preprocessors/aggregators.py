@@ -5,8 +5,10 @@ import squidpy as sq
 
 
 def aggregate_neighbors(adata: ad.AnnData,
+                        n_neighs: Optional[int]=None,
                         radius: Optional[float]=None,
-                        delaunay_radius_union: bool=False) -> ad.AnnData:
+                        delaunay: bool=True,
+                        include_self_loop: bool=False) -> ad.AnnData:
     """
     Aggregate cell features by neighborhood radius.
 
@@ -15,12 +17,20 @@ def aggregate_neighbors(adata: ad.AnnData,
     adata:
         AnnData object with spatial coordinates available in
         `adata.obsm['spatial']`.
+    n_neighs:
+        If specified, use `n_neighs` to compute the neighborhood graph. If
+        'radius' or 'delaunay' are also specified, a union neighborhood graph
+        will be computed.
     radius:
-        If specified, use `radius` to compute the neighborhood graph, else use
-        delaunay triangulation.
-    delaunay_radius_union:
-        If 'True', compute the neighborhood graph by delaunay triangulation but
-        exclude observations that are outside of the radius with size `radius`.
+        If specified, use `radius` to compute the neighborhood graph. If
+        'n_neighs' or 'delaunay' are also specified, a union neighborhood graph
+        will be computed.
+    delaunay:
+        If 'True', compute the neighborhood graph by delaunay triangulation. If
+        'n_neighs' or 'radius' are also specified, a union neighborhood graph
+        will be computed.
+    include_self_loop:
+        If 'True', include cell itself in the neighborhood graph.
 
     Returns
     ----------
@@ -28,31 +38,45 @@ def aggregate_neighbors(adata: ad.AnnData,
         AnnData object with aggregated counts available in
         `adata.layers['X_neighborhood']`.
     """
-    if delaunay_radius_union and (radius is None):
-        raise ValueError(
-            'Radius needs to be specified if `delaunay_radius_union` is True.')
-
+    if n_neighs is not None:
+        # Compute knn spatial neighborhood graph
+        sq.gr.spatial_neighbors(adata,
+                                coord_type='generic',
+                                spatial_key='spatial',
+                                n_neighs=n_neighs,
+                                set_diag=include_self_loop,
+                                ) 
+        knn_connectivities = adata.obsp['spatial_connectivities']  
     if radius is not None:
         # Compute spatial neighborhood graph with radius
         sq.gr.spatial_neighbors(adata,
                                 coord_type='generic',
                                 spatial_key='spatial',
                                 radius=radius,
-                                set_diag=True)
-        radius_connectivities = adata.obsp['spatial_connectivities']
+                                set_diag=include_self_loop,
+                                )
+        radius_connectivities = adata.obsp['spatial_connectivities'] 
+        if n_neighs is not None:
+            adata.obsp[
+                'spatial_connectivities'] = knn_connectivities.multiply(
+                    adata.obsp['spatial_connectivities'])
     
-    if (radius is None) or delaunay_radius_union:
+    if delaunay:
         # Compute spatial neighborhood graph with delaunay triangulation
         sq.gr.spatial_neighbors(adata,
                                 coord_type='generic',
                                 spatial_key='spatial',
                                 delaunay=True,
-                                set_diag=True)
-
-        if delaunay_radius_union:
-            adata.obsp[
-                'spatial_connectivities'] = radius_connectivities.multiply(
-                    adata.obsp['spatial_connectivities'])
+                                set_diag=include_self_loop,
+                                )
+        if n_neighs is not None:
+                adata.obsp[
+                    'spatial_connectivities'] = knn_connectivities.multiply(
+                        adata.obsp['spatial_connectivities'])
+        if radius is not None:
+                adata.obsp[
+                    'spatial_connectivities'] = radius_connectivities.multiply(
+                        adata.obsp['spatial_connectivities'])            
         
     adata.layers['X_neighborhood'] = (
         adata.obsp['spatial_connectivities'].T @ adata.X)

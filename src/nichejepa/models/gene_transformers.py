@@ -568,7 +568,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         self.value_embed = nn.Embedding(self.n_value_bins,
                                         self.embed_dim)
         self.special_value_embed = nn.Embedding(
-            2 + self.n_special_values, # include <pad> and zero expression
+            2 + self.n_special_values + self.max_cls_tokens, # include <pad> and zero expression
             self.embed_dim,
             padding_idx=0)
         self.value_emb_weights_projection = ValueEmbWeightsProjection(
@@ -763,7 +763,6 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
-                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
@@ -835,7 +834,17 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             seg_embs = enc_seg_embed(segments)
             pos_embs = apply_masks(pos_embs, masks_pred)
             seg_embs = apply_masks(seg_embs, masks_pred)
-            
+
+            # Repeat embeddings for all context masks
+            pos_embs = repeat_interleave_batch(
+                pos_embs,
+                B,
+                repeat=len(masks_enc))
+            seg_embs = repeat_interleave_batch(
+                seg_embs,
+                B,
+                repeat=len(masks_enc))
+
             # Repeat mask token for all batches, masks and positions from
             # predictor masks
             pred_tokens = self.mask_token.repeat(
@@ -846,14 +855,18 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # Add positional and segment embeddings to mask tokens                  
             pred_tokens += pos_embs + seg_embs
 
+            # Repeat context embeddings for all target masks
+            z = z.repeat(len(masks_pred), 1, 1)
+
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([pred_tokens[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
-                           pred_tokens[:, keep_tokens_special:, :], # target gene tokens
-                           z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, keep_tokens_special:, :] # context gene tokens
-                           ], dim=1)
+            z = torch.cat([
+                z[:, :self.max_cls_tokens, :], # <cls> tokens
+                pred_tokens[:, self.max_cls_tokens:, :],
+                # non <cls> special tokens and target gene tokens
+                z[:, self.max_cls_tokens:, :]
+                # non <cls> special tokens and context gene tokens
+                ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -861,7 +874,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask and special tokens
-            z = z[:, :pred_tokens.size(1)]
+            z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
             z = self.predictor_proj(z)
@@ -886,7 +899,6 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
                 masks_pred: Union[List[torch.Tensor], torch.Tensor],
-                keep_tokens_special: int,
                 masks_attention: torch.Tensor=None,
                 ) -> torch.Tensor:
             """
@@ -958,6 +970,16 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             token_embs = apply_masks(token_embs, masks_pred)
             seg_embs = apply_masks(seg_embs, masks_pred)
 
+            # Repeat embeddings for all context masks
+            token_embs = repeat_interleave_batch(
+                token_embs,
+                B,
+                repeat=len(masks_enc))
+            seg_embs = repeat_interleave_batch(
+                seg_embs,
+                B,
+                repeat=len(masks_enc))
+
             # Repeat mask token for all batches, masks and "positions" from
             # predictor masks
             pred_tokens = self.mask_token.repeat(
@@ -968,14 +990,18 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Add gene and segment embeddings to mask tokens                  
             pred_tokens += token_embs + seg_embs
 
+            # Repeat context embeddings for all target masks
+            z = z.repeat(len(masks_pred), 1, 1)
+
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([pred_tokens[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, (self.n_special_tokens-self.max_cls_tokens):keep_tokens_special, :], # <cls> tokens
-                           pred_tokens[:, keep_tokens_special:, :], # target gene tokens
-                           z[:, :(self.n_special_tokens-self.max_cls_tokens), :], # non <cls> special tokens
-                           z[:, keep_tokens_special:, :] # context gene tokens
-                           ], dim=1)
+            z = torch.cat([
+                z[:, :self.max_cls_tokens, :], # <cls> tokens
+                pred_tokens[:, self.max_cls_tokens:, :],
+                # non <cls> special tokens and target gene tokens
+                z[:, self.max_cls_tokens:, :]
+                # non <cls> special tokens and context gene tokens
+                ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
@@ -983,7 +1009,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask and special tokens
-            z = z[:, :pred_tokens.size(1)]
+            z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
             z = self.predictor_proj(z)
