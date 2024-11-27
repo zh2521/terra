@@ -127,6 +127,7 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
                               seq_len_cell: int,
                               n_special_tokens: int,
                               max_cls_tokens: int,
+                              n_segments: int,
                               ):
     """
     Configures attention masks based on the controlled attention pattern.
@@ -152,6 +153,7 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
         The starting index of valid tokens for masking, excluding special
         tokens, within the attention matrix.
     max_cls_tokens:
+    n_segments:
     """
     # <cls> tokens do not attent to other <cls> tokens
     if controlled_attention_pattern[0][1]:
@@ -227,9 +229,9 @@ def configure_attention_masks(controlled_attention_pattern: torch.Tensor,
 
     # Gene tokens do not attent to other gene tokens
     if controlled_attention_pattern[1][3]:
-        for i in range(max_cls_tokens):
+        for i in range(n_segments):
             start_idx = n_special_tokens + (i * seq_len_cell)
-            if i == (max_cls_tokens - 1):
+            if i == (n_segments - 1):
                 end_idx = None # last <cls> token will capture until end
             else:
                 end_idx = n_special_tokens + ((i + 1) * seq_len_cell)
