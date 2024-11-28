@@ -1001,8 +1001,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([
-                z[:, :self.max_cls_tokens, :], # <cls> tokens
+            z_out = torch.cat([
                 pred_tokens[:, self.max_cls_tokens:, :],
                 # non <cls> special tokens and target gene tokens
                 z[:, self.max_cls_tokens:, :]
@@ -1011,8 +1010,15 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Run forward prop
             for blk in self.predictor_blocks:
-                z = blk(z, masks=masks_attention)
-            z = self.predictor_norm(z)
+                z_out = blk(z_out, masks=masks_attention)
+            z_out = self.predictor_norm(z_out)
+
+            z = torch.cat([
+                z[:, :self.max_cls_tokens, :], # <cls> tokens
+                # non <cls> special tokens and target gene tokens
+                z_out
+                # non <cls> special tokens and context gene tokens
+                ], dim=1)
 
             # Return predictions for (target) mask and special tokens
             z = z[:, :pred_tokens.size(1), :]
