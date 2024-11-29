@@ -280,7 +280,8 @@ def infer(args: dict,
                 mask_indices = torch.isin(
                     tokens,
                     torch.tensor(masked_tokens, device=tokens.device)
-                    ).unsqueeze(1).unsqueeze(1).expand(-1, -1, 1108, -1) # temp
+                    ).unsqueeze(1).unsqueeze(1).expand(
+                        -1,-1, tokens.shape[-1], -1)
                 masks_attention[mask_indices] = 0
 
             if gt_type == 'rank':
@@ -340,13 +341,22 @@ def infer(args: dict,
                     seq_len_cell=seq_len_cell,
                     n_special_tokens=n_special_tokens,
                     max_cls_tokens=max_cls_tokens)
-                neighborhood_mask = create_binary_selection_mask(
-                    tokens,
-                    selection_type="agg_neighborhood",
-                    excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens)
+                if tokenizer_type == 'cell_neighborhood':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type="agg_neighborhood",
+                        excluded_tokens=agg_excluded_tokens,
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)
+                elif tokenizer_type == 'cell_graph':
+                    neighborhood_mask = create_binary_selection_mask(
+                        tokens,
+                        selection_type="agg_graph",
+                        excluded_tokens=agg_excluded_tokens,
+                        seq_len_cell=seq_len_cell,
+                        n_special_tokens=n_special_tokens,
+                        max_cls_tokens=max_cls_tokens)                    
 
                 if agg_type == 'avg':
                     cell_emb = compute_mean_unmasked_emb(emb,
