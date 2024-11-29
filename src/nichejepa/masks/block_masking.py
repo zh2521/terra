@@ -27,6 +27,8 @@ class BlockMaskCollator:
     n_targets:
         Number of target masks to sample for each token sequence.
     n_contexts:
+    n_segments:
+        Number of segments
     seq_len_cell:
         The length of the token sequence representing the cell segment.
     seq_len_neighborhood:
@@ -44,12 +46,14 @@ class BlockMaskCollator:
         max will be sampled for each batch.
     controlled_attention_pattern:
         The pattern that the model uses to generate the attention matrix.
+    controlled_attention_type:
     restrict_special_attention:
         If 'True', restrict attention of special tokens to themselves
     """
     def __init__(self,
                  n_targets: int,
                  n_contexts: int,
+                 n_segments: int,
                  seq_len_cell: int,
                  seq_len_neighborhood: int,
                  max_special_tokens: int,
@@ -57,9 +61,11 @@ class BlockMaskCollator:
                  max_cls_tokens: int,
                  per_block_mask_ratio: float=0.5,
                  controlled_attention_pattern: Optional[torch.Tensor]=None,
+                 controlled_attention_type: Literal['enc', 'pred', 'enc_pred']='enc_pred',
                  restrict_special_attention: bool=False):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
+        self.n_segments = n_segments
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len_genes = self.seq_len_cell + self.seq_len_neighborhood
@@ -68,6 +74,7 @@ class BlockMaskCollator:
         self.max_cls_tokens = max_cls_tokens
         self.per_block_mask_ratio = per_block_mask_ratio
         self.controlled_attention_pattern = controlled_attention_pattern
+        self.controlled_attention_type = controlled_attention_type
         self.restrict_special_attention = restrict_special_attention
 
     def _sample_gene_mask(self,
@@ -291,16 +298,24 @@ class BlockMaskCollator:
                     i,
                     (i+1):] = 0
 
-        # Create predictor attention mask (without controlled attention)
-        if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
-            collated_masks_attention_pred = create_controlled_mask_context_target(
-                collated_masks_attention,
-                n_special_tokens=self.n_special_tokens,
-                max_cls_tokens=self.max_cls_tokens,
-                target_masks=collated_target_masks,
-                context_masks=collated_context_masks)
-        else:
-            collated_masks_attention_pred = None
+        if 'pred' not in self.controlled_attention_type:
+            # Create predictor attention mask (without controlled attention)
+            if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
+                collated_masks_attention_pred = create_controlled_mask_context_target(
+                    collated_masks_attention,
+                    n_special_tokens=self.n_special_tokens,
+                    target_masks=collated_target_masks,
+                    context_masks=collated_context_masks)
+            else:
+                collated_masks_attention_pred = None
+        if 'enc' not in self.controlled_attention_type:
+            # Create encoder attention mask (without controlled attention)
+            if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
+                collated_masks_attention_enc = create_controlled_mask_context_target(
+                    collated_masks_attention,
+                    context_masks=collated_context_masks)
+            else:
+                collated_masks_attention_enc = None            
 
         # Apply controlled attention
         if self.controlled_attention_pattern is not None:
@@ -310,14 +325,26 @@ class BlockMaskCollator:
                     collated_masks_attention,
                     self.seq_len_cell,
                     self.n_special_tokens,
-                    self.max_cls_tokens)
+                    self.max_cls_tokens,
+                    self.n_segments)
 
-        # Create encoder attention mask (with controlled attention)
-        if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
-            collated_masks_attention_enc = create_controlled_mask_context_target(
-                collated_masks_attention,
-                context_masks=collated_context_masks)
-        else:
-            collated_masks_attention_enc = None
+        if 'pred' in self.controlled_attention_type:
+            # Create predictor attention mask (with controlled attention)
+            if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
+                collated_masks_attention_pred = create_controlled_mask_context_target(
+                    collated_masks_attention,
+                    n_special_tokens=self.n_special_tokens,
+                    target_masks=collated_target_masks,
+                    context_masks=collated_context_masks)
+            else:
+                collated_masks_attention_pred = None
+        if 'enc' in self.controlled_attention_type:
+            # Create encoder attention mask (with controlled attention)
+            if (self.controlled_attention_pattern is not None) or (self.max_cls_tokens > 2):
+                collated_masks_attention_enc = create_controlled_mask_context_target(
+                    collated_masks_attention,
+                    context_masks=collated_context_masks)
+            else:
+                collated_masks_attention_enc = None    
 
         return collated_batch, collated_context_masks, collated_target_masks, collated_masks_attention, collated_masks_attention_enc, collated_masks_attention_pred
