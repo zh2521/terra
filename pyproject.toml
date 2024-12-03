@@ -25,6 +25,7 @@ dependencies = [
     "anndata",
     "squidpy",
     "scikit-misc",
+    "transformers",
     "datasets",
     # for debug logging (referenced from the issue template)
     "session-info",
