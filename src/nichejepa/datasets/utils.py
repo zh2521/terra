@@ -112,8 +112,9 @@ def prepare_dataset(args: dict,
     elif args['data']['test_batch_ids']:
         cell_ids = dataset['cell_id']
         test_batch_mask = [
-            any(batch_id in cell_id for batch_id in args['data'][
-                'test_batch_ids']) for cell_id in cell_ids]
+            any(batch_id == f"{cell_id.split('_')[0]}_{cell_id.split('_')[1]}"
+                for batch_id in args['data']['test_batch_ids'])
+            for cell_id in cell_ids]
         train_indices = [
             index for index, value in enumerate(test_batch_mask) if not value]
         test_indices = [

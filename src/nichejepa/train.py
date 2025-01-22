@@ -27,6 +27,7 @@ from typing import Optional
 import datasets
 import numpy as np
 import pandas as pd
+import pickle
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
@@ -96,9 +97,8 @@ def train(args: dict,
 
     # Load params from config file
     dataset_name = args['data']['dataset_name']
+    token_dict_folder_path = args['data']['token_dict_folder_path']
     tokenizer_type = args['data']['tokenizer_type']
-    n_special_values = args['data']['n_special_values']
-    vocab_size = args['data']['vocab_size']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
@@ -107,6 +107,7 @@ def train(args: dict,
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
 
+    add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
@@ -128,6 +129,7 @@ def train(args: dict,
         controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
     else:
         controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+    controlled_attention_type = args['mask']['controlled_attention_type']
     restrict_special_attention = args['mask']['restrict_special_attention']
 
     warmup = args['optimization']['warmup']
@@ -149,16 +151,24 @@ def train(args: dict,
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
 
+    # Load token dict and get token dict-specfic params
+    with open(token_dict_folder_path, 'rb') as file:
+        token_dict = pickle.load(file)
+    vocab_size = len(token_dict)
+    n_special_values = sum(1 for key in token_dict if "spv" in key)
+    max_special_tokens = sum(1 for key in token_dict if "cls" in key) + sum(
+        1 for key in token_dict if "spt" in key)
+
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
-        max_special_tokens = 7
-        max_cls_tokens = 2
-        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
+        if add_cls:
+            special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens            
     elif tokenizer_type == 'cell_graph':
-        max_special_tokens = 105
-        max_cls_tokens = 100
-        special_tokens = [
-            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
+        if add_cls:
+            special_tokens = [
+                f'cls_{i}' for i in range(n_segments)] + special_tokens
+    
+    max_cls_tokens = sum('cls' in token for token in special_tokens)
 
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
@@ -238,6 +248,7 @@ def train(args: dict,
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
+            n_segments=n_segments,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             max_special_tokens=max_special_tokens,
@@ -245,6 +256,7 @@ def train(args: dict,
             max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
             controlled_attention_pattern=controlled_attention_pattern,
+            controlled_attention_type=controlled_attention_type,
             restrict_special_attention=restrict_special_attention)
     else:
         mask_collator = RandomMaskCollator(
@@ -262,7 +274,6 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        max_cls_tokens=max_cls_tokens,
         max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
@@ -274,7 +285,6 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        max_cls_tokens=max_cls_tokens,
         max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
@@ -380,8 +390,10 @@ def train(args: dict,
         train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
-            positions = udata[2].to(device, non_blocking=True)
-            counts = udata[3].to(device, non_blocking=True)
+            if gt_type == 'rank':
+                positions = udata[2].to(device, non_blocking=True)
+            elif gt_type == 'counts':
+                counts = udata[2].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -389,13 +401,6 @@ def train(args: dict,
                 masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
             if masks_attention_pred is not None:
                 masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)
-
-            #torch.set_printoptions(threshold=float('inf'))
-            #print(tokens[0, :])
-            #print(segments[0, :])
-            #print(counts[0, :])
-            #print(udata[-1])
-            #raise ValueError
 
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))

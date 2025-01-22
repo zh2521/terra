@@ -1,6 +1,7 @@
 import copy
 import logging
 import os
+import pickle
 import sys
 import yaml
 from collections import defaultdict
@@ -93,6 +94,7 @@ def infer(args: dict,
         torch.cuda.set_device(device)
 
     # Load params from config file
+    add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
@@ -105,13 +107,12 @@ def infer(args: dict,
     use_flash_attention = args['meta']['use_flash_attention']
 
     dataset_name = args['data']['dataset_name']
+    token_dict_folder_path = args['data']['token_dict_folder_path']
     raw_data_folder_path = args['data']['raw_data_folder_path']
     batch_size = args['data']['batch_size']
-    vocab_size = args['data']['vocab_size']
     pin_memory = args['data']['pin_memory']
     num_workers = args['data']['num_workers']
     tokenizer_type = args['data']['tokenizer_type']
-    n_special_values = args['data']['n_special_values']
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
@@ -126,33 +127,34 @@ def infer(args: dict,
         controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
     else:
         controlled_attention_pattern = args['mask']['controlled_attention_pattern']
+    controlled_attention_type = args['mask']['controlled_attention_type']
     restrict_special_attention = args['mask']['restrict_special_attention']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
     
+    # Load token dict and get token dict-specfic params
+    with open(token_dict_folder_path, 'rb') as file:
+        token_dict = pickle.load(file)
+    vocab_size = len(token_dict)
+    n_special_values = sum(1 for key in token_dict if "spv" in key)
+    max_special_tokens = sum(1 for key in token_dict if "cls" in key) + sum(
+        1 for key in token_dict if "spt" in key)
+
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
-        max_special_tokens = 7
-        max_cls_tokens = 2
-        special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
+        if add_cls:
+            special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens  
     elif tokenizer_type == 'cell_graph':
-        max_special_tokens = 105
-        max_cls_tokens = 100
-        special_tokens = [
-            f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
+        if add_cls:
+            special_tokens = [
+                f'cls_{i}' for i in range(n_segments)] + special_tokens
+
+    max_cls_tokens = sum('cls' in token for token in special_tokens)
 
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
-
-    # Define tokenizer-specific params
-    if tokenizer_type == 'cell_neighborhood':
-        max_special_tokens = 7
-        max_cls_tokens = 2
-    elif tokenizer_type == 'cell_graph':
-        max_special_tokens = 105
-        max_cls_tokens = 100
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
@@ -200,6 +202,7 @@ def infer(args: dict,
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
+            n_segments=n_segments,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             max_special_tokens=max_special_tokens,
@@ -207,6 +210,7 @@ def infer(args: dict,
             max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
             controlled_attention_pattern=controlled_attention_pattern,
+            controlled_attention_type=controlled_attention_type,
             restrict_special_attention=restrict_special_attention)
     else:
         mask_collator = RandomMaskCollator(
@@ -224,7 +228,6 @@ def infer(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        max_cls_tokens=max_cls_tokens,
         max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
@@ -265,8 +268,10 @@ def infer(args: dict,
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
         segments = udata[1].to(device, non_blocking=True)
-        positions = udata[2].to(device, non_blocking=True)
-        counts = udata[3].to(device, non_blocking=True)
+        if gt_type == 'rank':
+            positions = udata[2].to(device, non_blocking=True)
+        elif gt_type == 'counts':
+            counts = udata[2].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
@@ -419,6 +424,7 @@ def infer(args: dict,
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
     adata_metadata_subset = adata_metadata[
         adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
+
     merged_obs = pd.merge(adata.obs,
                           adata_metadata_subset.obs,
                           on='cell_id')
