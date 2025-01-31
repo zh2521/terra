@@ -469,6 +469,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # Add positional and segment embeddings to token embeddings
             x = pos_emb + seg_emb + token_emb
 
+            x_special = x[:, :self.n_special_tokens]
+            x = x[:, self.n_special_tokens:]
+
             B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
                 
             # Mask token embeddings if masks are provided
@@ -480,6 +483,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
                 x = blk(x, masks=masks_attention)
             if self.norm is not None:
                 x = self.norm(x)
+
+            x = torch.cat([x_special, x], dim=1)
 
             return x
 
@@ -521,14 +526,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         """
         # Format masks
         if masks is not None:
-            if not isinstance(masks, list):
-                masks = [masks]
-        
-        # Replace special tokens (except <cls> tokens) with pad tokens for
-        # inference
-        positions[:, self.max_cls_tokens:self.n_special_tokens] = 0
-        segments[:, self.max_cls_tokens:self.n_special_tokens] = 0
-        tokens[:, self.max_cls_tokens:self.n_special_tokens] = 0
+                if not isinstance(masks, list):
+                    masks = [masks]
 
         # Get positional, segment and token embeddings
         pos_emb = self.pos_embed(positions)
@@ -537,6 +536,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
         # Add positional and segment embeddings to token embeddings
         x = pos_emb + seg_emb + token_emb
+
+        x_special = x[:, :self.n_special_tokens]
+        x = x[:, self.n_special_tokens:]
 
         B, N, D = x.shape
 
@@ -865,23 +867,17 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = z.repeat(len(masks_pred), 1, 1)
 
             # Concatenate mask tokens and context embeddings of gene tokens
-            z_out = torch.cat([
-                pred_tokens[:, self.n_special_tokens:, :], # target gene tokens
-                z[:, self.n_special_tokens:, :] # context gene tokens
+            z = torch.cat([
+                pred_tokens[:, self.n_special_tokens:, :], # target gene tokens (excl. special tokens)
+                z[:, :, :] # context gene tokens (incl. special tokens)
                 ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
-                z_out = blk(z_out, masks=masks_attention)
-            z_out = self.predictor_norm(z_out)
+                z = blk(z, masks=masks_attention)
+            z = self.predictor_norm(z)
 
-            # Concatenate context embeddings of special tokens
-            z = torch.cat([
-                z[:, :self.n_special_tokens, :], # special tokens
-                z_out
-                ], dim=1)
-
-            # Return predictions for (target) mask and special tokens
+            # Return predictions for (target) mask tokens
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
