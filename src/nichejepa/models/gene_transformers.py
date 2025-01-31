@@ -873,6 +873,10 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = z.repeat(len(masks_pred), 1, 1)
             x_special = x_special.repeat(len(masks_pred), 1, 1)
 
+            print(z.shape)
+            print(x_special.shape)
+            print(pred_tokens.shape)
+
             # Concatenate mask tokens and context embeddings of gene tokens
             z = torch.cat([
                 pred_tokens, # target gene tokens (excl. special tokens)
@@ -880,7 +884,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 z # context gene tokens (excl. special tokens)
                 ], dim=1)
 
+            print('-----')
             print(z.shape)
+            print('-----')
 
             # Run forward prop
             for blk in self.predictor_blocks:
