@@ -148,24 +148,31 @@ class CellBaseDataset(Dataset):
             n_nz_cls_tokens = sum(1 for token in cls_tokens if token != 0)
             n_zero_cls_tokens = n_cls_tokens - n_nz_cls_tokens
             tokens = cls_tokens + tokens
+            
+            # Add <cls> and special token segments
             segments = list(range(1, 1 + n_nz_cls_tokens)) \
                 + [0] * n_zero_cls_tokens \
                 + list(range(1 + n_nz_cls_tokens, 1 + n_nz_cls_tokens + (
                     self.n_special_tokens - n_cls_tokens))) \
                 + segments
             if self.gt_type == 'counts':
+                # Add <cls> values
                 values = list(range(2, 2 + n_nz_cls_tokens)) \
                     + [0] * n_zero_cls_tokens \
                     + values
             elif self.gt_type == 'rank':
+                # Add <cls> and special token positions
                 positions = list(range(1, 1 + n_nz_cls_tokens)) \
                     + [0] * n_zero_cls_tokens \
                     + list(range(1 + n_nz_cls_tokens, 1 + n_nz_cls_tokens + (
                         self.n_special_tokens - n_cls_tokens))) \
                     + positions
+
         else:
+            # Add special token segments
             segments = list(range(1, 1 + self.n_special_tokens)) + segments
             if self.gt_type == 'rank':
+                # Add special token positions
                 positions = list(
                     range(1, 1 + self.n_special_tokens)) + positions
 
@@ -179,7 +186,6 @@ class CellBaseDataset(Dataset):
                     values: Optional[list],
                     n_nz_tokens: int,
                     size: int,
-                    target_read_depth: Optional[int]=10000,
                     ) -> Tuple[list[int], list[int]]:
         """
         Sample a subset of gene tokens and corresponding values based on a
@@ -195,9 +201,6 @@ class CellBaseDataset(Dataset):
             Number of nonzero tokens in `tokens`.
         size:
             Size of the sampled subset.
-        target_read_depth:
-            Target read depth. Only relevant if `sampling_strategy` is 
-            'read_depth_norm_count_sampling'.
             
         Returns
         --------
@@ -343,7 +346,7 @@ class CellGraphDataset(CellBaseDataset):
         # Get (sampled) gene tokens and values/positions for index cell segment
         tokens, values = self._get_segment_seq(
             item=item,
-            segment=self.max_special_tokens, # index cell segment
+            segment=self.max_special_tokens, # first cell (index cell) segment
             segment_seq_len=self.seq_len_cell)
         if self.gt_type == 'rank':
             positions = [position if tokens[i] != 0 else 0 for i, position in 
@@ -463,7 +466,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
             positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
                 range(1, len(gene_tokens_neigh) + 1))
             positions = [position if tokens[i] != 0 else 0 for i, position in 
-                        enumerate(positions)]
+                         enumerate(positions)]
         elif self.gt_type == 'counts':
             values = values_cell + values_neigh
 
