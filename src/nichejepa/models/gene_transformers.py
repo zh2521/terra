@@ -469,17 +469,14 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # Add positional and segment embeddings to token embeddings
             x = pos_emb + seg_emb + token_emb
 
-            x_special = x[:, :self.n_special_tokens]
-            x = x[:, self.n_special_tokens:]
-
             B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
                 
             # Mask token embeddings if masks are provided
             if masks is not None:
                 x = apply_masks(x, masks)
 
-            print(x.shape)
-            print(masks_attention.shape)
+            x_special = x[:, :self.n_special_tokens]
+            x = x[:, self.n_special_tokens:]
             
             # Run forward prop
             for i, blk in enumerate(self.blocks):
@@ -540,14 +537,14 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         # Add positional and segment embeddings to token embeddings
         x = pos_emb + seg_emb + token_emb
 
-        x_special = x[:, :self.n_special_tokens]
-        x = x[:, self.n_special_tokens:]
-
         B, N, D = x.shape
 
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
+
+        x_special = x[:, :self.n_special_tokens]
+        x = x[:, self.n_special_tokens:]
 
         # Run forward prop and store embeddings after each block
         n_blocks = len(self.blocks)

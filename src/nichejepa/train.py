@@ -449,13 +449,13 @@ def train(args: dict,
                                     segments=segments,
                                     tokens=tokens,
                                     masks=masks_enc,
-                                    masks_attention=masks_attention_enc)                       
+                                    masks_attention=None)                       
                     elif gt_type == 'counts':
                         z = encoder(tokens=tokens,
                                     segments=segments,
                                     counts=counts,
                                     masks=masks_enc,
-                                    masks_attention=masks_attention_enc)
+                                    masks_attention=None)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)

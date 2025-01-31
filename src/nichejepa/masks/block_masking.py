@@ -181,6 +181,10 @@ class BlockMaskCollator:
             context_block_mask = context_block_mask[
                 torch.randperm(len(context_block_mask))]
 
+            context_block_mask = torch.cat((
+                            torch.arange(self.n_special_tokens),
+                            context_block_mask))
+
             context_masks.append(context_block_mask)
 
             start = end
