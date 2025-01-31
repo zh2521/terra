@@ -392,7 +392,6 @@ def train(args: dict,
             elif gt_type == 'counts':
                 counts = udata[2].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
-            print(masks_enc[0].shape)
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention_enc = masks_attention_enc.to(device, non_blocking=True)
             masks_attention_pred = masks_attention_pred.to(device, non_blocking=True)

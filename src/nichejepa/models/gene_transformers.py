@@ -477,6 +477,11 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # Mask token embeddings if masks are provided
             if masks is not None:
                 x = apply_masks(x, masks)
+
+            print(x.shape)
+            if masks is not None:
+                print(masks[0].shape)
+            print(masks_attention.shape)
             
             # Run forward prop
             for i, blk in enumerate(self.blocks):
@@ -871,6 +876,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 pred_tokens[:, self.n_special_tokens:, :], # target gene tokens (excl. special tokens)
                 z[:, :, :] # context gene tokens (incl. special tokens)
                 ], dim=1)
+
+            print(z.shape)
+            print(masks_attention.shape)
 
             # Run forward prop
             for blk in self.predictor_blocks:
