@@ -112,13 +112,12 @@ class BlockMaskCollator:
 
         # Get non-zero indices and segments excluding special tokens
         ns_tokens = tokens[self.n_special_tokens:]
-        nz_ns_indices = torch.nonzero(ns_tokens).add_(
-            self.n_special_tokens).squeeze()
+        nz_ns_indices = torch.nonzero(ns_tokens).squeeze()
         total_nz_ns = len(nz_ns_indices)
     
         # Initialize masks
         target_masks = []
-        context_mask = torch.zeros(len(tokens), dtype=torch.int32)
+        context_mask = torch.zeros(len(ns_tokens), dtype=torch.int32)
 
         # Compute block length based on number of blocks; avoid zero division
         block_length = max(1, total_nz_ns // self.n_targets)

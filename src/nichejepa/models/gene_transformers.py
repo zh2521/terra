@@ -835,6 +835,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 seg_embed[:, :self.n_special_tokens] +
                 token_embed[:, :self.n_special_tokens])
 
+            pos_embed = pos_embed[:, self.n_special_tokens:]
+            seg_embed = seg_embed[:, self.n_special_tokens:]
+
             # Add positional embeddings to tokens from context masks (only
             # keep context mask indices and sum positional and segment
             # embeddings without token embeddings)
