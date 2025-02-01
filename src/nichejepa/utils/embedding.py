@@ -178,6 +178,7 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
                 :, seq_len_cell + top_k:] = False
     elif selection_type == 'agg_graph':
         # Select non-padding tokens in all segments
+        selection_mask[:, :] = True
         selection_mask[ns_tokens == 0] = False
         if excluded_tokens:
             # Exclude other excluded tokens

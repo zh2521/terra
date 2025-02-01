@@ -534,8 +534,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
         # Add positional and segment embeddings to token embeddings
         x = pos_emb + seg_emb + token_emb
-
-        B, N, D = x.shape
+        #B, N, D = x.shape
 
         # Remove special tokens
         x = x[:, self.n_special_tokens:]
