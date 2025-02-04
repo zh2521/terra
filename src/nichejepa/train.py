@@ -125,12 +125,6 @@ def train(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
-    if args['mask']['controlled_attention_pattern'] is not None:
-        controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
-    else:
-        controlled_attention_pattern = args['mask']['controlled_attention_pattern']
-    controlled_attention_type = args['mask']['controlled_attention_type']
-    restrict_special_attention = args['mask']['restrict_special_attention']
 
     warmup = args['optimization']['warmup']
     num_epochs = args['optimization']['epochs']
@@ -150,6 +144,13 @@ def train(args: dict,
     write_tag = args['state']['write_tag']
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
+
+    if args['data']['precomputed_n_nonzero_tokens']:
+        with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
+            n_nonzero_tokens= pickle.load(f)
+    else:
+        n_nonzero_tokens = None
+        print(n_nonzero_tokens)
 
     # Load token dict and get token dict-specfic params
     with open(token_dict_folder_path, 'rb') as file:
@@ -275,7 +276,8 @@ def train(args: dict,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
-        sampling_strategy=sampling_strategy)
+        sampling_strategy=sampling_strategy,
+        n_nonzero_tokens_list=n_nonzero_tokens)
 
     test_cell_dataset = make_cell_dataset(
         dataset=test_dataset,
