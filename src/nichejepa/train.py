@@ -118,6 +118,7 @@ def train(args: dict,
     seg_learnable = args['meta']['seg_learnable']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
+    center_momentum = args['meta']['center_momentum']
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -243,6 +244,9 @@ def train(args: dict,
         seg_learnable=seg_learnable,
         use_flash_attention=use_flash_attention)
     target_encoder = copy.deepcopy(encoder)
+
+    # Initialize center for target centering
+    center = None
 
     # Initialize mask collator
     if block_masking:
@@ -400,11 +404,11 @@ def train(args: dict,
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
-            def train_step():
+            def train_step(center):
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
 
-                def forward_target():
+                def forward_target(center):
                     with torch.no_grad(): # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
@@ -420,7 +424,17 @@ def train(args: dict,
                                                masks_attention=masks_attention)
 
                         # Normalize over feature dim
-                        h = F.layer_norm(h, (h.size(-1),))
+                        # h = F.layer_norm(h, (h.size(-1),))
+
+                        # Update center over batch for centering like in DINO
+                        if center is not None:
+                            center = center_momentum * center + (
+                                1-center_momentum) * h.mean(dim=0, keepdim=True)
+                        else:
+                            center = h.mean(dim=0, keepdim=True)
+                        
+                        # Center over batch
+                        h = h - center
 
                         # Only keep encoded targets (masked genes of h); output
                         # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
@@ -438,7 +452,7 @@ def train(args: dict,
                             B,
                             repeat=len(masks_enc))
 
-                        return h
+                        return h, center
 
                 def forward_context():
                     # Context encoder forward pass with output dim (BATCH_SIZE,
@@ -488,7 +502,7 @@ def train(args: dict,
                 # Step 1: forward pass
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
-                    h = forward_target()
+                    h, center = forward_target(center)
                     z = forward_context()
                     loss = loss_fn(z, h)
 
@@ -510,8 +524,9 @@ def train(args: dict,
                                                 target_encoder.parameters()):
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
-                return (float(loss), _new_lr, _new_wd, grad_stats)
-            (loss, _new_lr, _new_wd, grad_stats), etime = gpu_timer(train_step)
+                return (float(loss), _new_lr, _new_wd, grad_stats, center)
+            (loss, _new_lr, _new_wd, grad_stats, center), etime = gpu_timer(
+                train_step, center)
             loss_meter.update(loss)
             time_meter.update(etime)
 

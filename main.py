@@ -59,7 +59,7 @@ def process_main(rank, args, params, world_size, port, devices, logger, folder_p
         train(params, train_dataset, test_dataset, save_folder_path=folder_path)
     else:
         train_dataset, test_dataset, val_dataset = prepare_dataset(params)
-        loss_val = train(params, val_dataset, test_dataset, resume_preempt=True, save_folder_path=folder_path, train_=False)
+        loss_val = train(params, val_dataset, test_dataset, resume_preempt=True, save_folder_path=folder_path)
         params['data']['test_batch_ids'] = ['1000_batch11', '1000_batch19', '1000_batch32']
         params['data']['split_val'] = 0.0
         train_dataset, test_dataset, val_dataset = prepare_dataset(params)
@@ -96,7 +96,7 @@ def sweep_func(args):
     num_gpus = len(args.devices)
     processes = []
     
-    wandb.init(project='nichejepa-sweep', mode='online')
+    wandb.init(project='nichejepa-sweep', mode='offline')
 
     if len(wandb.config.keys()) != 0:
       update_from_sweep = True
