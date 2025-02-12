@@ -118,6 +118,7 @@ def train(args: dict,
     seg_learnable = args['meta']['seg_learnable']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
+    centering = args['meta']['centering']
     center_momentum = args['meta']['center_momentum']
 
     n_contexts = args['mask']['n_contexts']
@@ -426,15 +427,17 @@ def train(args: dict,
                         # Normalize over feature dim
                         # h = F.layer_norm(h, (h.size(-1),))
 
-                        # Update center over batch for centering like in DINO
-                        if center is not None:
-                            center = center_momentum * center + (
-                                1-center_momentum) * h.mean(dim=0, keepdim=True)
-                        else:
-                            center = h.mean(dim=0, keepdim=True)
-                        
-                        # Center over batch
-                        h = h - center
+                        if centering:
+                            # Update center over batch for centering like in DINO
+                            if center is not None:
+                                center = center_momentum * center + (
+                                    1-center_momentum) * h.mean(
+                                        dim=0, keepdim=True)
+                            else:
+                                center = h.mean(dim=0, keepdim=True)
+                            
+                            # Center over batch
+                            h = h - center
 
                         # Only keep encoded targets (masked genes of h); output
                         # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
@@ -562,6 +565,7 @@ def train(args: dict,
                             grad_stats.min,
                             grad_stats.max))
             log_stats()
+            wandb.log({"loss": loss, 'lr':_new_lr, "epoch": epoch})
             assert not np.isnan(loss), 'loss is nan'
 
         # -- Save Checkpoint after every epoch
