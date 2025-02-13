@@ -148,7 +148,7 @@ def train(args: dict,
     r_file = args['state']['read_checkpoint']
 
     if args['data']['precomputed_n_nonzero_tokens']:
-        with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
+        with open(args['data']['precomputed_n_nonzero_tokens'] + "_train.pkl", "rb") as f: 
             n_nonzero_tokens= pickle.load(f)
     else:
         n_nonzero_tokens = None
