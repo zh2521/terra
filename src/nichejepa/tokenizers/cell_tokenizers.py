@@ -408,7 +408,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         super().__init__(**base_tokenizer_kwargs)
 
     def _tokenize_adata(self,
-                        adata_file_path: Path | str,
+                        adata_file_path: Optional[Path | str]=None,
+                        adata: Optional[ad.AnnData]=None,
                         ) -> dict:
         """
         Tokenize cells from an '.h5ad' (AnnData) file, equivalent to one batch.
@@ -417,6 +418,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         ----------
         adata_file_path:
             Path to AnnData file containing cells to be tokenized.
+        adata:
+            AnnData object to be tokenized.
 
         Returns
         ----------
@@ -454,7 +457,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict = {}
 
         # Read batch
-        adata = ad.read_h5ad(adata_file_path)
+        if adata is None:
+            adata = ad.read_h5ad(adata_file_path)
 
         print('Filtering cells...')
         # Filter cells based on adata.obs['filter_pass']
@@ -927,7 +931,8 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         super().__init__(**base_tokenizer_kwargs)
 
     def _tokenize_adata(self,
-                        adata_file_path: Path | str,
+                        adata_file_path: Optional[Path | str]=None,
+                        adata: Optional[ad.AnnData]=None,
                         ) -> dict:
         """
         Tokenize cells from an '.h5ad' (anndata) file.
@@ -969,7 +974,8 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         # Initialize dict to collect tokens and cell ids
         adata_dict = {}
 
-        adata = ad.read_h5ad(adata_file_path)
+        if adata is None:
+            adata = ad.read_h5ad(adata_file_path)
 
         print('Filtering cells.')
         # Filter to remove poor quality cells
