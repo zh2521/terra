@@ -15,7 +15,6 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 from datasets import load_from_disk
-from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 from pyensembl import EnsemblRelease
 
@@ -25,7 +24,6 @@ from .helper import init_model, load_checkpoint
 from .masks.block_masking  import BlockMaskCollator
 from .masks.random_masking import RandomMaskCollator
 from .tokenizers import cell_tokenizers
-from .utils.distributed import init_distributed
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
                               compute_unmasked_rank_based_weights,
@@ -48,6 +46,7 @@ logger = logging.getLogger()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
+          emb_layers: Optional[list]=None,
           cell_gene_ids: List=[],
           neighborhood_gene_ids: List=[],
           agg_type: Literal['cls',
@@ -69,6 +68,10 @@ def infer(args: dict,
         Dictionary containing the hyperparameters from the config file.
     dataset:
         Cell dataset for which embeddings will be inferred.
+    load_folder_path:
+        Path where the checkpoint is stored.
+    emb_layers:
+        Layers for which to retrieve the embedding.
     cell_gene_ids:
         List with gene IDs for which cell gene embeddings will be retrived.
     neighborhood_gene_ids:
@@ -134,7 +137,7 @@ def infer(args: dict,
 
     if args['data']['precomputed_n_nonzero_tokens']:
         with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
-            n_nonzero_tokens= pickle.load(f)
+            n_nonzero_tokens = pickle.load(f)
     else:
         n_nonzero_tokens = None
         print(n_nonzero_tokens)
@@ -162,6 +165,10 @@ def infer(args: dict,
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
 
+    # Specify last emb layer if not defined
+    if emb_layers is None:
+        emb_layers = [enc_depth]
+
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
     feature_path = f"{save_folder}/"
@@ -171,16 +178,13 @@ def infer(args: dict,
     with open(dump, 'w') as f:
         yaml.dump(args, f)
 
-    # Initialize torch distributed backend
-    world_size, rank = init_distributed()
-
     # Define checkpointing path
     latest_path = os.path.join(load_folder_path, f'{tag}-latest.pth.tar')
     load_path = (os.path.join(load_folder_path, r_file) if r_file is not None 
         else latest_path)
 
     # Initialize encoder, predictor, and target encoder
-    encoder, predictor = init_model(
+    target_encoder, _ = init_model(
         gt_type=gt_type,
         device=device,
         vocab_size=vocab_size,
@@ -197,11 +201,6 @@ def infer(args: dict,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         use_flash_attention=use_flash_attention)
-    target_encoder = copy.deepcopy(encoder)
-
-    encoder = DistributedDataParallel(encoder, static_graph=True)
-    predictor = DistributedDataParallel(predictor, static_graph=True)
-    target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
     if block_masking:
@@ -242,8 +241,8 @@ def infer(args: dict,
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
-        world_size=world_size,
-        rank=rank,
+        world_size=1,
+        rank=0,
         collate_fn=mask_collator,
         pin_memory=pin_memory,
         num_workers=num_workers,
@@ -253,15 +252,14 @@ def infer(args: dict,
     _, _, target_encoder, _, _, start_epoch = load_checkpoint(
             device=device,
             r_path=load_path,
-            encoder=encoder,
-            predictor=predictor,
+            encoder=None,
+            predictor=None,
             target_encoder=target_encoder,
             opt=None,
             scaler=None)
-   
-    # Retrieve embeddings
     target_encoder.eval()
 
+    # Retrieve embeddings
     all_cell_ids = []
     all_cell_emb_list = []
     all_neighborhood_emb_list = []
@@ -281,75 +279,79 @@ def infer(args: dict,
         # Collect cell IDs to join metadata
         all_cell_ids.extend(udata[-1])
 
+        # Aggregate gene embeddings into cell and neighborhood embeddings
+        ns_tokens = tokens[:, n_special_tokens:]
+
+        # Exclude masked tokens from aggregation
+        if masked_tokens is not None:
+            mask_indices = torch.isin(
+                tokens,
+                torch.tensor(masked_tokens, device=tokens.device)
+                ).unsqueeze(1).unsqueeze(1).expand(
+                    -1,-1, tokens.shape[-1], -1)
+            masks_attention[mask_indices] = 0
+
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
-            if masked_tokens is not None:
-                mask_indices = torch.isin(
-                    tokens,
-                    torch.tensor(masked_tokens, device=tokens.device)
-                    ).unsqueeze(1).unsqueeze(1).expand(
-                        -1,-1, tokens.shape[-1], -1)
-                masks_attention[mask_indices] = 0
-
-            if gt_type == 'rank':
-                emb_list = target_encoder.module.return_multi_layer_emb(
-                    positions=positions,
-                    segments=segments,
-                    tokens=tokens,
-                    masks_attention=masks_attention)
-            elif gt_type == 'counts':
-                emb_list = target_encoder.module.return_multi_layer_emb(
-                    tokens=tokens,
-                    segments=segments,
-                    counts=counts,
-                    masks_attention=masks_attention)
+            emb_list = []
+            for emb_layer in emb_layers:
+                if gt_type == 'rank':
+                    emb_list.append(target_encoder.return_layer_emb(
+                        layer=emb_layer,
+                        positions=positions,
+                        segments=segments,
+                        tokens=tokens,
+                        masks_attention=masks_attention))
+                elif gt_type == 'counts':
+                    emb_list.append(target_encoder.return_layer_emb(
+                        layer=emb_layer,
+                        tokens=tokens,
+                        segments=segments,
+                        counts=counts,
+                        masks_attention=masks_attention))
         
-            if feature_norm:
+            if feature_norm and (emb_layers[-1] == enc_depth):
                 # Normalize last layer like in training
                 emb_list[-1] = F.layer_norm(emb_list[-1],
                                             (emb_list[-1].size(-1),))
 
         # Aggregate gene embeddings into cell and neighborhood embeddings
-        ns_tokens = tokens[:, n_special_tokens:]
-
-        for i, emb in enumerate(emb_list):
-            # Keep only <cls> token; at the moment there is only 1 <cls> token
-            cell_mask = create_binary_selection_mask(
+        cell_mask = create_binary_selection_mask(
+            ns_tokens,
+            selection_type="agg_cell",
+            excluded_tokens=agg_excluded_tokens,
+            seq_len_cell=seq_len_cell,
+            n_special_tokens=n_special_tokens,
+            max_cls_tokens=max_cls_tokens,
+            top_k=top_k)
+        if tokenizer_type == 'cell_neighborhood':
+            neighborhood_mask = create_binary_selection_mask(
                 ns_tokens,
-                selection_type="agg_cell",
+                selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=seq_len_cell,
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
                 top_k=top_k)
-            if tokenizer_type == 'cell_neighborhood':
-                neighborhood_mask = create_binary_selection_mask(
-                    ns_tokens,
-                    selection_type="agg_neighborhood",
-                    excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens,
-                    top_k=top_k)
-            elif tokenizer_type == 'cell_graph':
-                neighborhood_mask = create_binary_selection_mask(
-                    ns_tokens,
-                    selection_type="agg_graph",
-                    excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens,
-                    top_k=top_k,
-                    n_segments=n_segments)                    
+        elif tokenizer_type == 'cell_graph':
+            neighborhood_mask = create_binary_selection_mask(
+                ns_tokens,
+                selection_type="agg_graph",
+                excluded_tokens=agg_excluded_tokens,
+                seq_len_cell=seq_len_cell,
+                n_special_tokens=n_special_tokens,
+                max_cls_tokens=max_cls_tokens,
+                top_k=top_k,
+                n_segments=n_segments)
 
+        for i, emb in enumerate(emb_list):
+            # Average gene embeddings into cell and neighborhood embedding 
             if agg_type == 'avg':
-                cell_emb = compute_mean_unmasked_emb(emb,
-                                                     cell_mask)
-                neighborhood_emb = compute_mean_unmasked_emb(
-                    emb,
-                    neighborhood_mask)
+                cell_emb = compute_mean_unmasked_emb(emb, cell_mask)
+                neighborhood_emb = compute_mean_unmasked_emb(emb, 
+                                                             neighborhood_mask)
             elif agg_type == "weighted_avg":
                 cell_weights = compute_unmasked_rank_based_weights(
                     tokens, cell_mask)
@@ -397,15 +399,13 @@ def infer(args: dict,
                     else:
                         all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                
 
+    # Add metadata
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
         index=range(len(all_cell_ids))))
-
-    # Add metadata
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
     adata_metadata_subset = adata_metadata[
         adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
-
     merged_obs = pd.merge(adata.obs,
                           adata_metadata_subset.obs,
                           on='cell_id')
@@ -682,69 +682,69 @@ def embed_data(adata: ad.AnnData,
                     counts=counts,
                     masks_attention=masks_attention)
         
-            # Create mask for index cell genes
-            cell_mask = create_binary_selection_mask(
+        # Create mask for index cell genes
+        cell_mask = create_binary_selection_mask(
+            ns_tokens,
+            selection_type="agg_cell",
+            excluded_tokens=agg_excluded_tokens,
+            seq_len_cell=model_config['data']['seq_len_cell'],
+            n_special_tokens=n_special_tokens,
+            max_cls_tokens=max_cls_tokens,
+            top_k=top_k)
+
+        # Create mask for neighbor cell genes
+        if model_config['data']['tokenizer_type'] == 'cell_neighborhood':
+            neighborhood_mask = create_binary_selection_mask(
                 ns_tokens,
-                selection_type="agg_cell",
+                selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=model_config['data']['seq_len_cell'],
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
                 top_k=top_k)
+        elif model_config['data']['tokenizer_type'] == 'cell_graph':
+            neighborhood_mask = create_binary_selection_mask(
+                ns_tokens,
+                selection_type="agg_graph",
+                excluded_tokens=agg_excluded_tokens,
+                seq_len_cell=model_config['data']['seq_len_cell'],
+                n_special_tokens=n_special_tokens,
+                max_cls_tokens=max_cls_tokens,
+                top_k=top_k,
+                n_segments=model_config['data']['n_segments'])
 
-            # Create mask for neighbor cell genes
-            if model_config['data']['tokenizer_type'] == 'cell_neighborhood':
-                neighborhood_mask = create_binary_selection_mask(
-                    ns_tokens,
-                    selection_type="agg_neighborhood",
-                    excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=model_config['data']['seq_len_cell'],
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens,
-                    top_k=top_k)
-            elif model_config['data']['tokenizer_type'] == 'cell_graph':
-                neighborhood_mask = create_binary_selection_mask(
-                    ns_tokens,
-                    selection_type="agg_graph",
-                    excluded_tokens=agg_excluded_tokens,
-                    seq_len_cell=model_config['data']['seq_len_cell'],
-                    n_special_tokens=n_special_tokens,
-                    max_cls_tokens=max_cls_tokens,
-                    top_k=top_k,
-                    n_segments=model_config['data']['n_segments'])
+        # Average gene embeddings into cell and neighborhood embedding                    
+        cell_emb = compute_mean_unmasked_emb(emb, cell_mask)
+        neighborhood_emb = compute_mean_unmasked_emb(emb, neighborhood_mask)
 
-            # Average gene embeddings into cell and neighborhood embedding                    
-            cell_emb = compute_mean_unmasked_emb(emb, cell_mask)
-            neighborhood_emb = compute_mean_unmasked_emb(emb, neighborhood_mask)
+        all_cell_emb_list.append(cell_emb)
+        all_neighborhood_emb_list.append(neighborhood_emb)
 
-            all_cell_emb_list.append(cell_emb)
-            all_neighborhood_emb_list.append(neighborhood_emb)
-
-            # Store cell and neighborhood gene embeddings
-            for gene_id in cell_gene_ids:
-                gene_emb = retrieve_gene_emb(
-                    tokens=tokens,
-                    emb=emb,
-                    gene_id=gene_id,
-                    gene_type="cell",
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
-                if itr == 0:
-                    all_cell_gene_emb_dict[gene_id] = [gene_emb]
-                else:
-                    all_cell_gene_emb_dict[gene_id].append(gene_emb)
-            for gene_id in neighborhood_gene_ids:
-                gene_emb = retrieve_gene_emb(
-                    tokens=tokens,
-                    emb=emb,
-                    gene_id=gene_id,
-                    gene_type="neighborhood",
-                    seq_len_cell=seq_len_cell,
-                    n_special_tokens=n_special_tokens)
-                if itr == 0:
-                    all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
-                else:
-                    all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)          
+        # Store cell and neighborhood gene embeddings
+        for gene_id in cell_gene_ids:
+            gene_emb = retrieve_gene_emb(
+                tokens=tokens,
+                emb=emb,
+                gene_id=gene_id,
+                gene_type="cell",
+                seq_len_cell=seq_len_cell,
+                n_special_tokens=n_special_tokens)
+            if itr == 0:
+                all_cell_gene_emb_dict[gene_id] = [gene_emb]
+            else:
+                all_cell_gene_emb_dict[gene_id].append(gene_emb)
+        for gene_id in neighborhood_gene_ids:
+            gene_emb = retrieve_gene_emb(
+                tokens=tokens,
+                emb=emb,
+                gene_id=gene_id,
+                gene_type="neighborhood",
+                seq_len_cell=seq_len_cell,
+                n_special_tokens=n_special_tokens)
+            if itr == 0:
+                all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
+            else:
+                all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)          
 
     # Store cell and neighborhood embeddings of all observations
     adata.obsm[f"cell_emb"] = np.array(torch.cat(
