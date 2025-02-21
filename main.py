@@ -129,7 +129,7 @@ def sweep_func(args):
 
     # Run the process_main function in a single or multi-GPU setting
     if args.test:
-        process_main(0, args, params, num_gpus, port, args.devices, logger, folder_path)
+        process_main(0, args, params, num_gpus, port, args.devices, logger, folder_path, is_training=False)
     else:
 
         for rank in range(num_gpus):
@@ -146,7 +146,7 @@ def sweep_func(args):
     else:
        for rank in range(1):
             p = mp.Process(target=process_main,
-                           args=(rank, args, params, 1, port, [args.devices[0]], logger, folder_path, False))
+                           args=(rank, args, params, 1, port, [args.devices[0]], logger, folder_path))
             p.start()
             processes.append(p)
 

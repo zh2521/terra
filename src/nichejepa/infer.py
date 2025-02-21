@@ -256,7 +256,8 @@ def infer(args: dict,
             predictor=None,
             target_encoder=target_encoder,
             opt=None,
-            scaler=None)
+            scaler=None,
+            is_training=False)
     target_encoder.eval()
 
     # Retrieve embeddings
@@ -303,14 +304,14 @@ def infer(args: dict,
                         positions=positions,
                         segments=segments,
                         tokens=tokens,
-                        masks_attention=masks_attention))
+                        masks_attention=masks_attention).cpu())
                 elif gt_type == 'counts':
                     emb_list.append(target_encoder.return_layer_emb(
                         layer=emb_layer,
                         tokens=tokens,
                         segments=segments,
                         counts=counts,
-                        masks_attention=masks_attention))
+                        masks_attention=masks_attention).cpu())
         
             if feature_norm and (emb_layers[-1] == enc_depth):
                 # Normalize last layer like in training
@@ -325,7 +326,7 @@ def infer(args: dict,
             seq_len_cell=seq_len_cell,
             n_special_tokens=n_special_tokens,
             max_cls_tokens=max_cls_tokens,
-            top_k=top_k)
+            top_k=top_k).cpu()
         if tokenizer_type == 'cell_neighborhood':
             neighborhood_mask = create_binary_selection_mask(
                 ns_tokens,
@@ -334,7 +335,7 @@ def infer(args: dict,
                 seq_len_cell=seq_len_cell,
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
-                top_k=top_k)
+                top_k=top_k).cpu()
         elif tokenizer_type == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
                 ns_tokens,
@@ -344,7 +345,7 @@ def infer(args: dict,
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
                 top_k=top_k,
-                n_segments=n_segments)
+                n_segments=n_segments).cpu()
 
         for i, emb in enumerate(emb_list):
             # Average gene embeddings into cell and neighborhood embedding 
@@ -403,6 +404,7 @@ def infer(args: dict,
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
         index=range(len(all_cell_ids))))
+    print("Loading metadata AnnDatas...")
     adata_metadata = collect_adata_from_folder(raw_data_folder_path)
     adata_metadata_subset = adata_metadata[
         adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
@@ -418,10 +420,10 @@ def infer(args: dict,
     for i in range(len(all_cell_emb_list)):
         adata.obsm[f"cell_emb_layer_{i}"] = np.array(torch.cat(
             all_cell_emb_list[i],
-            dim=0).cpu())
+            dim=0))
         adata.obsm[f"neighborhood_emb_layer_{i}"] = np.array(torch.cat(
             all_neighborhood_emb_list[i],
-            dim=0).cpu())
+            dim=0))
 
     # Store cell and neighborhood gene embeddings of all observations in the
     # last layer
@@ -673,14 +675,14 @@ def embed_data(adata: ad.AnnData,
                     positions=positions,
                     segments=segments,
                     tokens=tokens,
-                    masks_attention=masks_attention)
+                    masks_attention=masks_attention).cpu()
             elif model_config['meta']['gt_type'] == 'counts':
                 emb = target_encoder.return_layer_emb(
                     layer=emb_layer,
                     tokens=tokens,
                     segments=segments,
                     counts=counts,
-                    masks_attention=masks_attention)
+                    masks_attention=masks_attention).cpu()
         
         # Create mask for index cell genes
         cell_mask = create_binary_selection_mask(
@@ -749,10 +751,10 @@ def embed_data(adata: ad.AnnData,
     # Store cell and neighborhood embeddings of all observations
     adata.obsm[f"cell_emb"] = np.array(torch.cat(
         all_cell_emb_list,
-        dim=0).cpu())
+        dim=0))
     adata.obsm[f"neighborhood_emb"] = np.array(torch.cat(
         all_neighborhood_emb_list,
-        dim=0).cpu())
+        dim=0))
 
     # Store cell and neighborhood gene embeddings of all observations
     for gene_id in cell_gene_ids:
