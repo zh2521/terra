@@ -273,26 +273,54 @@ def retrieve_gene_emb(tokens: torch.Tensor,
     return gene_emb
 
 
-def collect_adata_from_folder(load_folder_path: str) -> ad.AnnData:
+def collect_adata_from_folder(load_folder_path: str,
+                              dataset_ids: Optional[list]=None,
+                              obs_cols: Optional[list]=None,
+                              ) -> ad.AnnData:
     """
     Loop through folder, read all '.h5ad' files and concatenate them as adata
     objects.
 
     Parameters
     --------
+    load_folder_path:
+        Directory which is searched for AnnData objects.
+    dataset_ids:
+        IDs of datasets which are included.
 
     Returns
     --------
+    adata:
+        The concatenated AnnData object.
     """
     adata_list = []
 
     # Walk through the load folder path and read files
-    for subdir, _, files in os.walk(load_folder_path):
-        for file_idx, file in enumerate(files):
-            if file.endswith('.h5ad'):
-                file_path = os.path.join(subdir, file)
-                adata = sc.read_h5ad(file_path)
-                adata_list.append(adata)
+    if dataset_ids:
+        for subdir, _, files in os.walk(load_folder_path):
+            if any(dataset_id in subdir.split('-')[0] for dataset_id in dataset_ids):
+                print(f'Loading AnnData objects from {subdir}.')
+                for file_idx, file in enumerate(files):
+                    if file.endswith('.h5ad'):
+                        file_path = os.path.join(subdir, file)
+                        adata = sc.read_h5ad(file_path)
+                        if obs_cols is None:
+                            adata.obs = adata.obs[['cell_id']]
+                        else:
+                            adata.obs = adata.obs[['cell_id'] + obs_cols]
+                        adata_list.append(adata)
+    else:
+        for subdir, _, files in os.walk(load_folder_path):
+            print(f'Loading AnnData objects from {subdir}.')
+            for file_idx, file in enumerate(files):
+                if file.endswith('.h5ad'):
+                    file_path = os.path.join(subdir, file)
+                    adata = sc.read_h5ad(file_path)
+                    if obs_cols is None:
+                        adata.obs = adata.obs[['cell_id']]
+                    else:
+                        adata.obs = adata.obs[['cell_id'] + obs_cols]
+                    adata_list.append(adata)        
 
     concatenated_adata = ad.concat(adata_list, join='outer', index_unique=None)
     

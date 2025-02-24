@@ -984,7 +984,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             B = len(z) // len(masks_enc)
 
             # MLP projection layer
-            z = self.predictor_embed(z)
+            #z = self.predictor_embed(z)
 
             # Retrieve special token embedding
             x_special = (
@@ -1050,7 +1050,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
-            z = self.predictor_proj(z)
+            #z = self.predictor_proj(z)
 
             return z
 
@@ -1122,7 +1122,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             B = len(z) // len(masks_enc)
 
             # MLP projection layer
-            z = self.predictor_embed(z)
+            #z = self.predictor_embed(z)
 
             # Retrieve special token embedding
             x_special = (
@@ -1188,7 +1188,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
-            z = self.predictor_proj(z)
+            #z = self.predictor_proj(z)
 
             return z
 

@@ -46,6 +46,8 @@ logger = logging.getLogger()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
+          dataset_ids: Optional[list]=None,
+          obs_cols: Optional[list]=None,
           emb_layers: Optional[list]=None,
           cell_gene_ids: List=[],
           neighborhood_gene_ids: List=[],
@@ -405,7 +407,10 @@ def infer(args: dict,
         obs=pd.DataFrame({'cell_id': all_cell_ids},
         index=range(len(all_cell_ids))))
     print("Loading metadata AnnDatas...")
-    adata_metadata = collect_adata_from_folder(raw_data_folder_path)
+    adata_metadata = collect_adata_from_folder(
+        raw_data_folder_path,
+        dataset_ids,
+        obs_cols)
     adata_metadata_subset = adata_metadata[
         adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
     merged_obs = pd.merge(adata.obs,
@@ -417,11 +422,11 @@ def infer(args: dict,
     adata.obsm['spatial'] = adata_metadata_subset.obsm['spatial']
    
     # Store cell and neighborhood embeddings of all observations across layers  
-    for i in range(len(all_cell_emb_list)):
-        adata.obsm[f"cell_emb_layer_{i}"] = np.array(torch.cat(
+    for i, emb_layer in enumerate(emb_layers):
+        adata.obsm[f"cell_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_cell_emb_list[i],
             dim=0))
-        adata.obsm[f"neighborhood_emb_layer_{i}"] = np.array(torch.cat(
+        adata.obsm[f"neighborhood_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_neighborhood_emb_list[i],
             dim=0))
 
