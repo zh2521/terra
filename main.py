@@ -117,7 +117,9 @@ def sweep_func(args):
     current_timestamp = (
         datetime.now().strftime("%d%m%Y_%H%M%S") +
         f"_{datetime.now().microsecond // 1000:03d}")
-    print(params)
+    logger.info(f'Timestamp {current_timestamp}.')
+    print('Timestamp', current_timestamp)
+    print('Params', params)
     if params['state']['folder_path'] is None:
         folder_path = os.path.join(artifact_folder_path,
                         params['data']['dataset_name'],
