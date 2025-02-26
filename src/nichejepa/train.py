@@ -46,7 +46,8 @@ from .masks.block_masking  import BlockMaskCollator
 from .masks.utils import apply_masks
 from .models.utils import repeat_interleave_batch
 from .utils.distributed import (AllReduce,
-                                init_distributed)
+                                init_distributed,
+                                AllReduceSum)
 from .utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,
@@ -143,6 +144,9 @@ def train(args: dict,
     write_tag = args['state']['write_tag']
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
+
+    # Initialize center for target centering
+    center = None
 
     if args['data']['precomputed_n_nonzero_tokens']:
         with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f:
@@ -242,9 +246,6 @@ def train(args: dict,
         seg_learnable=seg_learnable,
         use_flash_attention=use_flash_attention)
     target_encoder = copy.deepcopy(encoder)
-
-    # Initialize center for target centering
-    center = None
 
     # Initialize mask collator
     if block_masking:
@@ -400,12 +401,16 @@ def train(args: dict,
 
                         if centering:
                             # Update center over batch for centering like in DINO
+                            # Create batch_center across GPUs using AllReduceSum
+                            # to synchronize the sum between different hosts
+                            batch_center = torch.sum(h, dim=0, keepdim=True)
+                            batch_center = AllReduceSum.apply(batch_center)
+                            batch_centers = batch_center / (len(h) * world_size)
                             if center is not None:
                                 center = center_momentum * center + (
-                                    1-center_momentum) * h.mean(
-                                        dim=0, keepdim=True)
+                                    1-center_momentum) * batch_centers
                             else:
-                                center = h.mean(dim=0, keepdim=True)
+                                center = batch_centers
                             
                             # Center over batch
                             h = h - center

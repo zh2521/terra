@@ -6,7 +6,7 @@ import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Tuple
 
 import anndata as ad
 import numpy as np
@@ -14,7 +14,7 @@ import pandas as pd
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-from datasets import load_from_disk
+from datasets import Dataset, load_from_disk
 from tqdm import tqdm
 from pyensembl import EnsemblRelease
 
@@ -48,6 +48,7 @@ def infer(args: dict,
           load_folder_path: str,
           dataset_ids: Optional[list]=None,
           obs_cols: Optional[list]=None,
+          uns_cols: Optional[list]=None,
           emb_layers: Optional[list]=None,
           cell_gene_ids: List=[],
           neighborhood_gene_ids: List=[],
@@ -75,7 +76,7 @@ def infer(args: dict,
     emb_layers:
         Layers for which to retrieve the embedding.
     cell_gene_ids:
-        List with gene IDs for which cell gene embeddings will be retrived.
+        List with gene IDs for which cell gene embeddings will be retrieved.
     neighborhood_gene_ids:
         List with gene IDs for which neighborhood gene embeddings will be
         retrived.
@@ -409,17 +410,17 @@ def infer(args: dict,
     print("Loading metadata AnnDatas...")
     adata_metadata = collect_adata_from_folder(
         raw_data_folder_path,
+        all_cell_ids,
         dataset_ids,
-        obs_cols)
-    adata_metadata_subset = adata_metadata[
-        adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
+        obs_cols,
+        uns_cols)
     merged_obs = pd.merge(adata.obs,
-                          adata_metadata_subset.obs,
+                          adata_metadata.obs,
                           on='cell_id')
     adata.obs = merged_obs.set_index('cell_id')
-    adata_metadata_subset.obs = adata_metadata_subset.obs.set_index('cell_id')
-    adata_metadata_subset = adata_metadata_subset[adata.obs.index, :].copy()
-    adata.obsm['spatial'] = adata_metadata_subset.obsm['spatial']
+    adata_metadata.obs = adata_metadata.obs.set_index('cell_id')
+    adata_metadata = adata_metadata[adata.obs.index, :].copy()
+    adata.obsm['spatial'] = adata_metadata.obsm['spatial']
    
     # Store cell and neighborhood embeddings of all observations across layers  
     for i, emb_layer in enumerate(emb_layers):
@@ -444,23 +445,212 @@ def infer(args: dict,
     return adata
 
 
-@torch.no_grad()
-def embed_data(adata: ad.AnnData,
-               model_folder_path: str,
-               emb_layer: Optional[int]=None,
-               cell_gene_ids: list=[],
-               neighborhood_gene_ids: list=[],
-               agg_excluded_tokens: Optional[list[int]]=None,
-               top_k: Optional[int]=None,
-               nproc: int=4,
-               processing_mode: Literal['sequential', 'parallel']='parallel',
-               batch_size: int=128,
-               pin_memory: bool=False,
-               num_workers: int=12):
+def harmonize_adata(adata: ad.AnnData) -> ad.AnnData:
+    """
+    Harmonize an AnnData object prior to tokenization.
+
+    Parameters
+    -----------
+    adata:
+        An unharmonized AnnData object.
+
+    Returns:
+    -----------
+    adata:
+        A harmonized AnnData object.
+    """
+    print('==================================================')
+    print('STEP 1: ADDING ENSEMBL IDS...')
+    print('==================================================')
+    print('Adding ensembl IDs from release 111...')
+    # Extract ensembl IDs of protein coding and miRNA mouse genes
+    ensembl = EnsemblRelease(release=111, species='human')
+    ensembl.download()
+    ensembl.index()
+    all_genes = ensembl.genes()
+    protein_coding_genes = [
+        gene for gene in all_genes if gene.biotype == "protein_coding"]
+    mirna_genes = [
+        gene for gene in all_genes if gene.biotype == "miRNA"]
+    all_relevant_genes = protein_coding_genes + mirna_genes
+    gene_ensembl_map_dict = {
+        gene.gene_name: gene.gene_id for gene in all_relevant_genes}
+
+    adata_gene_names = [gene_name for gene_name in adata.var_names.tolist()]
+    adata.var.index = adata_gene_names
+    
+    harmonized_gene_names = []
+    matching_ensembl_ids = []
+    for gene_name in adata_gene_names:
+        if gene_name in gene_ensembl_map_dict.keys():
+            harmonized_gene_names.append(gene_name)
+            matching_ensembl_ids.append(gene_ensembl_map_dict[gene_name])
+    print(f'Number of genes with matching ensembl IDs: \
+          {len(harmonized_gene_names)}.')
+    print(f'Number of genes skipped: \
+          {len(adata_gene_names) - len(harmonized_gene_names)}.')
+
+    adata = adata[:, adata.var.index.isin(harmonized_gene_names)].copy()
+    adata.var = pd.DataFrame(
+        index=pd.Index(harmonized_gene_names, name="gene_name"),
+        data={"ensembl_id": matching_ensembl_ids})
+
+    # Add dummy values as special values
+    print('==================================================')
+    print('STEP 2: ADDING SPECIAL VALUES...')
+    print('==================================================')
+    if 'cell_id' not in adata.obs.keys():
+        adata.obs['cell_id'] = adata.obs_names
+    if 'dataset_id' not in adata.uns.keys():
+        adata.uns['dataset_id'] = 14  # just dummy values
+    if 'batch' not in adata.uns.keys():
+        adata.uns['batch'] = 'batch0' # just dummy values
+    if 'assay' not in adata.uns.keys():
+        adata.uns['assay'] = 'xenium' # just dummy values
+    if 'species' not in adata.uns.keys():
+        adata.uns['species'] = 'homo_sapiens' # just dummy values
+    if 'tissue' not in adata.uns.keys():
+        adata.uns['tissue'] = 'lung' # just dummy values
+
+    return adata
+
+
+def tokenize_adata(adata: ad.AnnData,
+                   model_folder_path: str,
+                   perturb_df: Optional[pd.DataFrame]=None,                   
+                   nproc: int=4,
+                   processing_mode: Literal['sequential',
+                                            'parallel']='parallel'
+                   ) -> Dataset:
+    """
+    Harmonize and tokenize an AnnData object based on the parameters in the
+    model config and return the tokenized huggingface dataset and harmonized
+    AnnData object.
+
+    Parameters
+    -----------
+    adata:
+        AnnData object to be tokenized.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    perturb_df:
+        DataFrame with perturbation data, e.g.
+        ```
+        perturb_df =  pd.DataFrame({
+            'ensembl_id': ['ENSG00000169194', 'ENSG00000131724'],
+            'target': ['neighborhood', 'cell'],
+            'perturbation_type': ['foldchange', 'knockout'],
+            'foldchange': [0.5, np.nan]
+        })
+        ```.
+    n_proc:
+        Number of processes used.
+    processing_mode:
+        Mode of processing.
+
+    Returns
+    -----------
+    dataset:
+        The tokenized data stored in a huggingface dataset.
+    """
+    print('==================================================')
+    print('STEP 1: LOADING CONFIG...')
+    print('==================================================')
+    model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
+    token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
+    norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
+
+    # Load model config
+    with open(model_config_file_path, 'r') as file:
+        model_config = yaml.safe_load(file)
 
     print('==================================================')
-    print("STEP 1: LOADING CONFIG...")
-    print('==================================================')    
+    if not isinstance(perturb_df, pd.DataFrame):
+        if perturb_df is None:
+            print('STEP 2: TOKENIZING ANNDATA OBJECT...')
+        else:
+            raise ValueError('`perturb_df` must be a pd.DataFrame.')
+    else:
+        print('STEP 2: TOKENIZING ANNDATA OBJECT AND APPLYING PERTURBATIONS...')
+    print('==================================================')
+    # Tokenize adata
+    if model_config['data']['tokenizer_type'] == 'cell_neighborhood':
+        Tokenizer = cell_tokenizers.CellNeighborhoodTokenizer
+    elif model_config['data']['tokenizer_type'] == 'cell_graph':
+        Tokenizer = cell_tokenizers.CellGraphTokenizer
+    tk = Tokenizer(
+        nproc=nproc,
+        processing_mode=processing_mode,
+        model_input_size=model_config['data']['model_input_size'],
+        n_neighs=model_config['data']['n_neighs'],
+        radius=None,
+        delaunay=False,
+        rank_cell_norm_method=model_config['data']['rank_cell_norm_method'],
+        rank_gene_norm_method=model_config['data']['rank_gene_norm_method'],
+        rank_count_norm_method=model_config['data']['rank_count_norm_method'],
+        count_cell_norm_method=model_config['data']['count_cell_norm_method'],
+        count_gene_norm_method=model_config['data']['count_gene_norm_method'],
+        count_count_norm_method=model_config['data']['count_count_norm_method'],
+        norm_factor_file_path=norm_factor_file_path,
+        token_dictionary_file_path=token_dictionary_file_path)
+    dataset_dict = tk._tokenize_adata(adata=adata,
+                                      perturb_df=perturb_df)
+    dataset = tk._create_dataset(
+        dataset_dict=dataset_dict,
+        use_generator=False,
+        cache_directory_path=None,
+        keep_in_memory=False)
+    
+    return dataset
+
+
+@torch.no_grad()
+def embed_dataset(dataset: Dataset,
+                  model_folder_path: str,
+                  emb_layer: Optional[int]=None,
+                  cell_gene_ids: list=[],
+                  neighborhood_gene_ids: list=[],
+                  agg_excluded_tokens: Optional[list[int]]=None,
+                  top_k: Optional[int]=None,
+                  batch_size: int=128,
+                  pin_memory: bool=False,
+                  num_workers: int=12) -> dict:
+    """
+    Parameters
+    -----------
+    dataset:
+        Tokenized huggingface dataset.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ids:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ids:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrived.
+    agg_excluded_tokens:
+        List of tokens to be excluded from the aggregation.
+    top_k:
+        Include only top_k genes in aggregation.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used.
+
+    Returns:
+    -----------
+    output_embed:
+        Dictionary with the cell, cell gene, neighborhood, and neighborhood gene
+        embeddings.
+    """
+    print('==================================================')
+    print('STEP 1: LOADING CONFIG...')
+    print('==================================================')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
     norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
@@ -490,90 +680,9 @@ def embed_data(adata: ad.AnnData,
         1 for key in token_dict if "spt" in key)
     max_cls_tokens = sum(
         'cls' in token for token in model_config['meta']['special_tokens'])
-    
-    print('==================================================')
-    print("STEP 2: PREPROCESSING ANNDATA OBJECT...")
-    print('==================================================')
-    if 'ensembl_id' not in adata.var:
-        print(f"No ensembl IDs found in `adata.var['ensembl_id']`. "
-               "Adding ensembl IDs...")
-        # Extract Ensembl IDs of protein coding and miRNA mouse genes
-        ensembl = EnsemblRelease(release=111, species='human')
-        ensembl.download()
-        ensembl.index()
-        all_genes = ensembl.genes()
-        protein_coding_genes = [
-            gene for gene in all_genes if gene.biotype == "protein_coding"]
-        mirna_genes = [
-            gene for gene in all_genes if gene.biotype == "miRNA"]
-        all_relevant_genes = protein_coding_genes + mirna_genes
-        gene_ensembl_map_dict = {
-            gene.gene_name: gene.gene_id for gene in all_relevant_genes}
-
-        adata_gene_names = [gene_name for gene_name in adata.var_names.tolist()]
-        adata.var.index = adata_gene_names
-        
-        harmonized_gene_names = []
-        matching_ensembl_ids = []
-        for gene_name in adata_gene_names:
-            if gene_name in gene_ensembl_map_dict.keys():
-                harmonized_gene_names.append(gene_name)
-                matching_ensembl_ids.append(gene_ensembl_map_dict[gene_name])
-        print(
-            "Number of genes with matching ensembl IDs:", len(harmonized_gene_names))
-        print(
-            f"Number of genes skipped: {len(adata_gene_names) - len(harmonized_gene_names)}")
-
-        adata = adata[:, adata.var.index.isin(harmonized_gene_names)].copy()
-        adata.var = pd.DataFrame(
-            index=pd.Index(harmonized_gene_names, name="gene_name"),
-            data={"ensembl_id": matching_ensembl_ids})
-
-    if 'cell_id' not in adata.obs.keys():
-        adata.obs['cell_id'] = adata.obs_names
-    if 'dataset_id' not in adata.uns.keys():
-        adata.uns['dataset_id'] = 14  # just dummy values
-    if 'batch' not in adata.uns.keys():
-        adata.uns['batch'] = 'batch0' # just dummy values
-    if 'assay' not in adata.uns.keys():
-        adata.uns['assay'] = 'xenium' # just dummy values
-    if 'species' not in adata.uns.keys():
-        adata.uns['species'] = 'homo_sapiens' # just dummy values
-    if 'tissue' not in adata.uns.keys():
-        adata.uns['tissue'] = 'lung' # just dummy values
 
     print('==================================================')
-    print('STEP 3: TOKENIZING ANNDATA OBJECT...')
-    print('==================================================')
-    # Tokenize adata
-    if model_config['data']['tokenizer_type'] == 'cell_neighborhood':
-        Tokenizer = cell_tokenizers.CellNeighborhoodTokenizer
-    elif model_config['data']['tokenizer_type'] == 'cell_graph':
-        Tokenizer = cell_tokenizers.CellGraphTokenizer
-    tk = Tokenizer(
-                nproc=nproc,
-                processing_mode=processing_mode,
-                model_input_size=model_config['data']['model_input_size'],
-                n_neighs=model_config['data']['n_neighs'],
-                radius=None,
-                delaunay=False,
-                rank_cell_norm_method=model_config['data']['rank_cell_norm_method'],
-                rank_gene_norm_method=model_config['data']['rank_gene_norm_method'],
-                rank_count_norm_method=model_config['data']['rank_count_norm_method'],
-                count_cell_norm_method=model_config['data']['count_cell_norm_method'],
-                count_gene_norm_method=model_config['data']['count_gene_norm_method'],
-                count_count_norm_method=model_config['data']['count_count_norm_method'],
-                norm_factor_file_path=norm_factor_file_path,
-                token_dictionary_file_path=token_dictionary_file_path)
-    dataset_dict = tk._tokenize_adata(adata=adata)
-    dataset = tk._create_dataset(
-        dataset_dict=dataset_dict,
-        use_generator=False,
-        cache_directory_path=None,
-        keep_in_memory=False)
-
-    print('==================================================')
-    print('STEP 4: GENERATING EMBEDDINGS...')
+    print('STEP 2: GENERATING EMBEDDINGS...')
     print('==================================================')
     # Set device
     if not torch.cuda.is_available():
@@ -697,7 +806,7 @@ def embed_data(adata: ad.AnnData,
             seq_len_cell=model_config['data']['seq_len_cell'],
             n_special_tokens=n_special_tokens,
             max_cls_tokens=max_cls_tokens,
-            top_k=top_k)
+            top_k=top_k).cpu()
 
         # Create mask for neighbor cell genes
         if model_config['data']['tokenizer_type'] == 'cell_neighborhood':
@@ -708,7 +817,7 @@ def embed_data(adata: ad.AnnData,
                 seq_len_cell=model_config['data']['seq_len_cell'],
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
-                top_k=top_k)
+                top_k=top_k).cpu()
         elif model_config['data']['tokenizer_type'] == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
                 ns_tokens,
@@ -718,7 +827,7 @@ def embed_data(adata: ad.AnnData,
                 n_special_tokens=n_special_tokens,
                 max_cls_tokens=max_cls_tokens,
                 top_k=top_k,
-                n_segments=model_config['data']['n_segments'])
+                n_segments=model_config['data']['n_segments']).cpu()
 
         # Average gene embeddings into cell and neighborhood embedding                    
         cell_emb = compute_mean_unmasked_emb(emb, cell_mask)
@@ -751,24 +860,137 @@ def embed_data(adata: ad.AnnData,
             if itr == 0:
                 all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
             else:
-                all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)          
+                all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)
+
+    output_embed = {}        
 
     # Store cell and neighborhood embeddings of all observations
-    adata.obsm[f"cell_emb"] = np.array(torch.cat(
+    output_embed["cell_emb"] = np.array(torch.cat(
         all_cell_emb_list,
         dim=0))
-    adata.obsm[f"neighborhood_emb"] = np.array(torch.cat(
+    output_embed["neighborhood_emb"] = np.array(torch.cat(
         all_neighborhood_emb_list,
         dim=0))
 
     # Store cell and neighborhood gene embeddings of all observations
     for gene_id in cell_gene_ids:
-        adata.obsm[f"cell_emb_gene{gene_id}"] = np.array(torch.cat(
+        output_embed[f"cell_emb_gene{gene_id}"] = np.array(torch.cat(
             all_cell_gene_emb_dict[gene_id],
             dim=0).cpu())
     for gene_id in neighborhood_gene_ids:
-        adata.obsm[f"neighborhood_emb_gene{gene_id}"] = np.array(torch.cat(
+        output_embed[f"neighborhood_emb_gene{gene_id}"] = np.array(torch.cat(
             all_neighborhood_gene_emb_dict[gene_id],
             dim=0).cpu())
+
+    return output_embed
+
+
+@torch.no_grad()
+def harmonize_tokenize_embed_pipeline(
+        adata: ad.AnnData,
+        model_folder_path: str,
+        perturb_df: Optional[pd.DataFrame]=None,               
+        nproc: int=4,
+        processing_mode: Literal['sequential',
+                                 'parallel']='parallel',
+        save_dataset_path: Optional[Path | str]=None,
+        num_shards: int=32,
+        emb_layer: Optional[int]=None,
+        cell_gene_ids: list=[],
+        neighborhood_gene_ids: list=[],
+        agg_excluded_tokens: Optional[list[int]]=None,
+        top_k: Optional[int]=None,
+        batch_size: int=128,
+        pin_memory: bool=False,
+        num_workers: int=12) -> ad.AnnData:
+    """
+    Harmonize, tokenize and embed an AnnData object.
+
+    Parameters
+    -----------
+    adata:
+        An unharmonized AnnData object to be tokenized.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    perturb_df:
+        DataFrame with perturbation data, e.g.
+        ```
+        perturb_df =  pd.DataFrame({
+            'ensembl_id': ['ENSG00000169194', 'ENSG00000131724'],
+            'target': ['neighborhood', 'cell'],
+            'perturbation_type': ['foldchange', 'knockout'],
+            'foldchange': [0.5, np.nan]
+        })
+        ```.
+    n_proc:
+        Number of processes used for tokenization.
+    processing_mode:
+        Mode of processing used for tokenization.
+    save_dataset_path:
+        If specified, huggingface dataset is written to disk at this path.
+    num_shards:
+        Number of shards with which huggingface dataset is saved.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ids:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ids:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrived.
+    agg_excluded_tokens:
+        List of tokens to be excluded from the aggregation.
+    top_k:
+        Include only top_k genes in aggregation.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used for model inference.
+
+    Returns:
+    -----------
+    adata:
+        A harmonized AnnData object with embeddings stored in `adata.obsm`.
+    """
+    print('====================================================================================================')
+    print('                                         HARMONIZE DATA                                             ')
+    print('====================================================================================================')    
+    adata = harmonize_adata(adata)
+
+    print('====================================================================================================')
+    print('                                          TOKENIZE DATA                                             ')
+    print('====================================================================================================')  
+    dataset = tokenize_adata(
+        adata=adata,
+        model_folder_path=model_folder_path,
+        perturb_df=perturb_df,                   
+        nproc=nproc,
+        processing_mode=processing_mode)
+
+    if save_dataset_path:
+        dataset.save_to_disk(
+            save_dataset_path,
+            num_shards=num_shards)
+
+    print('====================================================================================================')
+    print('                                            EMBED DATA                                              ')
+    print('====================================================================================================')  
+    output_embed = embed_dataset(
+        dataset=dataset,
+        model_folder_path=model_folder_path,
+        emb_layer=emb_layer,
+        cell_gene_ids=cell_gene_ids,
+        neighborhood_gene_ids=neighborhood_gene_ids,
+        agg_excluded_tokens=agg_excluded_tokens,
+        top_k=top_k,
+        batch_size=batch_size,
+        pin_memory=pin_memory,
+        num_workers=num_workers)
+
+    # Add embeddings to adata
+    for key, values in output_embed.items():
+        adata.obsm[key] = values
 
     return adata

@@ -274,8 +274,11 @@ def retrieve_gene_emb(tokens: torch.Tensor,
 
 
 def collect_adata_from_folder(load_folder_path: str,
+                              cell_ids: list,
                               dataset_ids: Optional[list]=None,
                               obs_cols: Optional[list]=None,
+                              uns_cols: Optional[list]=None,
+                              include_gene_panel_size: bool=True,
                               ) -> ad.AnnData:
     """
     Loop through folder, read all '.h5ad' files and concatenate them as adata
@@ -287,6 +290,8 @@ def collect_adata_from_folder(load_folder_path: str,
         Directory which is searched for AnnData objects.
     dataset_ids:
         IDs of datasets which are included.
+    obs_cols:
+    uns_cols:
 
     Returns
     --------
@@ -297,17 +302,27 @@ def collect_adata_from_folder(load_folder_path: str,
 
     # Walk through the load folder path and read files
     if dataset_ids:
+        print(f'Loading datasets: {dataset_ids}.')
         for subdir, _, files in os.walk(load_folder_path):
-            if any(dataset_id in subdir.split('-')[0] for dataset_id in dataset_ids):
+            if any(dataset_id in subdir.split('/')[-1].split('-')[0] for dataset_id in dataset_ids):
                 print(f'Loading AnnData objects from {subdir}.')
                 for file_idx, file in enumerate(files):
                     if file.endswith('.h5ad'):
                         file_path = os.path.join(subdir, file)
                         adata = sc.read_h5ad(file_path)
+                        adata = adata[adata.obs['cell_id'].isin(cell_ids)]
+                        if len(adata) == 0:
+                            del adata
+                            continue
                         if obs_cols is None:
                             adata.obs = adata.obs[['cell_id']]
                         else:
                             adata.obs = adata.obs[['cell_id'] + obs_cols]
+                        if uns_cols:
+                            for col in uns_cols:
+                                adata.obs[col] = adata.uns[col]
+                        if include_gene_panel_size:
+                            adata.obs['gene_panel_size'] = len(adata.var_names)
                         adata_list.append(adata)
     else:
         for subdir, _, files in os.walk(load_folder_path):
@@ -316,10 +331,19 @@ def collect_adata_from_folder(load_folder_path: str,
                 if file.endswith('.h5ad'):
                     file_path = os.path.join(subdir, file)
                     adata = sc.read_h5ad(file_path)
+                    adata = adata[adata.obs['cell_id'].isin(cell_ids)]
+                    if len(adata) == 0:
+                        del adata
+                        continue
                     if obs_cols is None:
                         adata.obs = adata.obs[['cell_id']]
                     else:
                         adata.obs = adata.obs[['cell_id'] + obs_cols]
+                    if uns_cols:
+                        for col in uns_cols:
+                            adata.obs[col] = adata.uns[col]
+                    if include_gene_panel_size:
+                        adata.obs['gene_panel_size'] = len(adata.var_names)
                     adata_list.append(adata)        
 
     concatenated_adata = ad.concat(adata_list, join='outer', index_unique=None)
