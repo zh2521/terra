@@ -141,6 +141,7 @@ def train(args: dict,
 
     log_freq = args['state']['log_freq']
     checkpoint_freq = args['state']['checkpoint_freq']
+    checkpoint_freq_iter = args['state']['checkpoint_freq_iter']
     write_tag = args['state']['write_tag']
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
@@ -337,7 +338,7 @@ def train(args: dict,
             wd_scheduler.step()
             next(momentum_scheduler)
 
-    def save_checkpoint(epoch):
+    def save_checkpoint(epoch, iter_number=None):
         save_dict = {'encoder': encoder.state_dict(),
                      'predictor': predictor.state_dict(),
                      'target_encoder': target_encoder.state_dict(),
@@ -351,8 +352,10 @@ def train(args: dict,
         if rank == 0:
             torch.save(save_dict, latest_path)
             if (epoch + 1) % checkpoint_freq == 0:
-                torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
-
+                if iter_number is None:
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
+                else:
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}_{iter_number}'))
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
         logger.info(f"Epoch {epoch + 1}")
@@ -546,7 +549,9 @@ def train(args: dict,
             #log_stats()
             wandb.log({"loss": loss, 'lr':_new_lr, "epoch": epoch})
             assert not np.isnan(loss), 'loss is nan'
-
+            if itr % checkpoint_freq_iter == 0:
+                logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
+                save_checkpoint(epoch + 1, itr // checkpoint_freq_iter)
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
         save_checkpoint(epoch+1)
