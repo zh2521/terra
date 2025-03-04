@@ -15,8 +15,6 @@ echo "NUMBER_EPOCHS=${NUMBER_EPOCHS}"
 echo "OUTPUT_DIR=${OUTPUT_DIR}"
 echo "LOG_DIR=${LOG_DIR}"
 
-cd /lustre/scratch126/cellgen/team361/mv10/jepa/iteration_feature/nichejepa
-
 mpirun \
     -np ${TOTAL_NUM_GPUS} \
     -H ${MPI_HOST_STRING} \

@@ -16,7 +16,7 @@ environment:
   ENV_PATH: "/nfs/team361/mv10/.deep_speed_test"  # Path to the environment to be activated.
 
 #artifact:
-  ARTIFACT_LOCATION: "/lustre/scratch126/cellgen/team361/mv10/jepa/iteration_feature/nichejepa"  # Path to store the artifacts.
+  ARTIFACT_LOCATION: ""  # Path to store the artifacts.
   EXPERIMENT_NAME: "Multi-node-Nemo"  # Name of the experiment.
   RUN_NAME: "test_2"  # Name of the run.
 
