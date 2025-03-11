@@ -447,8 +447,6 @@ def main(args, resume_preempt=False):
                         masks_pred=masks_pred,
                         masks_attention=None)
 
-
-
                     z = encoder(c, masks_enc)
                     z = predictor(z, h, masks_enc, masks_pred)
                     return z
@@ -457,7 +455,8 @@ def main(args, resume_preempt=False):
                     loss = 0.
                     # Compute loss and accumulate for each mask-enc/mask-pred pair
                     for zi, hi in zip(z, h):
-                        loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
+                        loss += torch.mean(
+                            torch.abs(zi - hi)**loss_exp) / loss_exp
                     loss /= len(masks_pred)
                     return loss
 

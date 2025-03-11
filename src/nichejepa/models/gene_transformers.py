@@ -644,7 +644,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         #    dim=self.n_value_bins)
         self.value_embed = MLP(
             in_features=1, 
-            hidden_features=1024/2,
+            hidden_features=512,
             out_features=1024,
             act_layer=nn.GELU,
         )
