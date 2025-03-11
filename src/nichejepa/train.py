@@ -62,7 +62,6 @@ logger = logging.getLogger()
 
 def train(args: dict,
           train_dataset: datasets.Dataset,
-          test_dataset: datasets.Dataset,
           resume_preempt: bool=False,
           save_folder_path: Optional[str]=None,
           LOCAL_RANK: Optional[int]=None,
@@ -76,8 +75,6 @@ def train(args: dict,
         Dictionary containing the hyperparams from the config file.
     train_dataset:
         Train split of huggingface dataset.
-    test_dataset:
-        Test split of huggingface dataset.
     resume_preempt:
     save_folder_path:
         Path for saving model artifacts.

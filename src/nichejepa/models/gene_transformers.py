@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .modules import Attention, Block, ValueEmbWeightsProjection, DropPath, MLP
+from .modules import Attention, Block, ValueEmbWeightsProjection, MLP
 from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)
@@ -68,8 +68,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         MLP modules.
     attn_drop_rate:
         Dropout ratio in attention layer of Attention modules.
-    drop_path_rate:
-        Probability for dropping paths in DropPath modules.
     norm_layer:
         Normalization layer.
     init_std:
@@ -95,7 +93,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  qk_scale: Optional[float]=None,
                  drop_rate: float=0.0,
                  attn_drop_rate: float=0.0,
-                 drop_path_rate: float=0.0,
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
                  use_flash_attention: bool=True,
@@ -131,9 +128,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 n_sincos_pos=n_segments + self.max_special_tokens)
             self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
-        # Define decaying drop path rate (higher drop rate in deeper blocks)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-
         # Initialize encoder blocks and norm layer
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim,
@@ -143,7 +137,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                   qk_scale=qk_scale,
                   drop=drop_rate,
                   attn_drop=attn_drop_rate,
-                  drop_path=dpr[i],
                   norm_layer=norm_layer,
                   use_flash_attention=use_flash_attention)
             for i in range(depth)])
@@ -288,8 +281,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         MLP modules.
     attn_drop_rate:
         Dropout ratio in attention layer of Attention modules.
-    drop_path_rate:
-        Probability for dropping paths in DropPath modules.
     norm_layer:
         Normalization layer.
     init_std:
@@ -312,7 +303,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  qk_scale: Optional[float]=None,
                  drop_rate: float=0.0,
                  attn_drop_rate: float=0.0,
-                 drop_path_rate: float=0.0,
                  norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
                  use_flash_attention: bool=True,
@@ -334,9 +324,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # Initialize mask token embedding for prediction
         self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
 
-        # Define decaying drop path rate (higher drop rate in deeper blocks)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-
         # Initialize predictor blocks, norm layer, and predictor projection
         # layer to project back to encoder embedding size
         self.predictor_blocks = nn.ModuleList([
@@ -347,7 +334,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                   qk_scale=qk_scale,
                   drop=drop_rate,
                   attn_drop=attn_drop_rate,
-                  drop_path=dpr[i],
                   norm_layer=norm_layer,
                   use_flash_attention=use_flash_attention)
             for i in range(depth)])
