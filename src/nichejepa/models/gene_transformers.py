@@ -642,7 +642,12 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             padding_idx=0)
         #self.value_emb_weights_projection = ValueEmbWeightsProjection(
         #    dim=self.n_value_bins)
-        self.value_embed = nn.Linear(1, 1024)
+        self.value_embed = MLP(
+            in_features=1, 
+            hidden_features=1024/2,
+            out_features=1024,
+            act_layer=nn.GELU,
+        )
 
     def forward(self,
                 tokens: torch.Tensor,
