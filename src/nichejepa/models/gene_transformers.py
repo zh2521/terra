@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .modules import Attention, Block, ValueEmbWeightsProjection, DropPath, MLP
+from .modules import Attention, Block, ValueEmbWeightsProjection, MLP
 from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)
@@ -116,42 +116,55 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                                         padding_idx=0)
 
         # Initialize segment embeddings (include <pad> and special segments)
-        self.seg_embed = nn.Parameter(
-            torch.zeros(1, n_segments + self.max_special_tokens, embed_dim),
-            requires_grad=False)
-            
+        self.seg_embed = nn.Embedding(
+            n_segments + 1 + self.max_special_tokens,
+            embed_dim,
+            padding_idx=0)
+
+        if not seg_learnable:
+            # Prevent gradient updates and initialize with sincos embedding,
+            # including special segments
+            self.seg_embed.weight.requires_grad = False
+            seg_embed = get_1d_sincos_pos_embed(
+                embed_dim=embed_dim,
+                n_zero_pos=0,
+                n_sincos_pos=n_segments + self.max_special_tokens)
+            self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
+
         # Initialize encoder blocks and norm layer
         self.blocks = nn.ModuleList([
-            Block(
-                dim=embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias,
-                qk_scale=qk_scale,
-                drop=drop_rate,
-                act_layer=nn.GELU,
-                attn_drop=attn_drop_rate,
-                norm_layer=norm_layer,
-                use_flash_attention=use_flash_attention)
+            Block(dim=embed_dim,
+                  num_heads=num_heads,
+                  mlp_ratio=mlp_ratio,
+                  qkv_bias=qkv_bias,
+                  qk_scale=qk_scale,
+                  drop=drop_rate,
+                  act_layer=nn.GELU,
+                  attn_drop=attn_drop_rate,
+                  norm_layer=norm_layer,
+                  use_flash_attention=use_flash_attention)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
-        # Initialize weights
-        if self.seg_embed is not None:
-            self._init_seg_embed(self.seg_embed.data) # sincos pos-embed
-        self.init_std = init_std
+        # Initialize weights of layers
         self.apply(self._init_weights)
         self._rescale_blocks()
 
-    def _init_seg_embed(self, seg_embed):
-        embed_dim = seg_embed.size(-1)
-        sincos = get_1d_sincos_pos_embed(
-            embed_dim=embed_dim,
-            n_zero_pos=0,
-            n_sincos_pos=n_segments + self.max_special_tokens)
-        seg_embed.copy_(torch.from_numpy(sincos).float().unsqueeze(0))
+    def _rescale_blocks(self):
+        """
+        Helper function to scale initialized layer weights.
+        """
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     def _init_weights(self, m):
+        """
+        Helper function to initialize layer weights.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=self.init_std)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -159,14 +172,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-
-    def _rescale_blocks(self):
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     @torch.no_grad()
     def return_token_emb(self,
@@ -294,18 +299,15 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  seg_learnable: bool=False,
                  predictor_embed_dim: int=384,
                  depth: int=6,
-                 num_heads: int=12,
+                 num_heads: int=8,
                  mlp_ratio: float=4.0,
                  qkv_bias: bool=True,
                  qk_scale: Optional[float]=None,
                  drop_rate: float=0.0,
                  attn_drop_rate: float=0.0,
+                 drop_path_rate: float=0.0,
                  norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
-                 uniform_power: bool=False,
-                 use_mask_tokens: bool=False,
-                 num_mask_tokens: int=2,
-                 zero_init_mask_tokens: bool=True,
                  use_flash_attention: bool=True,
                  **kwargs
                  ):
@@ -323,61 +325,43 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                                          bias=True)
 
         # Initialize mask token embedding for prediction
-        self.mask_tokens = None
-        self.num_mask_tokens = 0
-        if use_mask_tokens:
-            self.num_mask_tokens = num_mask_tokens
-            self.mask_tokens = nn.ParameterList([
-                nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
-                for i in range(num_mask_tokens)
-            ])
-
-        # Initialize positional embedding
-        self.uniform_power = uniform_power
-        self.predictor_pos_embed = None
-        self.predictor_pos_embed = nn.Parameter(
-            torch.zeros(1, seq_len, predictor_embed_dim), # TODO
-            requires_grad=False)
+        self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
 
         # Initialize predictor blocks, norm layer, and predictor projection
         # layer to project back to encoder embedding size
         self.predictor_blocks = nn.ModuleList([
-            Block(
-                dim=predictor_embed_dim,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                qkv_bias=qkv_bias,
-                qk_scale=qk_scale,
-                drop=drop_rate,
-                act_layer=nn.GELU,
-                attn_drop=attn_drop_rate,
-                norm_layer=norm_layer,
-                use_flash_attention=use_flash_attention)
+            Block(dim=predictor_embed_dim,
+                  num_heads=num_heads,
+                  mlp_ratio=mlp_ratio,
+                  qkv_bias=qkv_bias,
+                  qk_scale=qk_scale,
+                  drop=drop_rate,
+                  attn_drop=attn_drop_rate,
+                  norm_layer=norm_layer,
+                  use_flash_attention=use_flash_attention)
             for i in range(depth)])
         self.predictor_norm = norm_layer(predictor_embed_dim)
-        self.predictor_proj = nn.Linear(
-            predictor_embed_dim,
-            embed_dim,
-            bias=True)
+        self.predictor_proj = nn.Linear(predictor_embed_dim,
+                                        embed_dim,
+                                        bias=True)
 
-        # Initialize weights
-        if self.predictor_pos_embed is not None:
-            self._init_pos_embed(
-                self.predictor_pos_embed.data) # sincos pos-embed
-        self.init_std = init_std
-        if not zero_init_mask_tokens:
-            for mt in self.mask_tokens:
-                trunc_normal_(mt, std=self.init_std)
+        # Initialize mask token weights
+        trunc_normal_(self.mask_token, std=self.init_std)
+        
+        # Initialize layer weights
         self.apply(self._init_weights)
         self._rescale_blocks()
 
-    def _init_pos_embed(self, pos_embed):
-            embed_dim = pos_embed.size(-1)
-            sincos = get_1d_sincos_pos_embed(
-                embed_dim=embed_dim,
-                n_zero_pos=0,
-                n_sincos_pos=n_segments + self.max_special_tokens) # TODO
-            pos_embed.copy_(torch.from_numpy(sincos).float().unsqueeze(0))        
+    def _rescale_blocks(self):
+        """
+        Helper function to scale initialized layer weights.
+        """
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.predictor_blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     def _init_weights(self, m):
         """
@@ -390,17 +374,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-
-    def _rescale_blocks(self):
-        """
-        Helper function to scale initialized layer weights.
-        """
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.predictor_blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     @abstractmethod
     def forward(self) -> torch.Tensor:
@@ -652,7 +625,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     """
     def __init__(self,
                  n_special_values: int,
-                 n_value_bins: int=100,
+                 n_value_bins: int=10,
                  **base_encoder_kwargs,
                  ):
         super().__init__(**base_encoder_kwargs)
@@ -661,14 +634,15 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         # Initialize value embeddings and value embedding weight projection
         # layer
-        self.value_embed = nn.Embedding(self.n_value_bins,
-                                        self.embed_dim)
+        #self.value_embed = nn.Embedding(self.n_value_bins,
+        #                                self.embed_dim)
         self.special_value_embed = nn.Embedding(
-            2 + self.n_special_values + self.max_special_tokens, # include <pad> and zero expression
+            2 + self.n_special_values + self.n_special_tokens, # include <pad> and zero expression
             self.embed_dim,
             padding_idx=0)
-        self.value_emb_weights_projection = ValueEmbWeightsProjection(
-            dim=self.n_value_bins)
+        #self.value_emb_weights_projection = ValueEmbWeightsProjection(
+        #    dim=self.n_value_bins)
+        self.value_embed = nn.Linear(1, 1024)
 
     def forward(self,
                 tokens: torch.Tensor,
@@ -716,17 +690,18 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             seg_emb = self.seg_embed(segments)
 
             # Get value embeddings
-            value_emb_weights = self.value_emb_weights_projection(
-                counts.unsqueeze(dim=-1))
-            value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+            #value_emb_weights = self.value_emb_weights_projection(
+            #    counts.unsqueeze(dim=-1))
+            #value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+            value_emb = self.value_embed(counts.unsqueeze(dim=-1))
 
             # Assign padding value embedding to 0 counts 
-            zero_counts_mask = counts == 0.0
-            zero_value_embed = self.special_value_embed(
-                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-            value_emb[zero_counts_mask] = zero_value_embed
+            #zero_counts_mask = counts == 0.0
+            #zero_value_embed = self.special_value_embed(
+            #    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+            #value_emb[zero_counts_mask] = zero_value_embed
             
-            # Assign special value embeddings to <cls> and other special tokens
+            # Assign special value embeddings to special tokens
             sp_value_embed = self.special_value_embed(
                 counts[:, :self.n_special_tokens].int()).to(
                     value_emb.dtype)
@@ -799,24 +774,22 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         seg_emb = self.seg_embed(segments)
 
         # Get value embeddings
-        value_emb_weights = self.value_emb_weights_projection(
-            counts.unsqueeze(dim=-1))
-        value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+        #value_emb_weights = self.value_emb_weights_projection(
+        #    counts.unsqueeze(dim=-1))
+        #value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+        value_emb = self.value_embed(counts.unsqueeze(dim=-1))
 
         # Assign padding value embedding to 0 counts 
-        zero_counts_mask = counts == 0.0
-        zero_value_embed = self.special_value_embed(
-            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-        value_emb[zero_counts_mask] = zero_value_embed
+        #zero_counts_mask = counts == 0.0
+        #zero_value_embed = self.special_value_embed(
+        #    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+        #value_emb[zero_counts_mask] = zero_value_embed
         
-        # Assign special value embeddings to <cls> tokens
-        cls_value_embed = self.special_value_embed(
-            counts[:, :self.max_cls_tokens].int()).to(value_emb.dtype)
-        value_emb[:, :self.max_cls_tokens, :] = cls_value_embed
-
-        # Assign zero value embeddings to other special tokens
-        value_emb[
-            :, self.max_cls_tokens:self.n_special_tokens, :] = zero_value_embed
+        # Assign special value embeddings to special tokens
+        sp_value_embed = self.special_value_embed(
+            counts[:, :self.n_special_tokens].int()).to(
+                value_emb.dtype)
+        value_emb[:, :self.n_special_tokens, :] = sp_value_embed
 
         # Add token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
