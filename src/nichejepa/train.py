@@ -147,6 +147,7 @@ def train(args: dict,
     wd = float(args['optimization']['weight_decay'])
     final_wd = float(args['optimization']['final_weight_decay'])
     ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
+    clip_grad = args['optimization']['clip_grad']
 
     log_freq = args['state']['log_freq']
     checkpoint_freq = args['state']['checkpoint_freq']
@@ -503,14 +504,26 @@ def train(args: dict,
                     loss = loss_fn(z, h)
 
                 # Step 2: backward pass and step
+                _enc_norm, _pred_norm = 0., 0.
                 if use_bfloat16:
                     scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                else:
+                    loss.backward()
+                if ((epoch + 1) > warmup) and (clip_grad is not None):
+                    _enc_norm = torch.nn.utils.clip_grad_norm_(
+                        encoder.parameters(), clip_grad)
+                    _pred_norm = torch.nn.utils.clip_grad_norm_(
+                        predictor.parameters(), clip_grad)
+                if use_bfloat16:
                     scaler.step(optimizer)
                     scaler.update()
                 else:
-                    loss.backward()
                     optimizer.step()
                 grad_stats = grad_logger(encoder.named_parameters())
+                grad_stats.global_norm = float(_enc_norm)
+                grad_stats_pred = grad_logger(predictor.named_parameters())
+                grad_stats_pred.global_norm = float(_pred_norm)
                 optimizer.zero_grad()
 
                 # Step 3: momentum update of target encoder
@@ -520,8 +533,8 @@ def train(args: dict,
                                                 target_encoder.parameters()):
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
-                return (float(loss), _new_lr, _new_wd, grad_stats, center)
-            (loss, _new_lr, _new_wd, grad_stats, center), etime = gpu_timer(
+                return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred, center)
+            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred, center), etime = gpu_timer(
                 train_step, center)
             loss_meter.update(loss)
             time_meter.update(etime)
@@ -531,6 +544,8 @@ def train(args: dict,
                 csv_logger.log(epoch + 1,
                                itr,
                                loss,
+                               grad_stats.global_norm,
+                               grad_stats_pred.global_norm,
                                maskA_meter.val,
                                maskB_meter.val,
                                etime)
@@ -557,7 +572,15 @@ def train(args: dict,
                             grad_stats.last_layer,
                             grad_stats.min,
                             grad_stats.max))
-            wandb.log({"loss": loss, 'lr':_new_lr, "epoch": epoch })
+
+            #log_stats()
+            wandb.log(
+                {"loss": loss,
+                'lr':_new_lr,
+                'epoch': epoch,
+                'global_norm_enc': grad_stats.global_norm,
+                'global_norm_pred': grad_stats_pred.global_norm,
+                })
             assert not np.isnan(loss), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
