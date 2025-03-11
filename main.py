@@ -96,7 +96,7 @@ def sweep_func(args):
     num_gpus = len(args.devices)
     processes = []
     
-    wandb.init(project='nichejepa-sweep', mode='online')
+    wandb.init(project='nichejepa-sweep', mode='offline')
 
     if len(wandb.config.keys()) != 0:
       update_from_sweep = True

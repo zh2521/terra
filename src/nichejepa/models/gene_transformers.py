@@ -131,43 +131,35 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 n_sincos_pos=n_segments + self.max_special_tokens)
             self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
-        # Define decaying drop path rate (higher drop rate in deeper blocks)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
-
         # Initialize encoder blocks and norm layer
         self.blocks = nn.ModuleList([
-            Block(dim=embed_dim,
-                  num_heads=num_heads,
-                  mlp_ratio=mlp_ratio,
-                  qkv_bias=qkv_bias,
-                  qk_scale=qk_scale,
-                  drop=drop_rate,
-                  attn_drop=attn_drop_rate,
-                  drop_path=dpr[i],
-                  norm_layer=norm_layer,
-                  use_flash_attention=use_flash_attention)
+            Block(
+                dim=embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop_rate,
+                act_layer=nn.GELU,
+                attn_drop=attn_drop_rate,
+                norm_layer=norm_layer,
+                use_flash_attention=use_flash_attention)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
-        # Initialize weights of layers
+        # Initialize weights
+        if self.pos_embed is not None:
+            self._init_pos_embed(self.pos_embed.data) # sincos pos-embed
+        self.init_std = init_std
         self.apply(self._init_weights)
-        self.fix_init_weight()
+        self._rescale_blocks()
 
-    def fix_init_weight(self):
-        """
-        Helper function to scale initialized layer weights.
-        """
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
+    def _init_pos_embed(self, pos_embed):
+            embed_dim = pos_embed.size(-1)
+            sincos = get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False)
+            pos_embed.copy_(torch.from_numpy(sincos).float().unsqueeze(0))
 
     def _init_weights(self, m):
-        """
-        Helper function to initialize layer weights.
-        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=self.init_std)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -175,10 +167,14 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=self.init_std)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+
+    def _rescale_blocks(self):
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     @torch.no_grad()
     def return_token_emb(self,
@@ -306,15 +302,18 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  seg_learnable: bool=False,
                  predictor_embed_dim: int=384,
                  depth: int=6,
-                 num_heads: int=8,
+                 num_heads: int=12,
                  mlp_ratio: float=4.0,
                  qkv_bias: bool=True,
                  qk_scale: Optional[float]=None,
                  drop_rate: float=0.0,
                  attn_drop_rate: float=0.0,
-                 drop_path_rate: float=0.0,
                  norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
+                 uniform_power: bool=False,
+                 use_mask_tokens: bool=False,
+                 num_mask_tokens: int=2,
+                 zero_init_mask_tokens: bool=True,
                  use_flash_attention: bool=True,
                  **kwargs
                  ):
@@ -332,47 +331,61 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                                          bias=True)
 
         # Initialize mask token embedding for prediction
-        self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
+        self.mask_tokens = None
+        self.num_mask_tokens = 0
+        if use_mask_tokens:
+            self.num_mask_tokens = num_mask_tokens
+            self.mask_tokens = nn.ParameterList([
+                nn.Parameter(torch.zeros(1, 1, predictor_embed_dim))
+                for i in range(num_mask_tokens)
+            ])
 
-        # Define decaying drop path rate (higher drop rate in deeper blocks)
-        dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
+        # Initialize positional embedding
+        self.uniform_power = uniform_power
+        self.predictor_pos_embed = None
+        self.predictor_pos_embed = nn.Parameter(
+            torch.zeros(1, seq_len, predictor_embed_dim), # TODO
+            requires_grad=False)
 
         # Initialize predictor blocks, norm layer, and predictor projection
         # layer to project back to encoder embedding size
         self.predictor_blocks = nn.ModuleList([
-            Block(dim=predictor_embed_dim,
-                  num_heads=num_heads,
-                  mlp_ratio=mlp_ratio,
-                  qkv_bias=qkv_bias,
-                  qk_scale=qk_scale,
-                  drop=drop_rate,
-                  attn_drop=attn_drop_rate,
-                  drop_path=dpr[i],
-                  norm_layer=norm_layer,
-                  use_flash_attention=use_flash_attention)
+            Block(
+                dim=predictor_embed_dim,
+                num_heads=num_heads,
+                mlp_ratio=mlp_ratio,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                drop=drop_rate,
+                act_layer=nn.GELU,
+                attn_drop=attn_drop_rate,
+                norm_layer=norm_layer,
+                use_flash_attention=use_flash_attention)
             for i in range(depth)])
         self.predictor_norm = norm_layer(predictor_embed_dim)
-        self.predictor_proj = nn.Linear(predictor_embed_dim,
-                                        embed_dim,
-                                        bias=True)
+        self.predictor_proj = nn.Linear(
+            predictor_embed_dim,
+            embed_dim,
+            bias=True)
 
-        # Initialize mask token weights
-        trunc_normal_(self.mask_token, std=self.init_std)
-        
-        # Initialize layer weights
+        # Initialize weights
+        if self.predictor_pos_embed is not None:
+            self._init_pos_embed(
+                self.predictor_pos_embed.data) # sincos pos-embed
+        self.init_std = init_std
+        if not zero_init_mask_tokens:
+            for mt in self.mask_tokens:
+                trunc_normal_(mt, std=self.init_std)
         self.apply(self._init_weights)
-        self.fix_init_weight()
+        self._rescale_blocks()
 
-    def fix_init_weight(self):
-        """
-        Helper function to scale initialized layer weights.
-        """
-        def rescale(param, layer_id):
-            param.div_(math.sqrt(2.0 * layer_id))
-
-        for layer_id, layer in enumerate(self.predictor_blocks):
-            rescale(layer.attn.proj.weight.data, layer_id + 1)
-            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
+    def _init_pos_embed(self, pos_embed):
+            embed_dim = pos_embed.size(-1)
+            sincos = get_1d_sincos_pos_embed(
+                embed_dim=embed_dim,
+                n_zero_pos=0,
+                n_sincos_pos=n_segments + self.max_special_tokens) # TODO
+            pos_embed.copy_(torch.from_numpy(sincos).float().unsqueeze(0))        
 
     def _init_weights(self, m):
         """
@@ -385,10 +398,17 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         elif isinstance(m, nn.LayerNorm):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            trunc_normal_(m.weight, std=self.init_std)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
+
+    def _rescale_blocks(self):
+        """
+        Helper function to scale initialized layer weights.
+        """
+        def rescale(param, layer_id):
+            param.div_(math.sqrt(2.0 * layer_id))
+
+        for layer_id, layer in enumerate(self.predictor_blocks):
+            rescale(layer.attn.proj.weight.data, layer_id + 1)
+            rescale(layer.mlp.fc2.weight.data, layer_id + 1)
 
     @abstractmethod
     def forward(self) -> torch.Tensor:

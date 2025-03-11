@@ -338,6 +338,7 @@ def train(args: dict,
             scheduler.step()
             wd_scheduler.step()
             next(momentum_scheduler)
+            mask_collator.step()
 
     def save_checkpoint(epoch, iter_number=None):
         save_dict = {'encoder': encoder.state_dict(),
@@ -398,10 +399,11 @@ def train(args: dict,
                                                positions=positions,
                                                masks_attention=masks_attention)
                         elif gt_type == 'counts':
-                            h, _, _, _ = target_encoder(tokens=tokens,
-                                               segments=segments,
-                                               counts=counts,
-                                               masks_attention=masks_attention)
+                            h, _, _, _ = target_encoder(
+                                tokens=tokens,
+                                segments=segments,
+                                counts=counts,
+                                masks_attention=masks_attention)
 
                         if centering:
                             # Update center over batch for centering like in DINO
