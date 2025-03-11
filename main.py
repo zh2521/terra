@@ -98,7 +98,7 @@ def sweep_func(args):
     num_gpus = len(args.devices)
     processes = []
     
-    run_id = 'mlpcount1'
+    run_id = 'lean1'
     wandb.init(project='nichejepa-sweep', id=run_id, resume="allow", group="multi_node_training", mode='online')
 
     if len(wandb.config.keys()) != 0:

@@ -43,8 +43,8 @@ class CellBaseDataset(Dataset):
         seq_len_neighborhood:
             Sequence length of the neighborhood tokens.
         max_special_tokens:
-            Maximum number of special tokens (if all special tokens are
-            included; used to determine the first cell segment).
+                    Maximum number of special tokens (if all special tokens are
+                    included; used to determine the first cell segment)
         special_tokens:
             Special tokens to be included in the token sequences.
         sampling_strategy:
