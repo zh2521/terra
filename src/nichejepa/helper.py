@@ -138,8 +138,6 @@ def init_model(gt_type: Literal['rank', 'count'],
                enc_depth: int=12,
                pred_emb_dim: int=384,
                pred_depth: int=6,
-               pos_learnable: bool=False,
-               seg_learnable: bool=False,
                use_flash_attention: bool=True,
                ) -> Tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
@@ -168,12 +166,6 @@ def init_model(gt_type: Literal['rank', 'count'],
         Dimension of the predictor embedding.        
     pred_depth:
         Number of transformer blocks in the predictor.
-    pos_learnable:
-        If 'True', positional embeddings are learnable, otherwise use sin cos
-        positional embeddings.
-    seg_learnable:
-        If 'True', segment embeddings are learnable, otherwise use fixed
-        segment embeddings.
     use_flash_attention:
         If use flash_attention or not
     Returns
@@ -190,8 +182,6 @@ def init_model(gt_type: Literal['rank', 'count'],
         seq_len=seq_len,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         embed_dim=enc_emb_dim,
         depth=enc_depth,
         use_flash_attention=use_flash_attention)
@@ -201,8 +191,6 @@ def init_model(gt_type: Literal['rank', 'count'],
         seq_len=seq_len,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
         use_flash_attention=use_flash_attention)

@@ -116,8 +116,6 @@ def train(args: dict,
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
     special_tokens = args['meta']['special_tokens']
-    pos_learnable = args['meta']['pos_learnable']
-    seg_learnable = args['meta']['seg_learnable']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
     centering = args['meta']['centering']
@@ -247,8 +245,6 @@ def train(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         use_flash_attention=use_flash_attention)
     target_encoder = copy.deepcopy(encoder)
 
@@ -278,7 +274,6 @@ def train(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,

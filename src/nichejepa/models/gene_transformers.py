@@ -39,8 +39,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         Number of special tokens included in a token sequence.
     n_segments:
         Number of token segments within a token sequence.
-    seg_learnable:
-        If 'True', segment embeddings are learnable, otherwise fixed.
     embed_dim:
         Dimension of the encoder embedding.
     depth:
@@ -76,7 +74,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 seg_learnable: bool=False,
                  embed_dim: int=768,
                  depth: int=12,
                  predictor_embed_dim: int=384,
@@ -104,21 +101,20 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                                         embed_dim,
                                         padding_idx=0)
 
-        # Initialize segment embeddings (include <pad> and special segments)
+        # Initialize segment embeddings
         self.seg_embed = nn.Embedding(
-            1 + self.n_special_tokens + n_segments,
+            1 + n_segments, # include <pad>
             embed_dim,
             padding_idx=0)
 
-        if not seg_learnable:
-            # Prevent gradient updates and initialize with sincos embedding,
-            # including special segments
-            self.seg_embed.weight.requires_grad = False
-            seg_embed = get_1d_sincos_pos_embed(
-                embed_dim=embed_dim,
-                n_zero_pos=0,
-                n_sincos_pos=n_segments + self.n_special_tokens)
-            self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
+        # Prevent gradient updates and initialize with sincos embedding,
+        # including special segments
+        self.seg_embed.weight.requires_grad = False
+        seg_embed = get_1d_sincos_pos_embed(
+            embed_dim=embed_dim,
+            n_zero_pos=0,
+            n_sincos_pos=n_segments)
+        self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
         # Initialize encoder blocks and norm layer
         self.blocks = nn.ModuleList([
@@ -250,8 +246,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         Number of special tokens included in a token sequence.
     n_segments:
         Number of token segments within a token sequence.
-    seg_learnable:
-        If 'True', segment embeddings are learnable, otherwise fixed.
     predictor_embed_dim:
         Dimension of the embedding of the predictor.
     depth:
@@ -283,7 +277,6 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 seg_learnable: bool=False,
                  predictor_embed_dim: int=768,
                  depth: int=6,
                  num_heads: int=12,
@@ -626,7 +619,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         self.value_embed = nn.Embedding(self.n_value_bins,
                                         self.embed_dim)
         self.special_value_embed = nn.Embedding(
-            1 + self.n_special_values + self.max_special_tokens, # include <pad> # TODO: why is n_special_tokens needed? it is needed
+            2 + self.n_special_values + self.n_special_tokens, # include <pad> and zero expression # TODO: why is n_special_tokens needed? it is needed
             self.embed_dim,
             padding_idx=0)
         self.value_emb_weights_projection = ValueEmbWeightsProjection(
@@ -688,7 +681,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
             value_emb[zero_counts_mask] = zero_value_embed
             
-            # Assign special value embeddings to <cls> and other special tokens
+            # Assign special value embeddings to special tokens
             sp_value_embed = self.special_value_embed(
                 counts[:, :self.n_special_tokens].int()).to(
                     value_emb.dtype)
@@ -771,9 +764,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
         value_emb[zero_counts_mask] = zero_value_embed
 
-        # Assign zero value embeddings special tokens
-        value_emb[
-            :, self.n_special_tokens, :] = zero_value_embed
+        # Assign zero value embeddings special tokens (not needed)
+        #value_emb[
+        #    :, self.n_special_tokens, :] = zero_value_embed
 
         # Add token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
@@ -854,9 +847,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
         value_emb[zero_counts_mask] = zero_value_embed
         
-        # Assign zero value embeddings to special tokens
-        value_emb[
-            :, self.n_special_tokens, :] = zero_value_embed
+        # Assign zero value embeddings to special tokens (not needed)
+        #value_emb[
+        #    :, :self.n_special_tokens, :] = zero_value_embed
 
         # Add token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
