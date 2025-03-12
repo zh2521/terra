@@ -332,6 +332,7 @@ def train(args: dict,
             scheduler.step()
             wd_scheduler.step()
             next(momentum_scheduler)
+            mask_collator.step()
 
     def save_checkpoint(epoch, iter_number=None):
         save_dict = {'encoder': encoder.state_dict(),
