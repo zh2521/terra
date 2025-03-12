@@ -128,6 +128,7 @@ def load_checkpoint(device: str,
 
 
 def init_model(gt_type: Literal['rank', 'count'],
+               n_value_bins: int,
                device: str,
                vocab_size: int,
                seq_len: int,
@@ -148,6 +149,8 @@ def init_model(gt_type: Literal['rank', 'count'],
     -----------
     gt_type:
         Gene transformer type.
+    n_value_bins:
+        Number of value bins for count tokenization.s
     device:
         Device on which the model will be initialized.
     vocab_size:
@@ -177,6 +180,7 @@ def init_model(gt_type: Literal['rank', 'count'],
     """
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
+        n_value_bins=n_value_bins,
         n_special_values=n_special_values,
         vocab_size=vocab_size,
         seq_len=seq_len,

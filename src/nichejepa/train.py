@@ -111,6 +111,7 @@ def train(args: dict,
 
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
+    n_value_bins = args['meta']['n_value_bins']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
@@ -118,10 +119,6 @@ def train(args: dict,
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
-    centering = args['meta']['centering']
-    center_momentum = args['meta']['center_momentum']
-    # Initialize center for target centering
-    center = None
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -235,6 +232,7 @@ def train(args: dict,
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
         gt_type=gt_type,
+        n_value_bins=n_value_bins,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -381,43 +379,30 @@ def train(args: dict,
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
-            def train_step(center):
+            def train_step():
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
 
-                def forward_target(center):
+                def forward_target():
                     with torch.no_grad(): 
                         # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                         if gt_type == 'rank':
-                            h, _, _, _ = target_encoder(tokens=tokens,
-                                               segments=segments,
-                                               positions=positions,
-                                               masks_attention=masks_attention)
+                            h, _, _, _ = target_encoder(
+                                tokens=tokens,
+                                segments=segments,
+                                positions=positions,
+                                masks_attention=masks_attention)
                         elif gt_type == 'counts':
-                            h, _, _, _ = target_encoder(tokens=tokens,
-                                               segments=segments,
-                                               counts=counts,
-                                               masks_attention=masks_attention)
+                            h, _, _, _ = target_encoder(
+                                tokens=tokens,
+                                segments=segments,
+                                counts=counts,
+                                masks_attention=masks_attention)
 
-                        if centering:
-                            # Update center over batch for centering like in DINO
-                            # Create batch_center across GPUs using AllReduceSum
-                            # to synchronize the sum between different hosts
-                            batch_center = torch.sum(h, dim=0, keepdim=True)
-                            batch_center = AllReduceSum.apply(batch_center)
-                            batch_centers = batch_center / (len(h) * world_size)
-                            if center is not None:
-                                center = center_momentum * center + (
-                                    1-center_momentum) * batch_centers
-                            else:
-                                center = batch_centers
-                            # Center over batch
-                            h = h - center
-                        else:
-                            # Normalize over feature dim
-                            h = F.layer_norm(h, (h.size(-1),))
+                        # Normalize over feature dim
+                        h = F.layer_norm(h, (h.size(-1),))
 
                         # Only keep encoded targets (masked genes of h); output
                         # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
@@ -435,7 +420,7 @@ def train(args: dict,
                             B,
                             repeat=len(masks_enc))
 
-                        return h, center
+                        return h
 
                 def forward_context():
                     # Context encoder forward pass with output dim (BATCH_SIZE,
@@ -485,7 +470,7 @@ def train(args: dict,
                 # Step 1: forward pass
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
-                    h, center = forward_target(center)
+                    h = forward_target()
                     z = forward_context()
                     loss = loss_fn(z, h)
 
@@ -519,9 +504,9 @@ def train(args: dict,
                                                 target_encoder.parameters()):
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
-                return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred, center)
-            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred, center), etime = gpu_timer(
-                train_step, center)
+                return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
+            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
+                train_step)
             loss_meter.update(loss)
             time_meter.update(etime)
 

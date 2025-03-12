@@ -298,9 +298,9 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.init_std = init_std
 
         # Initialize layer to project from encoder to predictor embed dim
-        #self.predictor_embed = nn.Linear(embed_dim,
-        #                                 predictor_embed_dim,
-        #                                 bias=True)
+        self.predictor_embed = nn.Linear(embed_dim,
+                                         predictor_embed_dim,
+                                         bias=True)
 
         # Initialize mask token embedding for prediction
         self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
@@ -319,12 +319,12 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                   use_flash_attention=use_flash_attention)
             for i in range(depth)])
         self.predictor_norm = norm_layer(predictor_embed_dim)
-        #self.predictor_proj = nn.Linear(predictor_embed_dim,
-        #                                embed_dim,
-        #                                bias=True)
+        self.predictor_proj = nn.Linear(predictor_embed_dim,
+                                        embed_dim,
+                                        bias=True)
 
         # Initialize mask token weights
-        #trunc_normal_(self.mask_token, std=self.init_std)
+        trunc_normal_(self.mask_token, std=self.init_std)
         
         # Initialize layer weights
         self.apply(self._init_weights)
@@ -607,7 +607,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     """
     def __init__(self,
                  n_special_values: int,
-                 n_value_bins: int=10,
+                 n_value_bins: int=100,
                  **base_encoder_kwargs,
                  ):
         super().__init__(**base_encoder_kwargs)
@@ -941,7 +941,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             B = len(z) // len(masks_enc)
 
             # MLP projection layer
-            #z = self.predictor_embed(z)
+            z = self.predictor_embed(z)
 
             # Retrieve special token embedding
             x_special = (
@@ -1007,7 +1007,7 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
-            #z = self.predictor_proj(z)
+            z = self.predictor_proj(z)
 
             return z
 
@@ -1079,7 +1079,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             B = len(z) // len(masks_enc)
 
             # MLP projection layer
-            #z = self.predictor_embed(z)
+            z = self.predictor_embed(z)
 
             # Retrieve special token embedding
             x_special = (
@@ -1145,13 +1145,14 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer
-            #z = self.predictor_proj(z)
+            z = self.predictor_proj(z)
 
             return z
 
 
 def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
                     n_special_values: Optional[int]=None,
+                    n_value_bins: int=100,
                     **encoder_kwargs
                     ) -> Union[GeneTransformerRankEncoder,
                                 GeneTransformerCountEncoder]:
@@ -1165,6 +1166,7 @@ def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
     elif encoder_type == 'counts':
         model = GeneTransformerCountEncoder(
             n_special_values=n_special_values,
+            n_value_bins=n_value_bins,
             num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
@@ -1175,7 +1177,7 @@ def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
 
 
 def init_gt_predictor(predictor_type: Literal['rank', 'counts'],
-                 **predictor_kwargs
+                      **predictor_kwargs
                  ) -> Union[GeneTransformerRankPredictor,
                             GeneTransformerCountPredictor]:
     if predictor_type == 'rank':
