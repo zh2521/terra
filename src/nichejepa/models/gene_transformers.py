@@ -619,7 +619,6 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     def __init__(self,
                  count_encoding: Literal['value_bins', 'mlp']='value_bins',
                  n_value_bins: Optional[int]=100,
-                 n_special_values: int,
                  **base_encoder_kwargs,
                  ):
         super().__init__(**base_encoder_kwargs)
@@ -632,7 +631,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 self.n_value_bins,
                 self.embed_dim)
             self.special_value_embed = nn.Embedding(
-                2 + self.n_special_values + self.max_special_tokens, # include <pad> and zero expression
+                1, # include only <pad>
                 self.embed_dim,
                 padding_idx=0)
             self.value_emb_weights_projection = ValueEmbWeightsProjection(
@@ -694,20 +693,12 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 value_emb_weights = self.value_emb_weights_projection(
                     counts.unsqueeze(dim=-1))
                 value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+                zero_counts_mask = counts == 0.0 # assign padding to 0 counts
+                zero_value_embed = self.special_value_embed(
+                    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+                value_emb[zero_counts_mask] = zero_value_embed
             elif self.count_encoding == 'mlp'
-                value_emb = self.value_embed(counts.unsqueeze(dim=-1))
-
-            # Assign padding value embedding to 0 counts 
-            zero_counts_mask = counts == 0.0
-            zero_value_embed = self.special_value_embed(
-                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-            value_emb[zero_counts_mask] = zero_value_embed
-            
-            # Assign special value embeddings to special tokens
-            sp_value_embed = self.special_value_embed(
-                counts[:, :self.n_special_tokens].int()).to(
-                    value_emb.dtype)
-            value_emb[:, :self.n_special_tokens, :] = sp_value_embed
+                value_emb = self.value_embed(counts.unsqueeze(dim=-1))           
 
             # Add token and segment embeddings to value embeddings
             x = token_emb + seg_emb + value_emb
@@ -1046,8 +1037,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                  ):
         super().__init__(**base_predictor_kwargs)
 
+        # Initialize special value embedding
         self.n_special_values = n_special_values
-
         self.special_value_embed = nn.Embedding(
             2 + self.n_special_values + self.n_special_tokens, # include <pad> and zero expression # TODO: why is n_special_tokens needed? it is needed
             self.predictor_embed_dim,
