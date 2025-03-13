@@ -623,6 +623,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                  ):
         super().__init__(**base_encoder_kwargs)
         self.count_encoding = count_encoding
+        self.n_value_bins = n_value_bins
 
         # Initialize value embeddings and value embedding weight projection
         # layer
@@ -637,9 +638,10 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             self.value_emb_weights_projection = ValueEmbWeightsProjection(
                 dim=self.n_value_bins)
         elif self.count_encoding == 'mlp':
+            hidden_dim = int(self.embed_dim/2)
             self.value_embed = MLP(
                 in_features=1, 
-                hidden_features=(self.embed_dim/2),
+                hidden_features=hidden_dim,
                 out_features=self.embed_dim,
                 act_layer=nn.GELU)
 
@@ -697,7 +699,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 zero_value_embed = self.special_value_embed(
                     torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
                 value_emb[zero_counts_mask] = zero_value_embed
-            elif self.count_encoding == 'mlp'
+            elif self.count_encoding == 'mlp':
                 value_emb = self.value_embed(counts.unsqueeze(dim=-1))           
 
             # Add token and segment embeddings to value embeddings

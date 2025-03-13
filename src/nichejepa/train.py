@@ -234,7 +234,7 @@ def train(args: dict,
     encoder, predictor = init_model(
         gt_type=gt_type,
         count_encoding=count_encoding,
-        value_bins=value_bins,
+        n_value_bins=n_value_bins,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
