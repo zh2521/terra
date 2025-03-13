@@ -304,7 +304,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # including special segments
         self.seg_embed.weight.requires_grad = False
         seg_embed = get_1d_sincos_pos_embed(
-            embed_dim=embed_dim,
+            embed_dim=predictor_embed_dim,
             n_zero_pos=0,
             n_sincos_pos=n_segments)
         self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
@@ -1094,8 +1094,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # MLP projection layer
             z = self.predictor_embed(z)
-            token_emb = self.token_embed_projection(token_emb)
-            seg_emb = self.seg_embed(segments)
+            token_embed = self.token_embed_projection(token_embed)
+            seg_embed = self.seg_embed(segments)
             sp_value_embed = self.special_value_embed(
                 counts[:, :self.n_special_tokens].int())
 
