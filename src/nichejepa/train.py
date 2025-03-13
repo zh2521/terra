@@ -111,6 +111,7 @@ def train(args: dict,
 
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
+    count_encoding = args['meta']['count_encoding']
     n_value_bins = args['meta']['n_value_bins']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
@@ -232,6 +233,8 @@ def train(args: dict,
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
         gt_type=gt_type,
+        count_encoding=count_encoding,
+        value_bins=value_bins,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,

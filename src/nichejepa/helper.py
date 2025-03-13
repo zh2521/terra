@@ -128,6 +128,8 @@ def load_checkpoint(device: str,
 
 
 def init_model(gt_type: Literal['rank', 'count'],
+               count_encoding: Literal['value_bins', 'mlp'],
+               n_value_bins: int,
                device: str,
                vocab_size: int,
                seq_len: int,
@@ -177,6 +179,8 @@ def init_model(gt_type: Literal['rank', 'count'],
     """
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
+        count_encoding=count_encoding,
+        n_value_bins=n_value_bins,
         vocab_size=vocab_size,
         seq_len=seq_len,
         n_special_tokens=n_special_tokens,
