@@ -107,7 +107,6 @@ def infer(args: dict,
     # Load params from config file
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
-    n_value_bins = args['meta']['n_value_bins']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
@@ -186,7 +185,6 @@ def infer(args: dict,
     # Initialize encoder, predictor, and target encoder
     target_encoder, _ = init_model(
         gt_type=gt_type,
-        n_value_bins=n_value_bins,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,

@@ -765,10 +765,10 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         value_emb = self.value_embed(counts.unsqueeze(dim=-1))
 
         # Assign padding value embedding to 0 counts 
-        zero_counts_mask = counts == 0.0
-        zero_value_embed = self.special_value_embed(
-            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-        value_emb[zero_counts_mask] = zero_value_embed
+        #zero_counts_mask = counts == 0.0
+        #zero_value_embed = self.special_value_embed(
+        #    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+        #value_emb[zero_counts_mask] = zero_value_embed
 
         # Assign zero value embeddings special tokens (not needed)
         #value_emb[
@@ -843,15 +843,16 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         seg_emb = self.seg_embed(segments)
 
         # Get value embeddings
-        value_emb_weights = self.value_emb_weights_projection(
-            counts.unsqueeze(dim=-1))
-        value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+        #value_emb_weights = self.value_emb_weights_projection(
+        #    counts.unsqueeze(dim=-1))
+        #value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+        value_emb = self.value_embed(counts.unsqueeze(dim=-1))
 
         # Assign padding value embedding to 0 counts 
-        zero_counts_mask = counts == 0.0
-        zero_value_embed = self.special_value_embed(
-            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-        value_emb[zero_counts_mask] = zero_value_embed
+        #zero_counts_mask = counts == 0.0
+        #zero_value_embed = self.special_value_embed(
+        #    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+        #value_emb[zero_counts_mask] = zero_value_embed
         
         # Assign zero value embeddings to special tokens (not needed)
         #value_emb[
