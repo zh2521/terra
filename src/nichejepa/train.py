@@ -349,11 +349,11 @@ def train(args: dict,
                      'lr': lr}
         if rank == 0:
             torch.save(save_dict, latest_path)
-            if (epoch + 1) % checkpoint_freq == 0:
+            if (epoch) % checkpoint_freq == 0:
                 if iter_number is None:
-                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch}'))
                 else:
-                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}_{iter_number}'))
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch}_{iter_number}'))
 
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
@@ -562,4 +562,4 @@ def train(args: dict,
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch+1)
+        save_checkpoint(epoch + 1)

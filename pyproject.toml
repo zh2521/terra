@@ -24,6 +24,7 @@ urls.Home-page = "https://github.com/Lotfollahi-lab/niche-jepa"
 dependencies = [
     "anndata",
     "squidpy",
+    "scib-metrics",
     "scikit-misc",
     "transformers",
     "datasets",
