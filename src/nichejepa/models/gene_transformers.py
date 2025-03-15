@@ -692,8 +692,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             if not isinstance(masks, list):
                 masks = [masks]
 
-        torch.set_printoptions(threshold=float('inf'))
-        print(segments)
+        #torch.set_printoptions(threshold=float('inf'))
+        #print(segments)
 
         # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(tokens)
