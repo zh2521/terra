@@ -424,19 +424,15 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Get (sampled) gene tokens, values/positions and non-padded segments
         gene_tokens_cell, values_cell = self._get_segment_seq(
             item=item,
-            segment=self.n_special_tokens, # cell seg
+            segment=1, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neigh, values_neigh = self._get_segment_seq(
             item=item,
-            segment=self.n_special_tokens + 1, # neigh seg
+            segment=2, # neigh seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neigh
-        segments = [
-            self.n_special_tokens if gene_token != 0 else 0 for gene_token
-            in gene_tokens_cell
-            ] + [
-            self.n_special_tokens + 1 if gene_token != 0 else 0 for
-            gene_token in gene_tokens_neigh]
+        segments = [1 if gene_token != 0 else 0 for gene_token in gene_tokens_cell] + [
+            2 if gene_token != 0 else 0 for gene_token in gene_tokens_neigh]
         if self.gt_type == 'rank':
             positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
                 range(1, len(gene_tokens_neigh) + 1))
