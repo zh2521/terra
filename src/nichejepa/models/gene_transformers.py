@@ -219,14 +219,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         """
         pass
 
-    @abstractmethod
-    def return_multi_layer_emb() -> List[torch.Tensor]:
-        """
-        Encoder-specific logic for returning multi-layer embeddings during
-        inference.
-        """
-        pass
-
 
 class GeneTransformerBasePredictor(ABC, nn.Module):
     """
@@ -294,10 +286,28 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.num_heads = num_heads
         self.init_std = init_std
 
+        # Initialize segment embeddings
+        self.seg_embed = nn.Embedding(
+            1 + n_segments, # include <pad>
+            predictor_embed_dim,
+            padding_idx=0)
+        
+        # Prevent gradient updates and initialize with sincos embedding,
+        # including special segments
+        self.seg_embed.weight.requires_grad = False
+        seg_embed = get_1d_sincos_pos_embed(
+            embed_dim=predictor_embed_dim,
+            n_zero_pos=0,
+            n_sincos_pos=n_segments)
+        self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
+
         # Initialize layer to project from encoder to predictor embed dim
         self.predictor_embed = nn.Linear(embed_dim,
                                          predictor_embed_dim,
                                          bias=True)
+        self.token_embed_projection = nn.Linear(embed_dim,
+                                                predictor_embed_dim,
+                                                bias=True)
 
         # Initialize mask token embedding for prediction
         self.mask_token = nn.Parameter(torch.zeros(predictor_embed_dim))
@@ -321,7 +331,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                                         bias=True)
 
         # Initialize mask token weights
-        trunc_normal_(self.mask_token, std=self.init_std)
+        # trunc_normal_(self.mask_token, std=self.init_std)
         
         # Initialize layer weights
         self.apply(self._init_weights)
@@ -524,252 +534,184 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
         return x
 
-    @torch.no_grad()
-    def return_multi_layer_emb(self,
-                               positions: torch.Tensor,
-                               segments: torch.Tensor,
-                               tokens: torch.Tensor,
-                               masks: Optional[Union[
-                                   List[torch.Tensor], torch.Tensor]]=None,
-                               masks_attention: Optional[torch.Tensor]=None, 
-                               ) -> List[torch.Tensor]:
+
+class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
+    """
+    GeneTransformerCountEncoder class to encode contexts or targets using gene expression counts.
+
+    Parameters
+    -----------
+    count_encoding:
+        Encoding module for counts. Can be either `value_bins` (scFoundation count encoding) or `mlp` (2 layer MLP).
+    n_value_bins:
+        Number of value bins if `value_bins` count encoding is used.    
+    """
+    def __init__(
+        self,
+        count_encoding: Literal['value_bins', 'mlp']='value_bins',
+        n_value_bins: Optional[int]=100,
+        **base_encoder_kwargs
+        ):
+
+        super().__init__(**base_encoder_kwargs)
+        self.count_encoding = count_encoding
+        self.n_value_bins = n_value_bins
+
+        # Initialize value embeddings and value embedding weight projection layer
+        if self.count_encoding == 'value_bins':
+            self.value_embed = nn.Embedding(
+                self.n_value_bins,
+                self.embed_dim)
+            self.special_value_embed = nn.Embedding(
+                1, # include only <pad>
+                self.embed_dim,
+                padding_idx=0)
+            self.value_emb_weights_projection = ValueEmbWeightsProjection(
+                dim=self.n_value_bins)
+        elif self.count_encoding == 'mlp':
+            hidden_dim = int(self.embed_dim/2)
+            self.value_embed = MLP(
+                in_features=1, 
+                hidden_features=hidden_dim,
+                out_features=self.embed_dim,
+                act_layer=nn.GELU)
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        segments: torch.Tensor,
+        counts: torch.Tensor,
+        masks: Optional[Union[List[torch.Tensor], torch.Tensor]]=None,
+        masks_attention: Optional[torch.Tensor]=None
+        ) -> torch.Tensor:
         """
-        Run encoder forward pass on a batch of input token sequences, applying
-        masks if provided, and return a list containing the embeddings after
-        each block.
+        Run encoder forward pass on a batch of cell graph sequences. For each observation in the batch return only
+        embeddings for tokens included in the masks.
 
         Parameters
         -----------
-        positions:
-            Tensor containing position labels with shape (BATCH_SIZE, SEQ_LEN).
+        tokens:
+            Tensor containing input gene tokens with shape (BATCH_SIZE, SEQ_LEN).
         segments:
             Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
-        tokens:
-            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
+        counts:
+            Tensor containing the counts corresponding to gene tokens with shape (BATCH_SIZE, SEQ_LEN).
         masks:
-            List of N_MASKS tensors containing indices (within the sequence) of
-            tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
+            List of N_MASKS tensors containing indices (within the sequence) of tokens to keep with shape (BATCH_SIZE,
+            MASK_SIZE).
         masks_attention:
-            An attention tensor that controls how different tokens attend to
-            each other within a sequence.
+            An attention tensor that controls how different tokens attend to each other within a sequence.
 
         Returns
         -----------
-        emb_list:
-            List containing the embeddings after each layer with shape (
-            BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE
-            is minimum mask size in the batch. 
+        x:
+            Embeddings of input tokens included in the masks with shape (BATCH_SIZE * N_MASKS, MIN_MASK_SIZE,
+            EMBED_DIM), where MIN_MASK_SIZE is minimum mask size in the batch.    
         """
+        
         # Format masks
         if masks is not None:
-                if not isinstance(masks, list):
-                    masks = [masks]
+            if not isinstance(masks, list):
+                masks = [masks]
 
-        # Get positional, segment and token embeddings
-        pos_emb = self.pos_embed(positions)
-        seg_emb = self.seg_embed(segments)
+        # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(tokens)
+        seg_emb = self.seg_embed(segments)
 
-        # Add positional and segment embeddings to token embeddings
-        x = pos_emb + seg_emb + token_emb
-        #B, N, D = x.shape
+        # Get value embeddings
+        if self.count_encoding == 'value_bins':
+            value_emb_weights = self.value_emb_weights_projection(
+                counts.unsqueeze(dim=-1))
+            value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+            zero_counts_mask = counts == 0.0 # assign padding to 0 counts
+            zero_value_embed = self.special_value_embed(
+                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+            value_emb[zero_counts_mask] = zero_value_embed
+        elif self.count_encoding == 'mlp':
+            value_emb = self.value_embed(counts.unsqueeze(dim=-1))           
 
+        # Add gene token and segment embeddings to value embeddings
+        x = token_emb + seg_emb + value_emb
+        # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
+            
         # Remove special tokens before encoding
         x = x[:, self.n_special_tokens:]
 
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
-
-        # Run forward prop and store embeddings after each block
-        n_blocks = len(self.blocks)
-        emb_list = []
+        
+        # Run forward prop
         for i, blk in enumerate(self.blocks):
             x = blk(x, masks=masks_attention)
-            if (i == (n_blocks - 1)) and (self.norm is not None):
-                x = self.norm(x)
-            emb_list.append(x)
+        if self.norm is not None:
+            x = self.norm(x)
 
-        return emb_list
-
-
-class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
-    """
-    GeneTransformerCountEncoder class to encode contexts or targets using gene
-    expression counts.
-    """
-    def __init__(self,
-                 n_special_values: int,
-                 n_value_bins: int=10,
-                 **base_encoder_kwargs,
-                 ):
-        super().__init__(**base_encoder_kwargs)
-        self.n_special_values = n_special_values
-        self.n_value_bins = n_value_bins
-
-        # Initialize value embeddings and value embedding weight projection
-        # layer
-        #self.value_embed = nn.Embedding(self.n_value_bins,
-        #                                self.embed_dim)
-        self.special_value_embed = nn.Embedding(
-            2 + self.n_special_values + self.n_special_tokens, # include <pad> and zero expression # TODO: why is n_special_tokens needed? it is needed
-            self.embed_dim,
-            padding_idx=0)
-        #self.value_emb_weights_projection = ValueEmbWeightsProjection(
-        #    dim=self.n_value_bins)
-        self.value_embed = MLP(
-            in_features=1, 
-            hidden_features=512,
-            out_features=1024,
-            act_layer=nn.GELU,
-        )
-
-    def forward(self,
-                tokens: torch.Tensor,
-                segments: torch.Tensor,
-                counts: torch.Tensor,
-                masks: Optional[Union[List[torch.Tensor], torch.Tensor]]=None,
-                masks_attention: Optional[torch.Tensor]=None 
-                ) -> torch.Tensor:
-            """
-            Run encoder forward pass on a batch of input token sequences. For
-            each observation in the batch return only embeddings for tokens
-            included in the masks.
-
-            Parameters
-            -----------
-            tokens:
-                Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
-            segments:
-                Tensor containing segment labels with shape (BATCH_SIZE,
-                SEQ_LEN).
-            counts:
-                Tensor containing the counts corresponding to gene tokens with
-                shape (BATCH_SIZE, SEQ_LEN).
-            masks:
-                List of N_MASKS tensors containing indices (within the sequence)
-                of tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
-            masks_attention:
-                An attention tensor that controls how different tokens attend to
-                each other within a sequence.
-
-            Returns
-            -----------
-            x:
-                Embeddings of input tokens included in the masks with shape (
-                BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where
-                MIN_MASK_SIZE is minimum mask size in the batch.    
-            """
-            # Format masks
-            if masks is not None:
-                if not isinstance(masks, list):
-                    masks = [masks]
-
-            # Get embeddings for sequence of tokens and segments
-            token_emb = self.token_embed(tokens)
-            seg_emb = self.seg_embed(segments)
-
-            # Get value embeddings
-            #value_emb_weights = self.value_emb_weights_projection(
-            #    counts.unsqueeze(dim=-1))
-            #value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
-            value_emb = self.value_embed(counts.unsqueeze(dim=-1))
-
-            # Assign padding value embedding to 0 counts 
-            #zero_counts_mask = counts == 0.0
-            #zero_value_embed = self.special_value_embed(
-            #    torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-            #value_emb[zero_counts_mask] = zero_value_embed
-            
-            # Assign special value embeddings to special tokens
-            sp_value_embed = self.special_value_embed(
-                counts[:, :self.n_special_tokens].int()).to(
-                    value_emb.dtype)
-            value_emb[:, :self.n_special_tokens, :] = sp_value_embed
-
-            # Add token and segment embeddings to value embeddings
-            x = token_emb + seg_emb + value_emb
-            # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
-                
-            # Remove special tokens before encoding
-            x = x[:, self.n_special_tokens:]
-
-            # Mask token embeddings if masks are provided
-            if masks is not None:
-                x = apply_masks(x, masks)
-            
-            # Run forward prop
-            for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=masks_attention)
-            if self.norm is not None:
-                x = self.norm(x)
-
-            return x, token_emb, seg_emb, value_emb
+        return x, token_emb, seg_emb, value_emb
 
     @torch.no_grad()
-    def return_layer_emb(self,
-                         layer: int,
-                         tokens: torch.Tensor,
-                         segments: torch.Tensor,
-                         counts: torch.Tensor,
-                         masks: Optional[Union[
-                             List[torch.Tensor], torch.Tensor]]=None,
-                         masks_attention: Optional[torch.Tensor]=None, 
-                         ) -> List[torch.Tensor]:
+    def return_layer_emb(
+        self,
+        layer: int,
+        tokens: torch.Tensor,
+        segments: torch.Tensor,
+        counts: torch.Tensor,
+        masks: Optional[Union[
+            List[torch.Tensor], torch.Tensor]]=None,
+        masks_attention: Optional[torch.Tensor]=None, 
+        ) -> List[torch.Tensor]:
         """
-        Run encoder forward pass on a batch of input token sequences, applying
-        masks if provided, and return the embeddings of a specific layer.
+        Run encoder forward pass on a batch of cell graph sequences, applying masks if provided, and return the
+        embeddings of a specific layer.
 
         Parameters
         -----------
         layer:
             Index of the specific layer to be returned
-        positions:
-            Tensor containing position labels with shape (BATCH_SIZE, SEQ_LEN).
+        tokens:
+            Tensor containing input gene tokens with shape (BATCH_SIZE, SEQ_LEN).
         segments:
             Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
-        tokens:
-            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN).
+        counts:
+            Tensor containing the counts corresponding to gene tokens with shape (BATCH_SIZE, SEQ_LEN).
         masks:
-            List of N_MASKS tensors containing indices (within the sequence) of
-            tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
+            List of N_MASKS tensors containing indices (within the sequence) of tokens to keep with shape (BATCH_SIZE,
+            MASK_SIZE).
         masks_attention:
-            An attention tensor that controls how different tokens attend to
-            each other within a sequence.
+            An attention tensor that controls how different tokens attend to each other within a sequence.
 
         Returns
         -----------
         x:
-            Embeddings of a specific layer with shape (BATCH_SIZE * N_MASKS,
-            MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE is minimum mask size
-            in the batch. 
+            Embeddings of a specific layer with shape (BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where
+            MIN_MASK_SIZE is minimum mask size in the batch. 
         """
+
         # Format masks
         if masks is not None:
             if not isinstance(masks, list):
                 masks = [masks]
 
-        # Get embeddings for sequence of tokens and segments
+        #torch.set_printoptions(threshold=float('inf'))
+        #print(segments)
+
+        # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(tokens)
         seg_emb = self.seg_embed(segments)
 
         # Get value embeddings
-        #value_emb_weights = self.value_emb_weights_projection(
-        #    counts.unsqueeze(dim=-1))
-        #value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
-        value_emb = self.value_embed(counts.unsqueeze(dim=-1))
+        if self.count_encoding == 'value_bins':
+            value_emb_weights = self.value_emb_weights_projection(
+                counts.unsqueeze(dim=-1))
+            value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
+            zero_counts_mask = counts == 0.0 # assign padding to 0 counts
+            zero_value_embed = self.special_value_embed(
+                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+            value_emb[zero_counts_mask] = zero_value_embed
+        elif self.count_encoding == 'mlp':
+            value_emb = self.value_embed(counts.unsqueeze(dim=-1))  
 
-        # Assign padding value embedding to 0 counts 
-        zero_counts_mask = counts == 0.0
-        zero_value_embed = self.special_value_embed(
-            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-        value_emb[zero_counts_mask] = zero_value_embed
-
-        # Assign zero value embeddings special tokens (not needed)
-        #value_emb[
-        #    :, self.n_special_tokens, :] = zero_value_embed
-
-        # Add token and segment embeddings to value embeddings
+        # Add gene token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
@@ -791,108 +733,28 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         return x
 
-    @torch.no_grad()
-    def return_multi_layer_emb(self,
-                               tokens: torch.Tensor,
-                               segments: torch.Tensor,
-                               counts: torch.Tensor,
-                               masks: Optional[Union[
-                                   List[torch.Tensor], torch.Tensor]]=None,
-                               masks_attention: Optional[torch.Tensor]=None, 
-                               ) -> List[torch.Tensor]:
-        """
-        Run encoder forward pass on a batch of input token sequences, applying
-        masks if provided, and return a list containing the embeddings after
-        each block.
-
-        Parameters
-        -----------
-        tokens:
-            Tensor containing input tokens with shape (BATCH_SIZE, SEQ_LEN). 
-        segments:
-            Tensor containing segment labels with shape (BATCH_SIZE, SEQ_LEN).
-        counts:
-            Tensor containing the counts/values corresponding to tokens with
-            shape (BATCH_SIZE, SEQ_LEN).        
-        masks:
-            List of N_MASKS tensors containing indices (within the sequence) of
-            tokens to keep with shape (BATCH_SIZE, MASK_SIZE).
-        masks_attention:
-            An attention tensor that controls how different tokens attend to
-            each other within a sequence.
-
-        Returns
-        -----------
-        emb_list:
-            List containing the embeddings after each layer with shape (
-            BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE
-            is minimum mask size in the batch. 
-        """
-        # Format masks
-        if masks is not None:
-            if not isinstance(masks, list):
-                masks = [masks]
-
-        # Get embeddings for sequence of tokens and segments
-        token_emb = self.token_embed(tokens)
-        seg_emb = self.seg_embed(segments)
-
-        # Get value embeddings
-        value_emb_weights = self.value_emb_weights_projection(
-            counts.unsqueeze(dim=-1))
-        value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
-
-        # Assign padding value embedding to 0 counts 
-        zero_counts_mask = counts == 0.0
-        zero_value_embed = self.special_value_embed(
-            torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-        value_emb[zero_counts_mask] = zero_value_embed
-        
-        # Assign zero value embeddings to special tokens (not needed)
-        #value_emb[
-        #    :, :self.n_special_tokens, :] = zero_value_embed
-
-        # Add token and segment embeddings to value embeddings
-        x = token_emb + seg_emb + value_emb
-        # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
-
-        # Remove special tokens before encoding
-        x = x[:, self.n_special_tokens:]
-
-        # Mask token embeddings if masks are provided
-        if masks is not None:
-            x = apply_masks(x, masks)
-
-        # Run forward prop and store embeddings after each block
-        n_blocks = len(self.blocks)
-        emb_list = []
-        for i, blk in enumerate(self.blocks):
-            x = blk(x, masks=masks_attention)
-            if (i == (n_blocks - 1)) and (self.norm is not None):
-                x = self.norm(x)
-            emb_list.append(x)
-
-        return emb_list
-
 
 class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
     """
     GeneTransformerRankPredictor class.
     """
-    def __init__(self,
-                 **base_encoder_kwargs
-                 ):
+    def __init__(
+        self,
+        **base_encoder_kwargs
+        ):
+
         super().__init__(**base_encoder_kwargs)
 
-    def forward(self,
-                z: torch.Tensor,
-                pos_embed: torch.Tensor,
-                seg_embed: torch.Tensor,
-                token_embed: torch.Tensor,
-                masks_enc: Union[List[torch.Tensor], torch.Tensor],
-                masks_pred: Union[List[torch.Tensor], torch.Tensor],
-                masks_attention: torch.Tensor=None,
-                ) -> torch.Tensor:
+    def forward(
+        self,
+        z: torch.Tensor,
+        pos_embed: torch.Tensor,
+        seg_embed: torch.Tensor,
+        token_embed: torch.Tensor,
+        masks_enc: Union[List[torch.Tensor], torch.Tensor],
+        masks_pred: Union[List[torch.Tensor], torch.Tensor],
+        masks_attention: torch.Tensor=None,
+        ) -> torch.Tensor:
             """
             Run predictor forward pass for a batch of input tokens.
 
@@ -1016,144 +878,164 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
     """
     GeneTransformerCountPredictor class.
+
+    Parameters
+    -----------
+    n_special_values:
+        Number of special values (used for special tokens) for value embedding.
     """
-    def __init__(self,
-                 **base_predictor_kwargs
-                 ):
+    def __init__(
+        self,
+        n_special_values: int,
+        **base_predictor_kwargs
+        ):
+        
         super().__init__(**base_predictor_kwargs)
 
-    def forward(self,
-                z: torch.Tensor,
-                token_embed: torch.Tensor,
-                seg_embed: torch.Tensor,
-                value_embed: torch.Tensor,
-                masks_enc: Union[List[torch.Tensor], torch.Tensor],
-                masks_pred: Union[List[torch.Tensor], torch.Tensor],
-                masks_attention: torch.Tensor=None,
-                ) -> torch.Tensor:
-            """
-            Run predictor forward pass for a batch of input tokens.
+        # Initialize special value embedding
+        self.n_special_values = n_special_values
+        self.special_value_embed = nn.Embedding(
+            2 + self.n_special_values + self.n_special_tokens, # include <pad> and zero expression # TODO: why is n_special_tokens needed?
+            self.predictor_embed_dim,
+            padding_idx=0)
 
-            Parameters
-            -----------
-            z:
-                Embeddings from the encoder with shape (
-                BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
-            tokens:
-                Tensor containing tokens with shape (BATCH_SIZE, SEQ_LEN).
-            segments:
-                Tensor containing segment labels with shape (BATCH_SIZE,
-                SEQ_LEN).
-            enc_token_embed:
-                Token embeddings from the encoder.
-            enc_seg_embed:
-                Segment embeddings from the encoder.
-            masks_enc:
-                List of N_CONTEXT_MASKS tensors containing indices (within the
-                sequence) of tokens to keep with shape (BATCH_SIZE,
-                CONTEXT_MASK_SIZE).
-            masks_pred:
-                List of N_TARGET_MASKS tensors containing indices (within the
-                sequence) of tokens to keep with shape (BATCH_SIZE,
-                TARGET_MASK_SIZE).
-            masks_attention:
-                An attention mask that controls how different tokens attend to
-                each other within a sequence.
+    def forward(
+        self,
+        z: torch.Tensor,
+        token_embed: torch.Tensor,
+        segments: torch.Tensor,
+        counts: torch.Tensor,
+        masks_enc: Union[List[torch.Tensor], torch.Tensor],
+        masks_pred: Union[List[torch.Tensor], torch.Tensor],
+        masks_attention: torch.Tensor=None,
+        ) -> torch.Tensor:
+        """
+        Run predictor forward pass for a batch of input tokens.
 
-            Returns
-            -----------
-            z:
-                Embeddings of tokens included in the target masks with shape (
-                BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS, TARGET_MASK_SIZE,
-                EMBED_DIM).   
-            """
-            assert (masks_enc is not None) and (masks_pred is not None), \
-                'Cannot run predictor without index masks.'
+        Parameters
+        -----------
+        z:
+            Embeddings from the encoder with shape (
+            BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
+        tokens:
+            Tensor containing tokens with shape (BATCH_SIZE, SEQ_LEN).
+        segments:
+            Tensor containing segment labels with shape (BATCH_SIZE,
+            SEQ_LEN).
+        enc_token_embed:
+            Token embeddings from the encoder.
+        enc_seg_embed:
+            Segment embeddings from the encoder.
+        masks_enc:
+            List of N_CONTEXT_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            CONTEXT_MASK_SIZE).
+        masks_pred:
+            List of N_TARGET_MASKS tensors containing indices (within the
+            sequence) of tokens to keep with shape (BATCH_SIZE,
+            TARGET_MASK_SIZE).
+        masks_attention:
+            An attention mask that controls how different tokens attend to
+            each other within a sequence.
 
-            # Format masks
-            if not isinstance(masks_enc, list):
-                masks_enc = [masks_enc]
-            if not isinstance(masks_pred, list):
-                masks_pred = [masks_pred]
+        Returns
+        -----------
+        z:
+            Embeddings of tokens included in the target masks with shape (
+            BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS, TARGET_MASK_SIZE,
+            EMBED_DIM).   
+        """
+        assert (masks_enc is not None) and (masks_pred is not None), \
+            'Cannot run predictor without index masks.'
 
-            # Retrieve batch size (len(z) is BATCH_SIZE*N_CONTEXT_MASKS)
-            B = len(z) // len(masks_enc)
+        # Format masks
+        if not isinstance(masks_enc, list):
+            masks_enc = [masks_enc]
+        if not isinstance(masks_pred, list):
+            masks_pred = [masks_pred]
 
-            # MLP projection layer
-            z = self.predictor_embed(z)
+        # Retrieve batch size (len(z) is BATCH_SIZE*N_CONTEXT_MASKS)
+        B = len(z) // len(masks_enc)
 
-            # Retrieve special token embedding
-            x_special = (
-                token_embed[:, :self.n_special_tokens] +
-                seg_embed[:, :self.n_special_tokens] +
-                value_embed[:, :self.n_special_tokens])
+        # MLP projection layer
+        z = self.predictor_embed(z)
+        token_embed = self.token_embed_projection(token_embed)
 
-            # Remove special tokens
-            token_embed = token_embed[:, self.n_special_tokens:]
-            seg_embed = seg_embed[:, self.n_special_tokens:]
+        # Get segment and special value embeddings
+        seg_embed = self.seg_embed(segments)
+        sp_value_embed = self.special_value_embed(
+            counts[:, :self.n_special_tokens].int())
 
-            # Add positional embeddings to tokens from context masks (only
-            # keep context mask indices and sum positional and segment
-            # embeddings without token embeddings)
-            z += apply_masks(token_embed, masks_enc)
-            z += apply_masks(seg_embed, masks_enc)
+        # Retrieve special token embedding
+        x_special = (
+            token_embed[:, :self.n_special_tokens] +
+            seg_embed[:, :self.n_special_tokens] +
+            sp_value_embed)
 
-            _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: EMBED_DIM
+        # Remove special tokens
+        token_embed = token_embed[:, self.n_special_tokens:]
+        seg_embed = seg_embed[:, self.n_special_tokens:]
 
-            # Create "positional" embeddings for tokens from target masks (only
-            # keep target mask indices and sum token and segment embeddings
-            # without value embeddings; the latter are to be predicted)
-            token_embs = apply_masks(token_embed, masks_pred)
-            seg_embs = apply_masks(seg_embed, masks_pred)
+        # Add positional embeddings to tokens from context masks (only
+        # keep context mask indices and sum positional and segment
+        # embeddings without token embeddings)
+        z += apply_masks(token_embed, masks_enc)
+        z += apply_masks(seg_embed, masks_enc)
+        _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: EMBED_DIM
 
-            # Repeat embeddings for all context masks
-            token_embs = repeat_interleave_batch(
-                token_embs,
-                B,
-                repeat=len(masks_enc))
-            seg_embs = repeat_interleave_batch(
-                seg_embs,
-                B,
-                repeat=len(masks_enc))
+        # Create "positional" embeddings for tokens from target masks (only
+        # keep target mask indices and sum token and segment embeddings
+        # without value embeddings; the latter are to be predicted)
+        token_embs = apply_masks(token_embed, masks_pred)
+        seg_embs = apply_masks(seg_embed, masks_pred)
 
-            # Repeat mask token for all batches, masks and "positions" from
-            # predictor masks
-            pred_tokens = self.mask_token.repeat(
-                token_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
-                token_embs.size(1), # TARGET_MASK_SIZE
-                1)
+        # Repeat embeddings for all context masks
+        token_embs = repeat_interleave_batch(
+            token_embs,
+            B,
+            repeat=len(masks_enc))
+        seg_embs = repeat_interleave_batch(
+            seg_embs,
+            B,
+            repeat=len(masks_enc))
 
-            # Add gene and segment embeddings to mask tokens                  
-            pred_tokens += token_embs + seg_embs
+        # Repeat mask token for all batches, masks and "positions" from
+        # predictor masks
+        pred_tokens = self.mask_token.repeat(
+            token_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
+            token_embs.size(1), # TARGET_MASK_SIZE
+            1)
 
-            # Repeat context embeddings for all target masks
-            z = z.repeat(len(masks_pred), 1, 1)
-            x_special = x_special.repeat(len(masks_pred), 1, 1)
+        # Add gene and segment embeddings to mask tokens                  
+        pred_tokens += token_embs + seg_embs
 
-            # Concatenate mask tokens and context embeddings of gene tokens
-            z = torch.cat([
-                pred_tokens, # target gene tokens (excl. special tokens)
-                x_special, # special_tokens,
-                z # context gene tokens (excl. special tokens)
-                ], dim=1)
+        # Repeat context embeddings for all target masks
+        z = z.repeat(len(masks_pred), 1, 1)
+        x_special = x_special.repeat(len(masks_pred), 1, 1)
 
-            # Run forward prop
-            for blk in self.predictor_blocks:
-                z = blk(z, masks=masks_attention)
-            z = self.predictor_norm(z)
+        # Concatenate mask tokens and context embeddings of gene tokens
+        z = torch.cat([
+            pred_tokens, # target gene tokens (excl. special tokens)
+            x_special, # special_tokens,
+            z # context gene tokens (excl. special tokens)
+            ], dim=1)
 
-            # Return predictions for (target) mask tokens
-            z = z[:, :pred_tokens.size(1), :]
+        # Run forward prop
+        for blk in self.predictor_blocks:
+            z = blk(z, masks=masks_attention)
 
-            # MLP projection layer
-            z = self.predictor_proj(z)
+        z = self.predictor_norm(z)
 
-            return z
+        # Return predictions for (target) mask tokens
+        z = z[:, :pred_tokens.size(1), :]
+
+        # MLP projection layer
+        z = self.predictor_proj(z)
+
+        return z
 
 
 def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
-                    n_special_values: Optional[int]=None,
-                    n_value_bins: int=100,
                     **encoder_kwargs
                     ) -> Union[GeneTransformerRankEncoder,
                                 GeneTransformerCountEncoder]:
@@ -1166,8 +1048,6 @@ def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
             **encoder_kwargs)
     elif encoder_type == 'counts':
         model = GeneTransformerCountEncoder(
-            n_special_values=n_special_values,
-            n_value_bins=n_value_bins,
             num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
@@ -1178,6 +1058,7 @@ def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
 
 
 def init_gt_predictor(predictor_type: Literal['rank', 'counts'],
+                      n_special_values: Optional[int]=None,
                       **predictor_kwargs
                  ) -> Union[GeneTransformerRankPredictor,
                             GeneTransformerCountPredictor]:
@@ -1190,6 +1071,7 @@ def init_gt_predictor(predictor_type: Literal['rank', 'counts'],
             **predictor_kwargs)
     elif predictor_type == 'counts':
         model = GeneTransformerCountPredictor(
+            n_special_values=n_special_values,
             num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,

@@ -247,6 +247,7 @@ class CellBaseDataset(Dataset):
                 List of values for a given segment.
             """
             seg_tokens = [(seg_token - 104) if seg_token != 0 else seg_token for seg_token in item['seg_tokens']] # TODO: Fix tokenization after removal of 100 <cls> tokens
+
             # Only keep gene tokens and values in specified segment
             segment_start_idx = seg_tokens.index(segment)
             if segment + 1 in seg_tokens:
@@ -328,12 +329,12 @@ class CellGraphDataset(CellBaseDataset):
             positions = None
 
         # Get non-padded segments for index cell segment
-        segments = [
-            self.n_special_tokens if token != 0 else 0 for token in tokens]
+        segments = [1 if token != 0 else 0 for token in tokens]
 
         # Get (sampled) gene tokens, values/positions and non-padded segments
         # for neighbor cell segments
         seg_tokens = [(seg_token - 104) if seg_token != 0 else seg_token for seg_token in item['seg_tokens']] # TODO: Fix tokenization after removal of 100 <cls> tokens
+
         for segment in np.unique(seg_tokens):
             if segment > 1: # neighbor cell segments
                 segment_tokens, segment_values = self._get_segment_seq(
@@ -423,19 +424,15 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Get (sampled) gene tokens, values/positions and non-padded segments
         gene_tokens_cell, values_cell = self._get_segment_seq(
             item=item,
-            segment=self.n_special_tokens, # cell seg
+            segment=1, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neigh, values_neigh = self._get_segment_seq(
             item=item,
-            segment=self.n_special_tokens + 1, # neigh seg
+            segment=2, # neigh seg
             segment_seq_len=self.seq_len_neighborhood)
         tokens = gene_tokens_cell + gene_tokens_neigh
-        segments = [
-            self.n_special_tokens if gene_token != 0 else 0 for gene_token
-            in gene_tokens_cell
-            ] + [
-            self.n_special_tokens + 1 if gene_token != 0 else 0 for
-            gene_token in gene_tokens_neigh]
+        segments = [1 if gene_token != 0 else 0 for gene_token in gene_tokens_cell] + [
+            2 if gene_token != 0 else 0 for gene_token in gene_tokens_neigh]
         if self.gt_type == 'rank':
             positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
                 range(1, len(gene_tokens_neigh) + 1))

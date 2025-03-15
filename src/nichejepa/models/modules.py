@@ -5,7 +5,6 @@ import torch.nn as nn
 
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
-
 class Attention(nn.Module):
     """
     Attention module used in transformer block, containing attention and
@@ -187,6 +186,8 @@ class Block(nn.Module):
                             masks=masks)
         if return_attention:
             return attn
+        x = x + y
+        x = x + self.mlp(self.norm2(x))
 
         return x
 
@@ -204,13 +205,13 @@ class ValueEmbWeightsProjection(nn.Module):
         """
         super().__init__()
         self.linear1 = nn.Linear(1, dim)
-        self.activation = nn.GELU()
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
         self.linear2 = nn.Linear(dim, dim)
         self.softmax = nn.Softmax(dim=-1)
     
     def forward(self, x):
         x = self.linear1(x)
-        x = self.activation(x)
+        x = self.leaky_relu(x)
         out = self.linear2(x)
         out = x + out # residual connection
         out = self.softmax(out)

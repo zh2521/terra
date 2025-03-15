@@ -111,6 +111,7 @@ def train(args: dict,
 
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
+    count_encoding = args['meta']['count_encoding']
     n_value_bins = args['meta']['n_value_bins']
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
@@ -232,6 +233,7 @@ def train(args: dict,
     # Initialize encoder, predictor and target encoder
     encoder, predictor = init_model(
         gt_type=gt_type,
+        count_encoding=count_encoding,
         n_value_bins=n_value_bins,
         device=device,
         vocab_size=vocab_size,
@@ -347,11 +349,11 @@ def train(args: dict,
                      'lr': lr}
         if rank == 0:
             torch.save(save_dict, latest_path)
-            if (epoch + 1) % checkpoint_freq == 0:
+            if (epoch) % checkpoint_freq == 0:
                 if iter_number is None:
-                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}'))
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch}'))
                 else:
-                    torch.save(save_dict, save_path.format(epoch=f'{epoch + 1}_{iter_number}'))
+                    torch.save(save_dict, save_path.format(epoch=f'{epoch}_{iter_number}'))
 
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
@@ -448,7 +450,7 @@ def train(args: dict,
                     if gt_type == 'rank':
                         z = predictor(z=z,
                                       pos_embed=pos_emb,
-                                      seg_embed=seg_emb,
+                                      segments=segments,
                                       token_embed=token_emb,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
@@ -456,8 +458,8 @@ def train(args: dict,
                     elif gt_type == 'counts':
                         z = predictor(z=z,
                                       token_embed=token_emb,
-                                      seg_embed=seg_emb,
-                                      value_embed=value_emb,
+                                      segments=segments,
+                                      counts=counts,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       masks_attention=None)
@@ -560,4 +562,4 @@ def train(args: dict,
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch+1)
+        save_checkpoint(epoch + 1)
