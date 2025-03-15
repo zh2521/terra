@@ -331,7 +331,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                                         bias=True)
 
         # Initialize mask token weights
-        trunc_normal_(self.mask_token, std=self.init_std)
+        # trunc_normal_(self.mask_token, std=self.init_std)
         
         # Initialize layer weights
         self.apply(self._init_weights)
@@ -692,6 +692,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             if not isinstance(masks, list):
                 masks = [masks]
 
+        torch.set_printoptions(threshold=float('inf'))
+        print(segments)
+
         # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(tokens)
         seg_emb = self.seg_embed(segments)
@@ -957,6 +960,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         # MLP projection layer
         z = self.predictor_embed(z)
         token_embed = self.token_embed_projection(token_embed)
+
+        # Get segment and special value embeddings
         seg_embed = self.seg_embed(segments)
         sp_value_embed = self.special_value_embed(
             counts[:, :self.n_special_tokens].int())
@@ -1026,7 +1031,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
         # MLP projection layer
         z = self.predictor_proj(z)
-        
+
         return z
 
 
