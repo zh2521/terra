@@ -192,7 +192,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         embed_dim=enc_emb_dim,
         depth=enc_depth,
         use_flash_attention=use_flash_attention,
-        use_layer_norm)
+        use_layer_norm=use_layer_norm)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
         n_special_values=n_special_values,
@@ -203,7 +203,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
         use_flash_attention=use_flash_attention,
-        use_layer_norm)
+        use_layer_norm=use_layer_norm)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):
