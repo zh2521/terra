@@ -98,7 +98,7 @@ def main():
             f"_{datetime.now().microsecond // 1000:03d}")
         print(f'Run timestamp: {current_timestamp}.')
         if not wandb.run.resumed:
-            wandb.run.summary["run_timestamp"] = current_timestamp
+            wandb.config.run_timestamp = current_timestamp
         print(params)
         if params['state']['folder_path'] is None:
             folder_path = os.path.join(artifact_folder_path,

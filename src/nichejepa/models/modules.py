@@ -80,10 +80,10 @@ class Attention(nn.Module):
         if self.use_flash_attention:
             with torch.backends.cuda.sdp_kernel(enable_flash=True):
                 if masks is not None:
-                    x = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=masks!= 0)
+                    x = nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=masks!= 0, scale=self.scale)
                     attn=None
                 else:
-                    x = nn.functional.scaled_dot_product_attention(q, k, v)
+                    x = nn.functional.scaled_dot_product_attention(q, k, v, scale=self.scale)
                     attn=None
         else:
             attn = (q @ k.transpose(-2, -1)) * self.scale
@@ -92,7 +92,7 @@ class Attention(nn.Module):
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = (attn @ v)
-        x.transpose(1, 2).reshape(B, N, C)
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
 
