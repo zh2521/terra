@@ -105,7 +105,6 @@ def compute_mean_unmasked_emb(emb: torch.Tensor,
 
 def create_binary_selection_mask(ns_tokens: torch.Tensor,
                                  seq_len_cell: int,
-                                 n_special_tokens: int,
                                  selection_type: Literal['cls_cell',
                                                          'cls_neighborhood',
                                                          'agg_cell',
@@ -127,7 +126,6 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
         A 2D tensor where each row represents a sequence of tokens.
     seq_len_cell:
         The length of cell tokens in the sequence.
-    n_special_tokens:
     selection_type:
         Defines the type of embedding, which is relevant for the mask creation.
     excluded_tokens:
@@ -194,27 +192,25 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
     elif selection_type == 'gene_cell':
         # Select only positions corresponding to the specified gene_id in the
         # cell segment
-        selection_mask = tokens == gene_id
-        selection_mask[:, n_special_tokens + seq_len_cell:] = False
+        selection_mask = ns_tokens == gene_id
+        selection_mask[:, seq_len_cell:] = False
     elif selection_type == 'gene_neighborhood':
         # Select only positions corresponding to the specified gene_id in the
         # neighborhood segments
-        selection_mask = tokens == gene_id
-        selection_mask[:, n_special_tokens:
-                          n_special_tokens + seq_len_cell] = False
+        selection_mask = ns_tokens == gene_id
+        selection_mask[:, :seq_len_cell] = False
     elif selection_type == 'gene_graph':
         # Select only positions corresponding to the specified gene_id in all
         # segments
-        selection_mask = tokens == gene_id
+        selection_mask = ns_tokens == gene_id
     else:
         raise ValueError('The "selection_type" is not valid.')
 
     return selection_mask
 
 
-def retrieve_gene_emb(tokens: torch.Tensor,
+def retrieve_gene_emb(ns_tokens: torch.Tensor,
                       seq_len_cell: int,
-                      n_special_tokens: int,
                       emb: torch.Tensor,
                       gene_type: Literal["cell", "neighborhood"],
                       gene_id: int,
@@ -245,11 +241,10 @@ def retrieve_gene_emb(tokens: torch.Tensor,
         The cell or neighborhood embedding of the gene with the given gene ID.
     """
     gene_mask = create_binary_selection_mask(
-        tokens=tokens,
+        ns_tokens=ns_tokens,
         seq_len_cell=seq_len_cell,
-        n_special_tokens=n_special_tokens,
         selection_type=f"gene_{gene_type}",
-        gene_id=gene_id)
+        gene_id=gene_id).cpu()
 
     gene_indices = torch.argmax(gene_mask.to(torch.int),
                                 dim=1,

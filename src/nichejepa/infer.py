@@ -320,7 +320,6 @@ def infer(args: dict,
             selection_type="agg_cell",
             excluded_tokens=agg_excluded_tokens,
             seq_len_cell=seq_len_cell,
-            n_special_tokens=n_special_tokens,
             top_k=top_k).cpu()
         if tokenizer_type == 'cell_neighborhood':
             neighborhood_mask = create_binary_selection_mask(
@@ -328,7 +327,6 @@ def infer(args: dict,
                 selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens,
                 top_k=top_k).cpu()
         elif tokenizer_type == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
@@ -336,7 +334,6 @@ def infer(args: dict,
                 selection_type="agg_graph",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens,
                 top_k=top_k,
                 n_segments=n_segments).cpu()
 
@@ -370,24 +367,22 @@ def infer(args: dict,
             if i == (len(emb_list) - 1):
                 for gene_id in cell_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=tokens,
+                        ns_tokens=ns_tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="cell",
-                        seq_len_cell=seq_len_cell,
-                        n_special_tokens=n_special_tokens)
+                        seq_len_cell=seq_len_cell)
                     if itr == 0:
                         all_cell_gene_emb_dict[gene_id] = [gene_emb]
                     else:
                         all_cell_gene_emb_dict[gene_id].append(gene_emb)
                 for gene_id in neighborhood_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=tokens,
+                        ns_tokens=ns_tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="neighborhood",
-                        seq_len_cell=seq_len_cell,
-                        n_special_tokens=n_special_tokens)
+                        seq_len_cell=seq_len_cell)
                     if itr == 0:
                         all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
                     else:
@@ -784,7 +779,6 @@ def embed_dataset(dataset: Dataset,
             selection_type="agg_cell",
             excluded_tokens=agg_excluded_tokens,
             seq_len_cell=model_config['data']['seq_len_cell'],
-            n_special_tokens=n_special_tokens,
             top_k=top_k).cpu()
 
         # Create mask for neighbor cell genes
@@ -794,7 +788,6 @@ def embed_dataset(dataset: Dataset,
                 selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=model_config['data']['seq_len_cell'],
-                n_special_tokens=n_special_tokens,
                 top_k=top_k).cpu()
         elif model_config['data']['tokenizer_type'] == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
@@ -802,7 +795,6 @@ def embed_dataset(dataset: Dataset,
                 selection_type="agg_graph",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=model_config['data']['seq_len_cell'],
-                n_special_tokens=n_special_tokens,
                 top_k=top_k,
                 n_segments=model_config['data']['n_segments']).cpu()
 
