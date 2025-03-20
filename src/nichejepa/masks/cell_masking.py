@@ -101,9 +101,6 @@ class CelllMaskCollator:
         # Calculate the total number of cells
         n_cells = self.n_segments
 
-        # Ensure we don't sample more targets than available cells
-        assert self.n_targets <= n_cells, f"Cannot sample {self.n_targets} targets from {n_cells} cells."
-
         # Randomly choose target cell indices
         if self.context_cell_indices is None:
             all_cell_indices = torch.randperm(n_cells)
