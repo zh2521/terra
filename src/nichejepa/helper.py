@@ -140,6 +140,7 @@ def init_model(gt_type: Literal['rank', 'count'],
                enc_depth: int=12,
                pred_emb_dim: int=384,
                pred_depth: int=6,
+               num_heads: int=8,
                use_flash_attention: bool=True,
                use_layer_norm: bool=True,
                ) -> Tuple[gt.GeneTransformerBaseEncoder,
@@ -191,6 +192,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         n_segments=n_segments,
         embed_dim=enc_emb_dim,
         depth=enc_depth,
+        num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm)
     predictor = gt.__dict__["init_gt_predictor"](
@@ -202,6 +204,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         n_segments=n_segments,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
+        num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm)
 

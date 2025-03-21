@@ -1045,14 +1045,12 @@ def init_gt_encoder(encoder_type: Literal['rank', 'counts'],
                                 GeneTransformerCountEncoder]:
     if encoder_type == 'rank':
         model = GeneTransformerRankEncoder(
-            num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **encoder_kwargs)
     elif encoder_type == 'counts':
         model = GeneTransformerCountEncoder(
-            num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
@@ -1068,7 +1066,6 @@ def init_gt_predictor(predictor_type: Literal['rank', 'counts'],
                             GeneTransformerCountPredictor]:
     if predictor_type == 'rank':
         model = GeneTransformerRankPredictor(
-            num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
@@ -1076,7 +1073,6 @@ def init_gt_predictor(predictor_type: Literal['rank', 'counts'],
     elif predictor_type == 'counts':
         model = GeneTransformerCountPredictor(
             n_special_values=n_special_values,
-            num_heads=8,
             mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
