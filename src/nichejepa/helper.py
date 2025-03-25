@@ -128,11 +128,11 @@ def load_checkpoint(device: str,
 
 
 def init_model(gt_type: Literal['rank', 'count'],
+               count_encoding: Literal['value_bins', 'mlp'],
+               n_value_bins: int,
                device: str,
                vocab_size: int,
                seq_len: int,
-               max_cls_tokens: int,
-               max_special_tokens: int,
                n_special_tokens: int,
                n_segments: int,
                n_special_values: Optional[int]=None,
@@ -140,9 +140,9 @@ def init_model(gt_type: Literal['rank', 'count'],
                enc_depth: int=12,
                pred_emb_dim: int=384,
                pred_depth: int=6,
-               pos_learnable: bool=False,
-               seg_learnable: bool=False,
+               num_heads: int=8,
                use_flash_attention: bool=True,
+               use_layer_norm: bool=True,
                ) -> Tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -158,7 +158,6 @@ def init_model(gt_type: Literal['rank', 'count'],
         Size of the token vocabulary. Includes <pad> token.
     seq_len:
         Length of the token sequences (w/o <cls> token).
-    max_special_tokens:
     n_special_tokens:
     n_segments:
     n_special_values:
@@ -171,14 +170,11 @@ def init_model(gt_type: Literal['rank', 'count'],
         Dimension of the predictor embedding.        
     pred_depth:
         Number of transformer blocks in the predictor.
-    pos_learnable:
-        If 'True', positional embeddings are learnable, otherwise use sin cos
-        positional embeddings.
-    seg_learnable:
-        If 'True', segment embeddings are learnable, otherwise use fixed
-        segment embeddings.
     use_flash_attention:
-        If use flash_attention or not
+        If `True` use flash_attention.
+    use_layer_norm:
+        If `True` use layer norm, else Dynamic Tanh.
+
     Returns
     -----------
     encoder:
@@ -188,30 +184,29 @@ def init_model(gt_type: Literal['rank', 'count'],
     """
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
-        n_special_values=n_special_values,
+        count_encoding=count_encoding,
+        n_value_bins=n_value_bins,
         vocab_size=vocab_size,
         seq_len=seq_len,
-        max_cls_tokens=max_cls_tokens,
-        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         embed_dim=enc_emb_dim,
         depth=enc_depth,
-        use_flash_attention=use_flash_attention)
+        num_heads=num_heads,
+        use_flash_attention=use_flash_attention,
+        use_layer_norm=use_layer_norm)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
+        n_special_values=n_special_values,
         embed_dim=enc_emb_dim,
         seq_len=seq_len,
-        max_cls_tokens=max_cls_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
-        use_flash_attention=use_flash_attention)
+        num_heads=num_heads,
+        use_flash_attention=use_flash_attention,
+        use_layer_norm=use_layer_norm)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):

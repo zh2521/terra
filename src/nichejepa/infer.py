@@ -23,6 +23,7 @@ from .datasets.dataloaders import init_dataloader_and_sampler
 from .helper import init_model, load_checkpoint
 from .masks.block_masking  import BlockMaskCollator
 from .masks.random_masking import RandomMaskCollator
+from .masks.cell_masking import CelllMaskCollator
 from .tokenizers import cell_tokenizers
 from .utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
@@ -107,13 +108,13 @@ def infer(args: dict,
     # Load params from config file
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
+    count_encoding = args['meta']['count_encoding']
+    n_value_bins = args['meta']['n_value_bins']
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
     special_tokens = args['meta']['special_tokens']
-    pos_learnable = args['meta']['pos_learnable']
-    seg_learnable = args['meta']['seg_learnable']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
 
@@ -131,9 +132,11 @@ def infer(args: dict,
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
     block_masking = args['mask']['block_masking']
+    cell_masking = args['mask']['cell_masking']
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
+    targets_list = args['mask']['targets_list']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
@@ -162,8 +165,6 @@ def infer(args: dict,
             special_tokens = [
                 f'cls_{i}' for i in range(n_segments)] + special_tokens
 
-    max_cls_tokens = sum('cls' in token for token in special_tokens)
-
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
@@ -189,11 +190,11 @@ def infer(args: dict,
     # Initialize encoder, predictor, and target encoder
     target_encoder, _ = init_model(
         gt_type=gt_type,
+        count_encoding=count_encoding,
+        n_value_bins=n_value_bins,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
-        max_cls_tokens=max_cls_tokens,
-        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
         n_special_values=n_special_values,
@@ -201,8 +202,6 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable,
         use_flash_attention=use_flash_attention)
 
     # Initialize mask collator
@@ -213,10 +212,18 @@ def infer(args: dict,
             n_segments=n_segments,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
-            max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
-            max_cls_tokens=max_cls_tokens,
             per_block_mask_ratio=per_block_mask_ratio)
+    elif cell_masking:
+       mask_collator = CelllMaskCollator(
+            n_targets=n_targets,
+            n_contexts=n_contexts,
+            n_segments=n_segments,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
+            n_special_tokens=n_special_tokens,
+            per_block_mask_ratio=per_block_mask_ratio,
+            targets_list=targets_list)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -233,7 +240,6 @@ def infer(args: dict,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
         seq_len_neighborhood=seq_len_neighborhood,
-        max_special_tokens=max_special_tokens,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
         special_tokens=special_tokens,
@@ -327,8 +333,6 @@ def infer(args: dict,
             selection_type="agg_cell",
             excluded_tokens=agg_excluded_tokens,
             seq_len_cell=seq_len_cell,
-            n_special_tokens=n_special_tokens,
-            max_cls_tokens=max_cls_tokens,
             top_k=top_k).cpu()
         if tokenizer_type == 'cell_neighborhood':
             neighborhood_mask = create_binary_selection_mask(
@@ -336,8 +340,6 @@ def infer(args: dict,
                 selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens,
-                max_cls_tokens=max_cls_tokens,
                 top_k=top_k).cpu()
         elif tokenizer_type == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
@@ -345,8 +347,6 @@ def infer(args: dict,
                 selection_type="agg_graph",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens,
-                max_cls_tokens=max_cls_tokens,
                 top_k=top_k,
                 n_segments=n_segments).cpu()
 
@@ -380,24 +380,22 @@ def infer(args: dict,
             if i == (len(emb_list) - 1):
                 for gene_id in cell_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=tokens,
+                        ns_tokens=ns_tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="cell",
-                        seq_len_cell=seq_len_cell,
-                        n_special_tokens=n_special_tokens)
+                        seq_len_cell=seq_len_cell)
                     if itr == 0:
                         all_cell_gene_emb_dict[gene_id] = [gene_emb]
                     else:
                         all_cell_gene_emb_dict[gene_id].append(gene_emb)
                 for gene_id in neighborhood_gene_ids:
                     gene_emb = retrieve_gene_emb(
-                        tokens=tokens,
+                        ns_tokens=ns_tokens,
                         emb=emb,
                         gene_id=gene_id,
                         gene_type="neighborhood",
-                        seq_len_cell=seq_len_cell,
-                        n_special_tokens=n_special_tokens)
+                        seq_len_cell=seq_len_cell)
                     if itr == 0:
                         all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
                     else:
@@ -676,10 +674,6 @@ def embed_dataset(dataset: Dataset,
         token_dict = pickle.load(file)
     vocab_size = len(token_dict)
     n_special_values = sum(1 for key in token_dict if "spv" in key)
-    max_special_tokens = sum(1 for key in token_dict if "cls" in key) + sum(
-        1 for key in token_dict if "spt" in key)
-    max_cls_tokens = sum(
-        'cls' in token for token in model_config['meta']['special_tokens'])
 
     print('==================================================')
     print('STEP 2: GENERATING EMBEDDINGS...')
@@ -697,8 +691,6 @@ def embed_dataset(dataset: Dataset,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
-        max_cls_tokens=max_cls_tokens,
-        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
         n_segments=model_config['data']['n_segments'],
         n_special_values=n_special_values,
@@ -706,8 +698,6 @@ def embed_dataset(dataset: Dataset,
         enc_depth=model_config['meta']['enc_depth'],
         pred_emb_dim=model_config['meta']['pred_emb_dim'],
         pred_depth=model_config['meta']['pred_depth'],
-        pos_learnable=model_config['meta']['pos_learnable'],
-        seg_learnable=model_config['meta']['seg_learnable'],
         use_flash_attention=model_config['meta']['use_flash_attention'])
 
     # Create mask collator
@@ -717,9 +707,7 @@ def embed_dataset(dataset: Dataset,
         n_segments=model_config['data']['n_segments'],
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
-        max_special_tokens=max_special_tokens,
         n_special_tokens=n_special_tokens,
-        max_cls_tokens=max_cls_tokens,
         per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
         
     # Create torch dataset
@@ -804,8 +792,6 @@ def embed_dataset(dataset: Dataset,
             selection_type="agg_cell",
             excluded_tokens=agg_excluded_tokens,
             seq_len_cell=model_config['data']['seq_len_cell'],
-            n_special_tokens=n_special_tokens,
-            max_cls_tokens=max_cls_tokens,
             top_k=top_k).cpu()
 
         # Create mask for neighbor cell genes
@@ -815,8 +801,6 @@ def embed_dataset(dataset: Dataset,
                 selection_type="agg_neighborhood",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=model_config['data']['seq_len_cell'],
-                n_special_tokens=n_special_tokens,
-                max_cls_tokens=max_cls_tokens,
                 top_k=top_k).cpu()
         elif model_config['data']['tokenizer_type'] == 'cell_graph':
             neighborhood_mask = create_binary_selection_mask(
@@ -824,8 +808,6 @@ def embed_dataset(dataset: Dataset,
                 selection_type="agg_graph",
                 excluded_tokens=agg_excluded_tokens,
                 seq_len_cell=model_config['data']['seq_len_cell'],
-                n_special_tokens=n_special_tokens,
-                max_cls_tokens=max_cls_tokens,
                 top_k=top_k,
                 n_segments=model_config['data']['n_segments']).cpu()
 
