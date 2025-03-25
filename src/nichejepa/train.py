@@ -440,21 +440,14 @@ def train(args: dict,
                         # Normalize over feature dim
                         h = F.layer_norm(h, (h.size(-1),))
 
-                        # Only keep encoded targets (masked genes of h); output
-                        # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
-                        # EMB_SIZE)
+                        # Only keep encoded targets (masked genes of h); list
+                        # with length N_TARGETS and output dim (BATCH_SIZE,
+                        # TARGET_MASK_SIZE, EMB_SIZE)
                         h = apply_masks(
                             h,
-                            masks_pred)
+                            masks_pred,
+                            concat=False)
                         B = len(h)
-
-                        # Repeat targets if multiple contexts; output dim 
-                        # (BATCH_SIZE * N_TARGETS * N_CONTEXTS, 
-                        # TARGET_MASK_SIZE, EMB_DIM)
-                        h = repeat_interleave_batch(
-                            h,
-                            B,
-                            repeat=len(masks_enc))
 
                         return h
 
@@ -471,7 +464,7 @@ def train(args: dict,
                             masks=masks_enc,
                             masks_attention=None)                       
                     elif gt_type == 'counts':
-                        z, token_emb, seg_emb, value_emb = encoder(
+                        z, token_emb = encoder(
                             tokens=tokens,
                             segments=segments,
                             counts=counts,
@@ -498,9 +491,15 @@ def train(args: dict,
                                       masks_attention=None)
                     return z
 
-                def loss_fn(z, h):
-                    loss = F.smooth_l1_loss(z, h)
-                    loss = AllReduce.apply(loss)
+                def loss_fn(z, h, loss_exp=1.0):
+                    print("AQUI")
+                    print(z.shape)
+                    print(h.shape)
+                    loss = 0.
+                    # Compute loss and accumulate for each mask-enc/mask-pred pair
+                    for zi, hi in zip(z, h):
+                        loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
+                    loss /= len(masks_pred)
                     return loss
 
                 # Step 1: forward pass
