@@ -87,13 +87,13 @@ def main():
     logger.info(f'Params: {params}.')
     if WORLD_RANK==0:
         wandb.init(project='nichejepa-sweep', id=run_id, resume="allow", group="multi_node_training", mode='online')
-        if not wandb.run.resumed:
-            wandb.config.run_timestamp = current_timestamp
         artifact_folder_path = '../nichejepa-reproducibility/artifacts'
         current_timestamp = (
             datetime.now().strftime("%d%m%Y_%H%M%S") +
             f"_{datetime.now().microsecond // 1000:03d}")
         print(f'Run timestamp: {current_timestamp}.')
+        if not wandb.run.resumed:
+            wandb.config.run_timestamp = current_timestamp
         print(params)
         if params['state']['folder_path'] is None:
             folder_path = os.path.join(artifact_folder_path,

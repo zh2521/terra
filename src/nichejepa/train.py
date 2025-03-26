@@ -412,6 +412,8 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
+            assert len(masks_enc) == 1, 'Currently require num encoder masks = 1'
+
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -492,10 +494,14 @@ def train(args: dict,
                     return z
 
                 def loss_fn(z, h, loss_exp=1.0):
+                    #print(len(z))
+                    #print(len(h))
+                    #print(z)
+                    #print(h)
                     loss = 0.
                     # Compute loss and accumulate for each mask-enc/mask-pred pair
-                    for hi in h:
-                        loss += torch.mean(torch.abs(z[0] - hi)**loss_exp) / loss_exp
+                    for zi, hi in zip(z, h):
+                        loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
                     loss /= len(masks_pred)
                     return loss
 
