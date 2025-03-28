@@ -651,7 +651,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         if self.norm is not None:
             x = self.norm(x)
 
-        return x, token_emb, seg_emb, value_emb
+        return x, token_emb
 
     @torch.no_grad()
     def return_layer_emb(
@@ -702,6 +702,11 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(tokens)
         seg_emb = self.seg_embed(segments)
+
+        #print(tokens)
+        #print(segments)
+        #print(counts)
+        #raise ValueError
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
@@ -958,8 +963,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         if not isinstance(masks_pred, list):
             masks_pred = [masks_pred]
 
-        # Retrieve batch size (len(z) is BATCH_SIZE*N_CONTEXT_MASKS)
-        B = len(z) // len(masks_enc)
+        # Retrieve batch size
+        B = len(z)
 
         # MLP projection layer
         z = self.predictor_embed(z)
@@ -993,20 +998,10 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         token_embs = apply_masks(token_embed, masks_pred)
         seg_embs = apply_masks(seg_embed, masks_pred)
 
-        # Repeat embeddings for all context masks
-        token_embs = repeat_interleave_batch(
-            token_embs,
-            B,
-            repeat=len(masks_enc))
-        seg_embs = repeat_interleave_batch(
-            seg_embs,
-            B,
-            repeat=len(masks_enc))
-
         # Repeat mask token for all batches, masks and "positions" from
         # predictor masks
         pred_tokens = self.mask_token.repeat(
-            token_embs.size(0), # BATCH_SIZE * N_CONTEXT_MASKS * N_TARGET_MASKS
+            token_embs.size(0), # BATCH_SIZE * N_TARGET_MASKS
             token_embs.size(1), # TARGET_MASK_SIZE
             1)
 

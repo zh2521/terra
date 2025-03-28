@@ -813,7 +813,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 adata_dict['gene_expr_cell'] += [
                     norm_counts_cell_count[j][
                         np.argsort(-norm_counts_cell_rank[j])]
-                    for j in range(norm_counts_cell.shape[0])]
+                    for j in range(norm_counts_cell_count.shape[0])]
 
                 if isinstance(perturb_df, pd.DataFrame):
                     norm_counts_cell_neigh_rank = adata_neigh[
