@@ -124,6 +124,10 @@ def train(args: dict,
         num_heads = args['meta']['num_heads']
     else:
         num_heads = 8
+    if 'loss_fn' in args['meta'].keys():
+        loss_fn = args['meta']['loss_fn']
+    else:
+        loss_fn = 'l1'
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -501,7 +505,10 @@ def train(args: dict,
                     loss = 0.
                     # Compute loss and accumulate for each mask-enc/mask-pred pair
                     for zi, hi in zip(z, h):
-                        loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
+                        if loss_fn == 'smooth_l1':
+                            loss += F.smooth_l1_loss(zi, hi)
+                        elif loss_fn == 'l1':
+                            loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
                     loss /= len(masks_pred)
                     return loss
 

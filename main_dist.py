@@ -52,6 +52,21 @@ def get_distributed_info():
     return WORLD_RANK, LOCAL_RANK, WORLD_SIZE
 
 
+def setup_for_distributed(is_master):
+    """
+    This function disables printing when not in master process
+    """
+    import builtins as __builtin__
+    builtin_print = __builtin__.print
+
+    def print(*args, **kwargs):
+        force = kwargs.pop('force', False)
+        if is_master or force:
+            builtin_print(*args, **kwargs)
+
+    __builtin__.print = print
+
+
 def main():
     # Retrieve distributed environment variables
     WORLD_RANK, LOCAL_RANK, WORLD_SIZE = get_distributed_info()
@@ -106,8 +121,6 @@ def main():
 
     print(f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}")
 
-    torch.cuda.set_device(LOCAL_RANK)
-
     # Initialize the distributed backend
     dist.init_process_group(
         backend=backend,
@@ -117,8 +130,13 @@ def main():
         timeout=timedelta(seconds=120)
     )
 
+    torch.cuda.set_device(LOCAL_RANK)
+    dist.barrier()
+    setup_for_distributed(LOCAL_RANK == 0)
+
     train_dataset, val_dataset, test_dataset = prepare_dataset(params)
     train(params, train_dataset, test_dataset, save_folder_path=folder_path, LOCAL_RANK=LOCAL_RANK)
+
 
 if __name__ == "__main__":
     # Print Torch Version
