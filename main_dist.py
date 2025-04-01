@@ -127,7 +127,6 @@ def main():
         init_method=f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}",
         rank=WORLD_RANK,
         world_size=WORLD_SIZE,
-        timeout=timedelta(seconds=120)
     )
 
     torch.cuda.set_device(LOCAL_RANK)
