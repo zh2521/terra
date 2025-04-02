@@ -34,7 +34,7 @@ class CelllMaskCollator:
     n_special_tokens:
         Number of special tokens in each token sequence, including <cls> tokens.
     per_block_mask_ratio:
-        Not used in cell masking but retained for compatibility.
+        Per cell mask ratio.
     targets_list:
         List of cells that should be in target.
     """
@@ -95,6 +95,15 @@ class CelllMaskCollator:
         keep_tokens_target:
             Minimum number of nonzero tokens kept in any target mask (used for batch collation).
         """
+        # Determine mask ratio; sample if list is provided
+        if isinstance(self.per_block_mask_ratio, list):
+            mask_ratios = np.arange(
+                self.per_block_mask_ratio[0],
+                self.per_block_mask_ratio[1] + 0.1, 0.1)
+            mask_ratio = np.random.choice(mask_ratios)
+        else:
+            mask_ratio = self.per_block_mask_ratio
+
         ns_tokens = tokens[self.n_special_tokens:]
         total_seq_len = ns_tokens.shape[0]
 
@@ -111,6 +120,7 @@ class CelllMaskCollator:
             context_cell_indices = self.context_cell_indices[torch.randperm(len(self.context_cell_indices))]
 
         target_masks = []
+        context_indices = []
         keep_tokens_target = self.seq_len_genes
 
         # Process target cells
@@ -119,17 +129,24 @@ class CelllMaskCollator:
             end = start + self.seq_len_cell
             cell_tokens = ns_tokens[start:end]
 
-            # Find non-zero indices within this cell
+            # Find non-zero indices within cell
             nonzero_indices = torch.nonzero(cell_tokens).squeeze()
+
+            # Determine how many indices will be masked
+            num_to_mask = int(np.ceil(len(nonzero_indices) * mask_ratio))
+
             # Map to global indices relative to ns_tokens
             global_indices = nonzero_indices + start
-            global_indices = global_indices[torch.randperm(len(global_indices))]
+            permuted_indices = torch.randperm(len(global_indices))
+            global_target_indices = permuted_indices[:num_to_mask]
+            global_context_indices = permuted_indices[num_to_mask:]
 
-            keep_tokens_target = min(keep_tokens_target, len(global_indices))
-            target_masks.append(global_indices)
+            keep_tokens_target = min(keep_tokens_target, len(global_target_indices))
+
+            context_indices.append(global_context_indices)
+            target_masks.append(global_target_indices)
 
         # Process context cells
-        context_indices = []
         keep_tokens_context = self.seq_len_genes
 
         for idx in context_cell_indices:
