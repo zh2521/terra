@@ -526,7 +526,7 @@ def train(args: dict,
                     scaler.unscale_(optimizer)
                 else:
                     loss.backward()
-                if ((epoch + 1) > warmup) and (clip_grad is not None):
+                if (itr > (warmup * ipe)) and (clip_grad is not None):
                     _enc_norm = torch.nn.utils.clip_grad_norm_(
                         encoder.parameters(), clip_grad)
                     _pred_norm = torch.nn.utils.clip_grad_norm_(
