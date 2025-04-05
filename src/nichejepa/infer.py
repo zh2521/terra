@@ -322,7 +322,7 @@ def infer(args: dict,
                         segments=segments,
                         tokens=tokens,
                         masks_attention=masks_attention,
-                        pad_neighborhood=True).cpu()),
+                        pad_neighborhood=False).cpu()),
                 elif gt_type == 'counts':
                     cell_emb_list.append(target_encoder.backbone.return_layer_emb(
                         layer=emb_layer,
@@ -337,7 +337,7 @@ def infer(args: dict,
                         segments=segments,
                         counts=counts,
                         masks_attention=masks_attention,
-                        pad_neighborhood=True).cpu()),
+                        pad_neighborhood=False).cpu()),
         
             if feature_norm and (emb_layers[-1] == enc_depth):
                 # Normalize last layer like in training
