@@ -43,9 +43,7 @@ from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.cell_masking import CellMaskCollator
 from nichejepa.masks.utils import apply_masks
 from nichejepa.models.utils import repeat_interleave_batch
-from nichejepa.utils.distributed import (AllReduce,
-                                init_distributed,
-                                AllReduceSum)
+from nichejepa.utils.distributed import init_distributed
 from nichejepa.utils.logging import (AverageMeter,
                             CSVLogger,
                             gpu_timer,

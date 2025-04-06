@@ -8,6 +8,8 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/schedulers.py
 
 import math
 
+import torch
+
 
 class WarmupCosineSchedule(object):
     def __init__(self,

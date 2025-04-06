@@ -1,6 +1,6 @@
 import yaml
 import logging
-
+from typing import Any
 
 def create_params_from_YAML_wandb_config(YAML_file: str,
                                          logger: logging.RootLogger,
