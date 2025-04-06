@@ -101,8 +101,7 @@ def prepare_dataset(
 
         if args['data']['test_batch_ids']:
             test_batch_mask = [
-                any(batch_id == f"{
-                    cell_id.split('_')[0]}_{cell_id.split('_')[1]}"
+                any(batch_id == f"{cell_id.split('_')[0]}_{cell_id.split('_')[1]}"
                     for batch_id in args['data']['test_batch_ids'])
                 for cell_id in cell_ids]
             test_indices = [
@@ -116,8 +115,7 @@ def prepare_dataset(
 
         if args['data']['val_batch_ids']:
             val_batch_mask = [
-                any(batch_id == f"{
-                    cell_id.split('_')[0]}_{cell_id.split('_')[1]}"
+                any(batch_id == f"{cell_id.split('_')[0]}_{cell_id.split('_')[1]}"
                     for batch_id in args['data']['val_batch_ids'])
                 for cell_id in cell_ids]
             val_indices = [
