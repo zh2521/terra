@@ -124,6 +124,10 @@ def train(args: dict,
         num_heads = args['meta']['num_heads']
     else:
         num_heads = 8
+    if 'loss_fn_type' in args['meta'].keys():
+        loss_fn_type = args['meta']['loss_fn_type']
+    else:
+        loss_fn_type = 'l1'
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -412,6 +416,8 @@ def train(args: dict,
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
+            assert len(masks_enc) == 1, 'Currently require num encoder masks = 1'
+
             maskA_meter.update(len(masks_enc[0][0]))
             maskB_meter.update(len(masks_pred[0][0]))
 
@@ -425,13 +431,13 @@ def train(args: dict,
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                         if gt_type == 'rank':
-                            h, _, _, _ = target_encoder(
+                            h, _ = target_encoder(
                                 tokens=tokens,
                                 segments=segments,
                                 positions=positions,
                                 masks_attention=masks_attention)
                         elif gt_type == 'counts':
-                            h, _, _, _ = target_encoder(
+                            h, _ = target_encoder(
                                 tokens=tokens,
                                 segments=segments,
                                 counts=counts,
@@ -440,21 +446,14 @@ def train(args: dict,
                         # Normalize over feature dim
                         h = F.layer_norm(h, (h.size(-1),))
 
-                        # Only keep encoded targets (masked genes of h); output
-                        # dim (BATCH_SIZE * N_TARGETS, TARGET_MASK_SIZE, 
-                        # EMB_SIZE)
+                        # Only keep encoded targets (masked genes of h); list
+                        # with length N_TARGETS and output dim (BATCH_SIZE,
+                        # TARGET_MASK_SIZE, EMB_SIZE)
                         h = apply_masks(
                             h,
-                            masks_pred)
+                            masks_pred,
+                            concat=False)
                         B = len(h)
-
-                        # Repeat targets if multiple contexts; output dim 
-                        # (BATCH_SIZE * N_TARGETS * N_CONTEXTS, 
-                        # TARGET_MASK_SIZE, EMB_DIM)
-                        h = repeat_interleave_batch(
-                            h,
-                            B,
-                            repeat=len(masks_enc))
 
                         return h
 
@@ -471,7 +470,7 @@ def train(args: dict,
                             masks=masks_enc,
                             masks_attention=None)                       
                     elif gt_type == 'counts':
-                        z, token_emb, seg_emb, value_emb = encoder(
+                        z, token_emb = encoder(
                             tokens=tokens,
                             segments=segments,
                             counts=counts,
@@ -498,9 +497,19 @@ def train(args: dict,
                                       masks_attention=None)
                     return z
 
-                def loss_fn(z, h):
-                    loss = F.smooth_l1_loss(z, h)
-                    loss = AllReduce.apply(loss)
+                def loss_fn(z, h, loss_exp=1.0):
+                    #print(len(z))
+                    #print(len(h))
+                    #print(z)
+                    #print(h)
+                    loss = 0.
+                    # Compute loss and accumulate for each mask-enc/mask-pred pair
+                    for zi, hi in zip(z, h):
+                        if loss_fn_type == 'smooth_l1':
+                            loss += F.smooth_l1_loss(zi, hi)
+                        elif loss_fn_type == 'l1':
+                            loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
+                    loss /= len(masks_pred)
                     return loss
 
                 # Step 1: forward pass
@@ -517,7 +526,7 @@ def train(args: dict,
                     scaler.unscale_(optimizer)
                 else:
                     loss.backward()
-                if ((epoch + 1) > warmup) and (clip_grad is not None):
+                if (itr > (warmup * ipe)) and (clip_grad is not None):
                     _enc_norm = torch.nn.utils.clip_grad_norm_(
                         encoder.parameters(), clip_grad)
                     _pred_norm = torch.nn.utils.clip_grad_norm_(

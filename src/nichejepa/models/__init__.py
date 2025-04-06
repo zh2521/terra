@@ -5,6 +5,7 @@ from .gene_transformers import (GeneTransformerBaseEncoder,
                                 GeneTransformerRankEncoder,
                                 GeneTransformerRankPredictor)
 from .modules import Attention, Block, ValueEmbWeightsProjection, MLP
+from .multimask import EncoderMultiMaskWrapper, PredictorMultiMaskWrapper
 from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)

@@ -12,6 +12,7 @@ from typing import Literal, Optional, Tuple
 import torch
 
 import nichejepa.models.gene_transformers as gt
+from .models.multimask import EncoderMultiMaskWrapper, PredictorMultiMaskWrapper
 from .models.utils import trunc_normal_
 from .utils.schedulers import (CosineWDSchedule,
                                WarmupCosineSchedule)
@@ -195,6 +196,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm)
+    encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
         n_special_values=n_special_values,
@@ -207,6 +209,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm)
+    predictor = PredictorMultiMaskWrapper(predictor)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):
@@ -226,6 +229,13 @@ def init_model(gt_type: Literal['rank', 'count'],
     encoder.to(device)
     predictor.to(device)
     logger.info(encoder)
+    logger.info(predictor)
+
+    def count_parameters(model):
+        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    logger.info(f'Encoder number of parameters: {count_parameters(encoder)}')
+    logger.info(f'Predictor number of parameters: {count_parameters(predictor)}')
     
     return encoder, predictor
 
