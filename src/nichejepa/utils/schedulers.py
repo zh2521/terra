@@ -55,7 +55,7 @@ class CosineWDSchedule(object):
                  optimizer,
                  ref_wd,
                  T_max,
-                 final_wd: float=0.):
+                 final_wd: float = 0.):
         """
         CosineWDSchedule class to schedule weight decay.
         """

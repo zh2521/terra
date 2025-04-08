@@ -22,7 +22,6 @@ import logging
 import sys
 import yaml
 from datetime import datetime
-from typing import Optional
 
 import datasets
 import numpy as np
@@ -61,8 +60,8 @@ logger = logging.getLogger()
 def train(args: dict,
           train_dataset: datasets.Dataset,
           resume_preempt: bool=False,
-          save_folder_path: Optional[str]=None,
-          LOCAL_RANK: Optional[int]=None,
+          save_folder_path: str | None = None,
+          LOCAL_RANK: int | None = None,
           ):
     """
     Train model.

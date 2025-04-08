@@ -33,7 +33,8 @@ def get_distributed_info():
         tuple: (WORLD_RANK, LOCAL_RANK, WORLD_SIZE)
     """
     if "LOCAL_RANK" in os.environ:
-        # Environment variables set by torch.distributed.launch or torchrun
+        # Environment variables set by torch.distributed.launch or
+        # torchrun
         LOCAL_RANK = int(os.environ["LOCAL_RANK"])
         WORLD_SIZE = int(os.environ["WORLD_SIZE"])
         WORLD_RANK = int(os.environ["RANK"])
@@ -101,7 +102,12 @@ def main():
     logger.info(f'Called with params from {args.fname}.')
     logger.info(f'Params: {params}.')
     if WORLD_RANK==0:
-        wandb.init(project='nichejepa-sweep', id=run_id, resume="allow", group="multi_node_training", mode='online')
+        wandb.init(
+            project='nichejepa-sweep',
+            id=run_id,
+            resume="allow",
+            group="multi_node_training",
+            mode='online')
         artifact_folder_path = '../nichejepa-reproducibility/artifacts'
         current_timestamp = (
             datetime.now().strftime("%d%m%Y_%H%M%S") +
@@ -134,7 +140,11 @@ def main():
     setup_for_distributed(LOCAL_RANK == 0)
 
     train_dataset, val_dataset, test_dataset = prepare_dataset(params)
-    train(params, train_dataset, test_dataset, save_folder_path=folder_path, LOCAL_RANK=LOCAL_RANK)
+    train(params,
+          train_dataset,
+          test_dataset,
+          save_folder_path=folder_path,
+          LOCAL_RANK=LOCAL_RANK)
 
 
 if __name__ == "__main__":
