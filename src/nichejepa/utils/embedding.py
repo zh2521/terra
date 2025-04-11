@@ -1,12 +1,76 @@
 
 import os
-from typing import List, Literal, Optional
+from typing import Literal
 
 import anndata as ad
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import torch
+import torch.nn.functional as F
+
+
+def compute_running_mean_cosine_mult_occ(
+        cell_embs: torch.Tensor,
+        cell_presence: torch.Tensor,
+        neb_occ: torch.Tensor,
+        neb_mask: torch.Tensor
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Computes the total (summed) cosine similarity and the total count of
+    valid occurrence pairs between each cell gene (unique per sequence)
+    and each neighborhood gene (across max_occ occurrences). No
+    averaging per sequence is performed.
+    
+    Parameters
+    ----------
+    cell_embs:
+        Shape: (N, num_cell_genes, D) -- cell gene embeddings.
+    cell_presence:
+        Shape: (N, num_cell_genes) -- binary presence indicator.
+    neb_occ:
+        Shape: (N, num_neb_genes, max_occ, D) -- neighborhood gene
+        occurrence embeddings.
+    neb_mask:
+        Shape: (N, num_neb_genes, max_occ) -- binary mask indicating
+        valid occurrences.
+
+    Returns
+    -------
+    total_cs:
+        Shape: (num_cell_genes, num_neb_genes) -- total sum of cosine
+        similarities.
+    total_count:
+        Shape: (num_cell_genes, num_neb_genes) -- total count of valid
+        occurrence pairs.
+    """
+    # Normalize embeddings along the last dimension.
+    cell_embs = F.normalize(cell_embs, p=2, dim=-1)
+    neb_occ = F.normalize(neb_occ, p=2, dim=-1)
+
+    # Compute cosine similarity between each cell gene and each
+    # neighborhood occurrence.
+    # Resulting shape: (N, num_cell_genes, num_neb_genes, max_occ)
+    cs = torch.einsum("ncd,njod->ncjo", cell_embs, neb_occ)
+
+    # Expand neb_mask to match cs shape.
+    neb_mask_exp = neb_mask.unsqueeze(1) # (N, 1, num_neb_genes, max_occ)
+    cs_masked = cs * neb_mask_exp # zero out invalid occurrences
+
+    # Sum cosine similarities over the occurrence dimension.
+    occ_sum = cs_masked.sum(dim=-1) # (N, num_cell_genes, num_neb_genes)
+    occ_count = neb_mask_exp.sum(dim=-1) # (N, num_cell_genes, num_neb_genes)
+
+    # Only count sequences where the cell gene is present.
+    cell_pres_exp = cell_presence.unsqueeze(-1) # (N, num_cell_genes, 1)
+    occ_sum_masked = occ_sum * cell_pres_exp
+    occ_count_masked = occ_count * cell_pres_exp
+
+    # Sum over all sequences.
+    total_cs = occ_sum_masked.sum(dim=0) # (num_cell_genes, num_neb_genes)
+    total_count = occ_count_masked.sum(dim=0) # (num_cell_genes, num_neb_genes)
+
+    return total_cs, total_count
 
 
 def compute_unmasked_rank_based_weights(tokens: torch.Tensor,
@@ -111,10 +175,10 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
                                                          'agg_neighborhood',
                                                          'gene_cell',
                                                          'gene_neighborhood'],
-                                 excluded_tokens: Optional[List]=None,
-                                 top_k: Optional[int]=None,
-                                 n_segments: Optional[int]=None,
-                                 gene_id: Optional[int]=None
+                                 excluded_tokens: list[int] | None = None,
+                                 top_k: int | None = None,
+                                 n_segments: int | None = None,
+                                 gene_id: int | None = None
                                  ) -> torch.Tensor:
     """
     Create a selection mask for cell and neighborhood tokens based on
@@ -127,7 +191,8 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
     seq_len_cell:
         The length of cell tokens in the sequence.
     selection_type:
-        Defines the type of embedding, which is relevant for the mask creation.
+        Defines the type of embedding, which is relevant for the mask
+        creation.
     excluded_tokens:
         List of tokens to be excluded from the selection.
     top_k:
@@ -135,8 +200,9 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
     n_segments:
         Number of gene segments.
     gene_id:
-        The ID of the gene for which the embedding is retrieved. Only relevant
-        if 'selection_type' is 'gene_cell' or 'gene_neighborhood'.
+        The ID of the gene for which the embedding is retrieved. Only
+        relevant if `selection_type` is `gene_cell` or
+        `gene_neighborhood`.
 
     Returns
     -----------
@@ -155,7 +221,8 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
                 ns_tokens,
                 torch.tensor(excluded_tokens).to(tokens.device))] = False
         if top_k:
-            # Exclude tokens beyond the top_k positions in the cell segment
+            # Exclude tokens beyond the top_k positions in the cell
+            # segment
             selection_mask[:, top_k:] = False
     elif selection_type == 'agg_neighborhood':
         # Select non-padding tokens in the neighborhood segments
@@ -167,8 +234,8 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
                 ns_tokens,
                 torch.tensor(excluded_tokens).to(tokens.device))] = False
         if top_k:
-            # Exclude tokens beyond the top_k positions in the neighborhood
-            # segments
+            # Exclude tokens beyond the top_k positions in the
+            # neighborhood segments
             selection_mask[
                 :, seq_len_cell + top_k:] = False
     elif selection_type == 'agg_graph':
@@ -190,18 +257,18 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
             selection_mask[
                 :, seq_len_cell * (n_segments - 1) + top_k:] = False  
     elif selection_type == 'gene_cell':
-        # Select only positions corresponding to the specified gene_id in the
-        # cell segment
+        # Select only positions corresponding to the specified gene_id
+        # in the cell segment
         selection_mask = ns_tokens == gene_id
         selection_mask[:, seq_len_cell:] = False
     elif selection_type == 'gene_neighborhood':
-        # Select only positions corresponding to the specified gene_id in the
-        # neighborhood segments
+        # Select only positions corresponding to the specified gene_id
+        # in the neighborhood segments
         selection_mask = ns_tokens == gene_id
         selection_mask[:, :seq_len_cell] = False
     elif selection_type == 'gene_graph':
-        # Select only positions corresponding to the specified gene_id in all
-        # segments
+        # Select only positions corresponding to the specified gene_id
+        # in all segments
         selection_mask = ns_tokens == gene_id
     else:
         raise ValueError('The "selection_type" is not valid.')
@@ -216,8 +283,8 @@ def retrieve_gene_emb(ns_tokens: torch.Tensor,
                       gene_id: int,
                       ) -> torch.Tensor:
     """
-    Retrieve contextual gene embeddings for a given gene based on a specified
-    gene ID and gene type.
+    Retrieve contextual gene embeddings for a given gene based on a
+    specified gene ID and gene type.
 
     Parameters
     -----------
@@ -230,15 +297,23 @@ def retrieve_gene_emb(ns_tokens: torch.Tensor,
     emb:
         A 3D tensor containg the embeddings of all genes.
     gene_type:
-        Defines whether to retrieve the cell or neighborhood gene embedding for
-        the given gene ID.
+        Defines whether to retrieve the cell or neighborhood gene
+        embedding for the given gene ID.
     gene_id:
         Gene ID of the gene for which the embedding will be retrieved.
 
     Returns
-    --------
-    gene_emb:
-        The cell or neighborhood embedding of the gene with the given gene ID.
+    -----------
+    If gene_type is "cell" (and aggregate_multiple is False):
+        Tuple[torch.Tensor, torch.Tensor]:
+            - gene_presence: A binary tensor of shape (N,) indicating whether the gene is present in each sequence.
+            - gene_indices: A tensor of shape (N,) containing the index of the gene occurrence in each sequence.
+    If gene_type is "neighborhood" and aggregate_multiple is True:
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+            - gene_occ: A tensor of shape (N, max_occ, D) containing the embeddings for each occurrence of the gene,
+              padded or truncated to max_occ.
+            - occ_mask: A tensor of shape (N, max_occ) with 1 for valid occurrences and 0 for padded positions.
+            - gene_presence: A binary tensor of shape (N,) indicating whether the gene is present in each sequence.
     """
     gene_mask = create_binary_selection_mask(
         ns_tokens=ns_tokens,
@@ -246,35 +321,44 @@ def retrieve_gene_emb(ns_tokens: torch.Tensor,
         selection_type=f"gene_{gene_type}",
         gene_id=gene_id).cpu()
 
-    gene_indices = torch.argmax(gene_mask.to(torch.int),
-                                dim=1,
-                                keepdim=True) # shape: (3, 1)
+    gene_presence = gene_mask.any(dim=1) # (N,)
 
-    # Use gather to get the correct embeddings for each cell based on the
-    # indices (if gene is not present, the index will be wrong but is
-    # overwritten below)
-    gene_emb = torch.gather(
-        emb,
-        1,
-        gene_indices.unsqueeze(-1).expand(-1, -1, emb.size(2))).squeeze(1)
-
-    # For rows with no True values, set them to zero embeddings
-    gene_emb[gene_mask.sum(dim=1) == 0] = torch.zeros(emb.size(2)).to(
-        gene_emb.device)
-
-    return gene_emb
+    if aggregate_multiple and gene_type == "neighborhood":
+        N, L = gene_mask.shape
+        occ_indices_list: List[torch.Tensor] = []
+        for i in range(N):
+            indices = (gene_mask[i]).nonzero(as_tuple=False).squeeze(-1)
+            # Truncate or pad indices to have exactly max_occ elements.
+            if indices.numel() >= max_occ:
+                occ_indices = indices[:max_occ]
+            else:
+                pad = torch.zeros(max_occ - indices.numel(), dtype=indices.dtype, device=indices.device)
+                occ_indices = torch.cat([indices, pad], dim=0)
+            occ_indices_list.append(occ_indices.unsqueeze(0)) # shape (1, max_occ)
+        occ_indices_tensor = torch.cat(occ_indices_list, dim=0) # shape (N, max_occ)
+        # Create occurrence mask: valid if the number of nonzero entries is > 0.
+        # Note: if a valid index can be 0, use gene_mask.sum(dim=1)>0 instead.
+        occ_mask = (occ_indices_tensor != 0).float()
+        occ_mask[~gene_presence] = 0.0
+        # Gather embeddings for each occurrence.
+        gene_occ = torch.gather(emb, 1, occ_indices_tensor.unsqueeze(-1).expand(-1, -1, emb.shape[-1]))
+        return gene_occ, occ_mask, gene_presence
+    else:
+        gene_mask_float = gene_mask.float()
+        gene_indices = gene_mask_float.argmax(dim=1) # (N,)
+        return gene_presence, gene_indices
 
 
 def collect_adata_from_folder(load_folder_path: str,
                               cell_ids: list,
-                              dataset_ids: Optional[list]=None,
-                              obs_cols: Optional[list]=None,
-                              uns_cols: Optional[list]=None,
-                              include_gene_panel_size: bool=True,
+                              dataset_ids: list[str] | None = None,
+                              obs_cols: list[str] | None = None,
+                              uns_cols: list[str] | None = None,
+                              include_gene_panel_size: bool = True,
                               ) -> ad.AnnData:
     """
-    Loop through folder, read all '.h5ad' files and concatenate them as adata
-    objects.
+    Loop through folder, read all `.h5ad` files and concatenate them as
+    adataobjects.
 
     Parameters
     --------

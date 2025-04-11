@@ -1,4 +1,4 @@
-from typing import List, Literal
+from typing import Literal
 
 import anndata
 import numpy as np
@@ -12,7 +12,7 @@ from sklearn.neighbors import KNeighborsClassifier
 
 
 def classification_metrics(adata: anndata.AnnData,
-                           label_col: str='cell_type',
+                           label_col: str = 'cell_type',
                            classifier: Literal['knn', 'logistic'] = 'knn',
                            n_neighbors: int | None = 5
                            ) -> dict:

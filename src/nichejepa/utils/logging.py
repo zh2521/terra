@@ -1,7 +1,7 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture.
-Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 (05.06.2024).
 """
@@ -9,7 +9,64 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 import torch
 
 
-def gpu_timer(closure, log_timings: bool=True):
+class AverageMeter(object):
+    """
+    Computes and stores the average and current value.
+    """
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.max = float('-inf')
+        self.min = float('inf')
+        self.sum = 0
+        self.count = 0
+
+    def update(self,
+               val: float,
+               n: int = 1):
+        """
+        Update the average and current value.
+        """
+        self.val = val
+        try:
+            self.max = max(val, self.max)
+            self.min = min(val, self.min)
+        except Exception:
+            pass
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+
+class CSVLogger(object):
+    """
+    CSVLogger class to log data to a CSV file.
+    """
+    def __init__(self,
+                 fname: str,
+                 *argv):
+        self.fname = fname
+        self.types = []
+        # -- print headers
+        with open(self.fname, '+a') as f:
+            for i, v in enumerate(argv, 1):
+                self.types.append(v[0])
+                if i < len(argv):
+                    print(v[1], end=',', file=f)
+                else:
+                    print(v[1], end='\n', file=f)
+
+    def log(self, *argv):
+        with open(self.fname, '+a') as f:
+            for i, tv in enumerate(zip(self.types, argv), 1):
+                end = ',' if i < len(argv) else '\n'
+                print(tv[0] % tv[1], end=end, file=f)
+
+
+def gpu_timer(closure, log_timings: bool = True):
     """
     Helper to time gpu-time to execute closure().
     """
@@ -31,55 +88,21 @@ def gpu_timer(closure, log_timings: bool=True):
     return result, elapsed_time
 
 
-class CSVLogger(object):
-    def __init__(self, fname, *argv):
-        self.fname = fname
-        self.types = []
-        # -- print headers
-        with open(self.fname, '+a') as f:
-            for i, v in enumerate(argv, 1):
-                self.types.append(v[0])
-                if i < len(argv):
-                    print(v[1], end=',', file=f)
-                else:
-                    print(v[1], end='\n', file=f)
-
-    def log(self, *argv):
-        with open(self.fname, '+a') as f:
-            for i, tv in enumerate(zip(self.types, argv), 1):
-                end = ',' if i < len(argv) else '\n'
-                print(tv[0] % tv[1], end=end, file=f)
-
-
-class AverageMeter(object):
+def grad_logger(named_params: list[tuple[str, torch.Tensor]],
+                ) -> AverageMeter:
     """
-    Computes and stores the average and current value.
+    Log the gradient norm of the model parameters.
+
+    Parameters
+    ----------
+    named_params:
+        List of named parameters.
+
+    Returns
+    -------
+    stats:
+        AverageMeter object.
     """
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.max = float('-inf')
-        self.min = float('inf')
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        try:
-            self.max = max(val, self.max)
-            self.min = min(val, self.min)
-        except Exception:
-            pass
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-def grad_logger(named_params):
     stats = AverageMeter()
     stats.first_layer = None
     stats.last_layer = None

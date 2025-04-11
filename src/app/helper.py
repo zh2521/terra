@@ -140,13 +140,14 @@ def init_model(gt_type: Literal['rank', 'count'],
                n_special_tokens: int,
                n_segments: int,
                n_special_values: int | None = None,
-               enc_emb_dim: int=768, 
-               enc_depth: int=12,
-               pred_emb_dim: int=384,
-               pred_depth: int=6,
-               num_heads: int=8,
-               use_flash_attention: bool=True,
-               use_layer_norm: bool=True,
+               enc_emb_dim: int = 768, 
+               enc_depth: int = 12,
+               pred_emb_dim: int = 384,
+               pred_depth: int = 6,
+               num_heads: int = 8,
+               use_flash_attention: bool = True,
+               use_layer_norm: bool = True,
+               api_version: Literal['v1', 'v2', 'v3'] = 'v3',
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -163,7 +164,9 @@ def init_model(gt_type: Literal['rank', 'count'],
     seq_len:
         Length of the token sequences (w/o <cls> token).
     n_special_tokens:
+        Number of special tokens.
     n_segments:
+        Number of segments.
     n_special_values:
         Number of special values.
     enc_emb_dim:
@@ -188,6 +191,7 @@ def init_model(gt_type: Literal['rank', 'count'],
     """
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
+        n_special_values=n_special_values,
         count_encoding=count_encoding,
         n_value_bins=n_value_bins,
         vocab_size=vocab_size,
@@ -198,8 +202,10 @@ def init_model(gt_type: Literal['rank', 'count'],
         depth=enc_depth,
         num_heads=num_heads,
         use_flash_attention=use_flash_attention,
-        use_layer_norm=use_layer_norm)
-    encoder = EncoderMultiMaskWrapper(encoder)
+        use_layer_norm=use_layer_norm,
+        api_version=api_version)
+    if api_version == 'v3':
+        encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
         n_special_values=n_special_values,
@@ -211,8 +217,10 @@ def init_model(gt_type: Literal['rank', 'count'],
         depth=pred_depth,
         num_heads=num_heads,
         use_flash_attention=use_flash_attention,
-        use_layer_norm=use_layer_norm)
-    predictor = PredictorMultiMaskWrapper(predictor)
+        use_layer_norm=use_layer_norm,
+        api_version=api_version)
+    if api_version == 'v3':
+        predictor = PredictorMultiMaskWrapper(predictor)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):

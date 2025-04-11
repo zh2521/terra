@@ -68,6 +68,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
     use_layer_norm:
         If `True`, use layer normalization, else use dynamic tanh
         normalization.
+    api_version:
+        Version of the API to use.
     """
     def __init__(self,
                  vocab_size: int,
@@ -88,6 +90,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  init_std: float = 0.02,
                  use_flash_attention: bool = True,
                  use_layer_norm: bool = True,
+                 api_version: Literal['v1', 'v2', 'v3'] = 'v3',
                  **kwargs
                  ):
         super().__init__()
@@ -98,6 +101,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
+        self.api_version = api_version
             
         # Initialize token embeddings
         self.token_embed = nn.Embedding(
@@ -107,7 +111,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
 
         # Initialize segment embeddings
         self.seg_embed = nn.Embedding(
-            1 + n_segments, # include <pad>
+            1 + n_segments + (105 if api_version == 'v1' else 0), # include <pad>
             embed_dim,
             padding_idx=0)
         
@@ -117,7 +121,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         seg_embed = get_1d_sincos_pos_embed(
             embed_dim=embed_dim,
             n_zero_pos=0,
-            n_sincos_pos=n_segments)
+            n_sincos_pos=n_segments + (105 if api_version == 'v1' else 0))
         self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
         # Initialize encoder blocks and norm layer
@@ -270,6 +274,8 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
     use_layer_norm:
         If `True`, use layer normalization, else use dynamic tanh
         normalization.
+    api_version:
+        Version of the API to use.
     """
     def __init__(self,
                  embed_dim: int,
@@ -288,6 +294,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  init_std: float = 0.02,
                  use_flash_attention: bool = True,
                  use_layer_norm: bool = True,
+                 api_version: Literal['v1', 'v2', 'v3'] = 'v3',
                  **kwargs
                  ):
         super().__init__()
@@ -296,10 +303,11 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.predictor_embed_dim = predictor_embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
+        self.api_version = api_version
 
         # Initialize segment embeddings
         self.seg_embed = nn.Embedding(
-            1 + n_segments, # include <pad>
+            1 + n_segments + (105 if api_version == 'v1' else 0), # include <pad>
             predictor_embed_dim,
             padding_idx=0)
         
@@ -309,7 +317,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         seg_embed = get_1d_sincos_pos_embed(
             embed_dim=predictor_embed_dim,
             n_zero_pos=0,
-            n_sincos_pos=n_segments)
+            n_sincos_pos=n_segments + (105 if api_version == 'v1' else 0))
         self.seg_embed.weight[1:].copy_(torch.from_numpy(seg_embed).float())
 
         # Initialize layer to project from enc to pred embed dim
@@ -589,11 +597,13 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         Number of value bins if `value_bins` count encoding is used.    
     """
     def __init__(self,
+                 n_special_values: int,
                  count_encoding: Literal['value_bins', 'mlp'] = 'mlp',
                  n_value_bins: int | None = 100,
                  **base_encoder_kwargs
                  ):
         super().__init__(**base_encoder_kwargs)
+        self.n_special_values = n_special_values
         self.count_encoding = count_encoding
         self.n_value_bins = n_value_bins
 
@@ -604,7 +614,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 self.n_value_bins,
                 self.embed_dim)
             self.special_value_embed = nn.Embedding(
-                1, # include only <pad>
+                1 + (1 + self.n_special_values + 105 if self.api_version == 'v1' else 0), # include only <pad>
                 self.embed_dim,
                 padding_idx=0)
             self.value_emb_weights_projection = ValueEmbWeightsProjection(

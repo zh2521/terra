@@ -25,10 +25,10 @@ from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.cell_masking import CellMaskCollator
 from nichejepa.tokenizers import cell_tokenizers
 from nichejepa.utils.embedding import (create_binary_selection_mask,
-                              compute_mean_unmasked_emb,
-                              compute_unmasked_rank_based_weights,
-                              collect_adata_from_folder,
-                              retrieve_gene_emb)
+                                       compute_mean_unmasked_emb,
+                                       compute_unmasked_rank_based_weights,
+                                       collect_adata_from_folder,
+                                       retrieve_gene_emb)
 from nichejepa.utils.logging import CSVLogger
 
 
@@ -61,9 +61,9 @@ def infer(args: dict,
           top_k: int | None = None,
           ) -> ad.AnnData:
     """
-    Use a trained model for inference. Run forward pass on a given dataset and
-    return cell, neighborhood and (optionally) gene embeddings (cell and
-    neighborhood gene embeddings).
+    Use a trained model for inference. Run forward pass on a given
+    dataset andbreturn cell, neighborhood and (optionally) gene
+    embeddings (cell and neighborhood gene embeddings).
 
     Parameters
     -----------
@@ -76,19 +76,21 @@ def infer(args: dict,
     emb_layers:
         Layers for which to retrieve the embedding.
     cell_gene_ids:
-        List with gene IDs for which cell gene embeddings will be retrieved.
+        List with gene IDs for which cell gene embeddings will be
+        retrieved.
     neighborhood_gene_ids:
-        List with gene IDs for which neighborhood gene embeddings will be
-        retrived.
+        List with gene IDs for which neighborhood gene embeddings will
+        be retrived.
     agg_type:
-        Specifies how (aggregated) cell and neighborhood embeddings are computed
-        from individual gene embeddings.
+        Specifies how (aggregated) cell and neighborhood embeddings are
+        computed from individual gene embeddings.
     masked_tokens:
-        List of tokens to be masked by the attention mask during inference.
+        List of tokens to be masked by the attention mask during
+        inference.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
     feature_norm:
-        If 'True', apply feature norm in the last embedding layer.
+        If `True`, apply feature norm in the last embedding layer.
     top_k:
         Include only top_k genes in aggregation.
 
@@ -116,6 +118,11 @@ def infer(args: dict,
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
+    
+    if 'api_version' in args['meta'].keys():
+        api_version = args['meta']['api_version']
+    else:
+        api_version = 'v3'
 
     dataset_name = args['data']['dataset_name']
     token_dict_folder_path = args['data']['token_dict_folder_path']
@@ -201,7 +208,13 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
-        use_flash_attention=use_flash_attention)
+        use_flash_attention=use_flash_attention,
+        api_version=api_version)
+
+    if api_version != 'v3':
+        return_layer_emb_fn = target_encoder.return_layer_emb
+    else:
+        return_layer_emb_fn = target_encoder.backbone.return_layer_emb
 
     # Initialize mask collator
     if block_masking:
@@ -279,7 +292,8 @@ def infer(args: dict,
         # Collect cell IDs to join metadata
         all_cell_ids.extend(udata[-1])
 
-        # Aggregate gene embeddings into cell and neighborhood embeddings
+        # Aggregate gene embeddings into cell and neighborhood
+        # embeddings
         ns_tokens = tokens[:, n_special_tokens:]
 
         # Exclude masked tokens from aggregation
@@ -299,14 +313,14 @@ def infer(args: dict,
             neighborhood_emb_list = []
             for emb_layer in emb_layers:
                 if gt_type == 'rank':
-                    cell_emb_list.append(target_encoder.backbone.return_layer_emb(
+                    cell_emb_list.append(return_layer_emb_fn(
                         layer=emb_layer,
                         positions=positions,
                         segments=segments,
                         tokens=tokens,
                         masks_attention=masks_attention,
                         pad_neighborhood=True).cpu()),
-                    neighborhood_emb_list.append(target_encoder.backbone.return_layer_emb(
+                    neighborhood_emb_list.append(return_layer_emb_fn(
                         layer=emb_layer,
                         positions=positions,
                         segments=segments,
@@ -314,14 +328,14 @@ def infer(args: dict,
                         masks_attention=masks_attention,
                         pad_neighborhood=False).cpu()),
                 elif gt_type == 'counts':
-                    cell_emb_list.append(target_encoder.backbone.return_layer_emb(
+                    cell_emb_list.append(return_layer_emb_fn(
                         layer=emb_layer,
                         tokens=tokens,
                         segments=segments,
                         counts=counts,
                         masks_attention=masks_attention,
                         pad_neighborhood=True).cpu()),
-                    neighborhood_emb_list.append(target_encoder.backbone.return_layer_emb(
+                    neighborhood_emb_list.append(return_layer_emb_fn(
                         layer=emb_layer,
                         tokens=tokens,
                         segments=segments,
