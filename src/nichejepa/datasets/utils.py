@@ -1,17 +1,14 @@
 import json
 import random
 import requests
-from typing import List, Literal, Tuple, Union
+from typing import Literal
 
 import pickle
 import datasets
 from datasets import load_from_disk
-from sklearn.model_selection import train_test_split
-
-from ..utils.embedding import collect_adata_from_folder
 
 
-def get_ensembl_ids(gene_names: List,
+def get_ensembl_ids(gene_names: list[str],
                     species: Literal['homo_sapiens',
                                      'mus_musculus'],
                     ) -> dict:
@@ -32,7 +29,8 @@ def get_ensembl_ids(gene_names: List,
     """
     server = 'https://rest.ensembl.org'
     endpoint = f'/lookup/symbol/{species}'
-    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+    headers = {
+        'Content-Type': 'application/json', 'Accept': 'application/json'}
 
     data = {'symbols': gene_names}
     response = requests.post(f'{server}{endpoint}',
@@ -52,37 +50,36 @@ def get_ensembl_ids(gene_names: List,
         response.raise_for_status()
 
 
-def prepare_dataset(args: dict,
-                    ) -> Union[Tuple[datasets.Dataset, datasets.Dataset],
-                               datasets.Dataset]:
+def prepare_dataset(
+        args: dict
+        ) -> tuple[datasets.Dataset, datasets.Dataset] | datasets.Dataset:
     """
-    Prepare dataset by loading it, determining sample size, and splitting it
-    into training and test sets based on `split_dataset`.
+    Prepare dataset by loading it, determining sample size, and
+    splitting it into training and test sets based on `split_dataset`.
 
     Parameters
     -----------
     args:
         A dictionary containing the configuration parameters, including:
-            - tokenized_data_folder_path: The path to the tokenized dataset.
+            - tokenized_data_folder_path: The path to the tokenized
+              dataset.
             - sample_subset: Whether to sample a subset of the dataset.
             - sample_size: The size of the dataset to sample.
             - split: The train-test split ratio.
-            - stratify: Whether to stratify the dataset based on cell types
-                        during the split.
+            - stratify: Whether to stratify the dataset based on cell
+              types during the split.
             - random_state: The random seed for reproducibility.
 
     Returns
     -----------
-    Either:
-        dataset:
-            The precomputed split of the dataset.
-    or:
-        train_dataset:
-            The training portion of the dataset.
-        test_dataset:
-            The test portion of the dataset.
-        val_dataset:
-            The validation portion of the dataset.
+    dataset (optional):
+        The precomputed split of the dataset.
+    train_dataset (optional):
+        The training portion of the dataset.
+    test_dataset (optional):
+        The test portion of the dataset.
+    val_dataset (optional):
+        The validation portion of the dataset.
     """
     # Load dataset from the specified path
     data_path = args['data']['tokenized_data_folder_path']
@@ -90,7 +87,7 @@ def prepare_dataset(args: dict,
 
     if args['data']['precomputed_split']:
         # Load precomputed data split if specified
-        with open(args['data']['precomputed_split'], "rb") as f: 
+        with open(args['data']['precomputed_split'], 'rb') as f: 
             indices = pickle.load(f)
         dataset = dataset.select(indices)
         return dataset, None, None
@@ -107,7 +104,8 @@ def prepare_dataset(args: dict,
             test_indices = [
                 index for index, value in enumerate(test_batch_mask) if value]
             train_indices = [
-                index for index, value in enumerate(test_batch_mask) if not value]
+                index for index, value in enumerate(test_batch_mask)
+                if not value]
         else:
             test_indices = []
             train_indices = indices
@@ -122,8 +120,8 @@ def prepare_dataset(args: dict,
             train_indices = [
                 index_1 and index_2 for index_1, index_2 in zip(
                     train_indices,
-                    [index for index, value in enumerate(val_batch_mask) if not value]
-                    )]
+                    [index for index, value in enumerate(val_batch_mask)
+                    if not value])]
         else:
             val_indices = []
 

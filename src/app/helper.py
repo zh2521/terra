@@ -1,21 +1,23 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf. Comput.
-Vis. Pattern Recognit. 15619–15629 (2023);
-https://github.com/facebookresearch/ijepa/blob/main/src/helper.py (05.06.2024).
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+https://github.com/facebookresearch/ijepa/blob/main/src/helper.py
+(05.06.2024).
 """
 
 import logging
 import sys
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 import torch
 
 import nichejepa.models.gene_transformers as gt
-from .models.multimask import EncoderMultiMaskWrapper, PredictorMultiMaskWrapper
-from .models.utils import trunc_normal_
-from .utils.schedulers import (CosineWDSchedule,
-                               WarmupCosineSchedule)
+from nichejepa.models.multimask import (EncoderMultiMaskWrapper,
+                                        PredictorMultiMaskWrapper)
+from nichejepa.models.utils import trunc_normal_
+from nichejepa.utils.schedulers import (CosineWDSchedule,
+                                        WarmupCosineSchedule)
 
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
@@ -29,8 +31,8 @@ def load_checkpoint(device: str,
                     target_encoder: gt.GeneTransformerBaseEncoder,
                     opt: torch.optim.AdamW,
                     scaler: torch.cuda.amp.GradScaler,
-                    is_training: bool=True,
-                    ) -> Tuple[gt.GeneTransformerBaseEncoder,
+                    is_training: bool = True,
+                    ) -> tuple[gt.GeneTransformerBaseEncoder,
                                gt.GeneTransformerBasePredictor,
                                gt.GeneTransformerBaseEncoder,
                                torch.optim.AdamW,
@@ -48,8 +50,8 @@ def load_checkpoint(device: str,
     encoder:
         Initialized GeneTransformerEncoder module to encode contexts.
     predictor:
-        Initialized GeneTransformerPredictor module to predict targets from
-        contexts.
+        Initialized GeneTransformerPredictor module to predict targets
+        from contexts.
     target_encoder:
         Initialized GeneTransformerEncoder module to encode targets.
     opt:
@@ -62,24 +64,25 @@ def load_checkpoint(device: str,
     Returns
     -----------
     encoder:
-        GeneTransformerEncoder module to encode contexts, loaded with state from
-        checkpoint.
+        GeneTransformerEncoder module to encode contexts, loaded with
+        state from checkpoint.
     predictor:
-        GeneTransformerPredictor module to predict targets from contexts, loaded
-        with state from checkpoint.
+        GeneTransformerPredictor module to predict targets from
+        contexts, loaded with state from checkpoint.
     target_encoder:
-        GeneTransformerEncoder module to encode targets, loaded with state from
-        checkpoint.
+        GeneTransformerEncoder module to encode targets, loaded with
+        state from checkpoint.
     opt:
         Torch optimizer, loaded with stete from checkpoint.
     scaler:
-        Torch scaler for automatic mixed precision training, loaded with state
-        from checkpoint.
+        Torch scaler for automatic mixed precision training, loaded with
+        state from checkpoint.
     epoch:
         Number of epochs from checkpoint.
     """
     try:
-        checkpoint = torch.load(r_path, map_location=torch.device(device))
+        checkpoint = torch.load(
+            r_path, map_location=torch.device(device))
 
         epoch = checkpoint['epoch']
 
@@ -136,7 +139,7 @@ def init_model(gt_type: Literal['rank', 'count'],
                seq_len: int,
                n_special_tokens: int,
                n_segments: int,
-               n_special_values: Optional[int]=None,
+               n_special_values: int | None = None,
                enc_emb_dim: int=768, 
                enc_depth: int=12,
                pred_emb_dim: int=384,
@@ -144,7 +147,7 @@ def init_model(gt_type: Literal['rank', 'count'],
                num_heads: int=8,
                use_flash_attention: bool=True,
                use_layer_norm: bool=True,
-               ) -> Tuple[gt.GeneTransformerBaseEncoder,
+               ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
     Initialize model.
@@ -235,7 +238,8 @@ def init_model(gt_type: Literal['rank', 'count'],
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
     logger.info(f'Encoder number of parameters: {count_parameters(encoder)}')
-    logger.info(f'Predictor number of parameters: {count_parameters(predictor)}')
+    logger.info(
+        f'Predictor number of parameters: {count_parameters(predictor)}')
     
     return encoder, predictor
 
@@ -247,12 +251,12 @@ def init_opt(encoder: gt.GeneTransformerBaseEncoder,
              ref_lr: float,
              warmup: int,
              num_epochs: int,
-             wd: float=1e-6,
-             final_wd: float=1e-6,
-             final_lr: float=0.0,
-             use_bfloat16: bool=False,
-             ipe_scale: float=1.25
-             ) -> Tuple[torch.optim.AdamW,
+             wd: float = 1e-6,
+             final_wd: float = 1e-6,
+             final_lr: float = 0.0,
+             use_bfloat16: bool = False,
+             ipe_scale: float = 1.25
+             ) -> tuple[torch.optim.AdamW,
                         torch.cuda.amp.GradScaler,
                         WarmupCosineSchedule,
                         CosineWDSchedule]:

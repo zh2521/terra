@@ -8,16 +8,18 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/schedulers.py
 
 import math
 
+import torch
+
 
 class WarmupCosineSchedule(object):
     def __init__(self,
-                 optimizer,
+                 optimizer: torch.optim.Optimizer,
                  warmup_steps: int,
                  start_lr: float,
                  ref_lr: float,
-                 T_max,
-                 last_epoch: int=-1,
-                 final_lr: float=0.):
+                 T_max: int,
+                 last_epoch: int = -1,
+                 final_lr: float = 0.):
         """
         WarmupCosineSchedule class to schedule learning rate.
         """ 
@@ -53,7 +55,7 @@ class CosineWDSchedule(object):
                  optimizer,
                  ref_wd,
                  T_max,
-                 final_wd: float=0.):
+                 final_wd: float = 0.):
         """
         CosineWDSchedule class to schedule weight decay.
         """

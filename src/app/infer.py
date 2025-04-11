@@ -6,7 +6,7 @@ import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
-from typing import List, Literal, Optional, Tuple
+from typing import Literal
 
 import anndata as ad
 import numpy as np
@@ -18,19 +18,18 @@ from datasets import Dataset, load_from_disk
 from tqdm import tqdm
 from pyensembl import EnsemblRelease
 
-from .datasets.cell_datasets import CellBaseDataset, make_cell_dataset
-from .datasets.dataloaders import init_dataloader_and_sampler
-from .helper import init_model, load_checkpoint
-from .masks.block_masking  import BlockMaskCollator
-from .masks.random_masking import RandomMaskCollator
-from .masks.cell_masking import CelllMaskCollator
-from .tokenizers import cell_tokenizers
-from .utils.embedding import (create_binary_selection_mask,
+from app.helper import init_model, load_checkpoint
+from nichejepa.datasets.cell_datasets import CellBaseDataset, make_cell_dataset
+from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
+from nichejepa.masks.block_masking  import BlockMaskCollator
+from nichejepa.masks.cell_masking import CellMaskCollator
+from nichejepa.tokenizers import cell_tokenizers
+from nichejepa.utils.embedding import (create_binary_selection_mask,
                               compute_mean_unmasked_emb,
                               compute_unmasked_rank_based_weights,
                               collect_adata_from_folder,
                               retrieve_gene_emb)
-from .utils.logging import CSVLogger
+from nichejepa.utils.logging import CSVLogger
 
 
 _GLOBAL_SEED = 0
@@ -47,19 +46,19 @@ logger = logging.getLogger()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
-          dataset_ids: Optional[list]=None,
-          obs_cols: Optional[list]=None,
-          uns_cols: Optional[list]=None,
-          emb_layers: Optional[list]=None,
-          cell_gene_ids: List=[],
-          neighborhood_gene_ids: List=[],
+          dataset_ids: list | None = None,
+          obs_cols: list | None = None,
+          uns_cols: list | None = None,
+          emb_layers: list | None = None,
+          cell_gene_ids: list = [],
+          neighborhood_gene_ids: list = [],
           agg_type: Literal['cls',
                             'avg',
-                            'weighted_avg']='avg',
-          masked_tokens: Optional[List[int]]=None,
-          agg_excluded_tokens: Optional[List[int]]=None,
-          feature_norm: bool=False,
-          top_k: Optional[int]=None,
+                            'weighted_avg'] = 'avg',
+          masked_tokens: list[int] | None = None,
+          agg_excluded_tokens: list[int] | None = None,
+          feature_norm: bool = False,
+          top_k: int | None = None,
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given dataset and
@@ -215,7 +214,7 @@ def infer(args: dict,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio)
     elif cell_masking:
-       mask_collator = CelllMaskCollator(
+       mask_collator = CellMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
             n_segments=n_segments,
@@ -224,15 +223,6 @@ def infer(args: dict,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
             targets_list=targets_list)
-    else:
-        mask_collator = RandomMaskCollator(
-            n_targets=n_targets,
-            n_contexts=n_contexts,
-            seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood,
-            n_special_tokens=n_special_tokens,
-            target_mask_size=target_mask_size,
-            context_mask_size=context_mask_size,)
 
     # Initialize train and test datasets, dataloaders and samplers
     cell_dataset = make_cell_dataset(
@@ -533,10 +523,10 @@ def harmonize_adata(adata: ad.AnnData) -> ad.AnnData:
 
 def tokenize_adata(adata: ad.AnnData,
                    model_folder_path: str,
-                   perturb_df: Optional[pd.DataFrame]=None,                   
-                   nproc: int=4,
+                   perturb_df: pd.DataFrame | None = None,                   
+                   nproc: int = 4,
                    processing_mode: Literal['sequential',
-                                            'parallel']='parallel'
+                                            'parallel'] = 'parallel'
                    ) -> Dataset:
     """
     Harmonize and tokenize an AnnData object based on the parameters in the
@@ -624,14 +614,15 @@ def tokenize_adata(adata: ad.AnnData,
 @torch.no_grad()
 def embed_dataset(dataset: Dataset,
                   model_folder_path: str,
-                  emb_layer: Optional[int]=None,
-                  cell_gene_ids: list=[],
-                  neighborhood_gene_ids: list=[],
-                  agg_excluded_tokens: Optional[list[int]]=None,
-                  top_k: Optional[int]=None,
-                  batch_size: int=128,
-                  pin_memory: bool=False,
-                  num_workers: int=12) -> dict:
+                  emb_layer: int | None = None,
+                  cell_gene_ids: list = [],
+                  neighborhood_gene_ids: list = [],
+                  agg_excluded_tokens: list[int] | None = None,
+                  top_k: int | None = None,
+                  batch_size: int = 128,
+                  pin_memory: bool = False,
+                  num_workers: int = 12
+                  ) -> dict:
     """
     Parameters
     -----------
@@ -889,20 +880,21 @@ def embed_dataset(dataset: Dataset,
 def harmonize_tokenize_embed_pipeline(
         adata: ad.AnnData,
         model_folder_path: str,
-        perturb_df: Optional[pd.DataFrame]=None,               
-        nproc: int=4,
+        perturb_df: pd.DataFrame | None = None,               
+        nproc: int = 4,
         processing_mode: Literal['sequential',
-                                 'parallel']='parallel',
-        save_dataset_path: Optional[Path | str]=None,
-        num_shards: int=32,
-        emb_layer: Optional[int]=None,
-        cell_gene_ids: list=[],
-        neighborhood_gene_ids: list=[],
-        agg_excluded_tokens: Optional[list[int]]=None,
-        top_k: Optional[int]=None,
-        batch_size: int=128,
-        pin_memory: bool=False,
-        num_workers: int=12) -> ad.AnnData:
+                                 'parallel'] = 'parallel',
+        save_dataset_path: Path | str | None = None,
+        num_shards: int = 32,
+        emb_layer: int | None = None,
+        cell_gene_ids: list = [],
+        neighborhood_gene_ids: list = [],
+        agg_excluded_tokens: list[int] | None = None,
+        top_k: int | None = None,
+        batch_size: int = 128,
+        pin_memory: bool = False,
+        num_workers: int = 12
+        ) -> ad.AnnData:
     """
     Harmonize, tokenize and embed an AnnData object.
 
