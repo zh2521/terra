@@ -112,7 +112,7 @@ def infer(args: dict,
     if 'count_encoding' in args['meta'].keys():
         count_encoding = args['meta']['count_encoding']
     else:
-        count_encoding = 'mlp'
+        count_encoding = 'value_bins'
     if 'n_value_bins' in args['meta'].keys():
         n_value_bins = args['meta']['n_value_bins']
     else:
