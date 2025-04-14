@@ -738,6 +738,7 @@ def embed_dataset(dataset: Dataset,
         enc_depth=model_config['meta']['enc_depth'],
         pred_emb_dim=model_config['meta']['pred_emb_dim'],
         pred_depth=model_config['meta']['pred_depth'],
+        num_heads=model_config['meta']['num_heads'],
         use_flash_attention=model_config['meta']['use_flash_attention'])
 
     # Create mask collator
