@@ -27,7 +27,7 @@ meta:
   pred_depth: 6
   pred_emb_dim: 192
   num_heads: 6
-  special_tokens: ['assay'] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
+  special_tokens: ['assay', 'tissue', 'batch'] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
   pos_learnable: False
   seg_learnable: False
   use_bfloat16: True
@@ -46,7 +46,7 @@ optimization:
   warmup: 0.3
   epochs: 3
   ema:
-  - 0.996
+  - 0.99
   - 1.0
   start_lr: 0.0002
   lr: 0.000625

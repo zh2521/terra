@@ -121,6 +121,10 @@ def infer(args: dict,
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
     pred_emb_dim = args['meta']['pred_emb_dim']
+    if 'num_heads' in args['meta'].keys():
+        num_heads = args['meta']['num_heads']
+    else:
+        num_heads = 8
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -220,6 +224,7 @@ def infer(args: dict,
         enc_depth=enc_depth,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
+        num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         api_version=api_version)
 
