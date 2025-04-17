@@ -28,7 +28,8 @@ from nichejepa.utils.embedding import (create_binary_selection_mask,
                                        compute_mean_unmasked_emb,
                                        compute_unmasked_rank_based_weights,
                                        collect_adata_from_folder,
-                                       retrieve_gene_emb)
+                                       retrieve_gene_emb,
+                                       compute_running_mean_cosine_mult_occ)
 from nichejepa.utils.logging import CSVLogger
 
 
@@ -59,6 +60,8 @@ def infer(args: dict,
           agg_excluded_tokens: list[int] | None = None,
           feature_norm: bool = False,
           top_k: int | None = None,
+          return_gene: bool=True,
+          return_cosine_sim: bool=False,
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -93,6 +96,10 @@ def infer(args: dict,
         If `True`, apply feature norm in the last embedding layer.
     top_k:
         Include only top_k genes in aggregation.
+    return_gene: 
+        If 'True' will return gene_embedding.
+    return_cosine_sim: 
+        If 'True' will compute and return cosine_sim matrix.
 
     Returns
     -----------
@@ -416,30 +423,67 @@ def infer(args: dict,
                 all_neighborhood_emb_list[i].append(neighborhood_emb)
 
             # Store cell and neighborhood gene embeddings of last layer
-            if i == (len(cell_emb_list) - 1):
-                for gene_id in cell_gene_ids:
-                    gene_emb = retrieve_gene_emb(
+            if i == (len(emb_list) - 1):
+                if len(cell_gene_ids) != 0:
+                    if itr == 0 or itr == len(loader)-1:
+                        cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
+                        cell_presence = torch.zeros((emb.shape[0], len(cell_gene_ids)), device=emb.device)
+                        neb_occ_list: List[torch.Tensor] = []
+                        neb_occ_mask_list: List[torch.Tensor] = []
+                        neb_presence = torch.zeros((emb.shape[0], len(neighborhood_gene_ids)), device=emb.device)
+                    else:
+                        cell_embs.zero_()
+                        cell_presence.zero_()
+                        neb_occ_list = []
+                        neb_occ_mask_list = []
+                        neb_presence.zero_()
+                rows = torch.arange(emb.shape[0], device=emb.device)
+                for j, gene_id in enumerate(cell_gene_ids):
+                    gene_presence_local, gene_indices = retrieve_gene_emb(
                         ns_tokens=ns_tokens,
-                        emb=cell_emb,
-                        gene_id=gene_id,
+                        seq_len_cell=seq_len_cell,
                         gene_type="cell",
-                        seq_len_cell=seq_len_cell)
-                    if itr == 0:
-                        all_cell_gene_emb_dict[gene_id] = [gene_emb]
-                    else:
-                        all_cell_gene_emb_dict[gene_id].append(gene_emb)
-                for gene_id in neighborhood_gene_ids:
-                    gene_emb = retrieve_gene_emb(
-                        ns_tokens=ns_tokens,
-                        emb=neighborhood_emb,
                         gene_id=gene_id,
-                        gene_type="neighborhood",
-                        seq_len_cell=seq_len_cell)
+                        aggregate_multiple=False
+                    )
+                    cell_embs[rows[gene_presence_local], j, :] = emb[rows[gene_presence_local], gene_indices[gene_presence_local], :]
+                    cell_presence[:, j] = gene_presence_local.float()
+                    if return_gene:
+                        if itr == 0:
+                            all_cell_gene_emb_dict[gene_id] = [cell_embs[:, j, :]]
+                        else:
+                            all_cell_gene_emb_dict[gene_id].append(cell_embs[:, j, :])
+                # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
+                for j, gene_id in enumerate(neighborhood_gene_ids):
+                    gene_occ, occ_mask, gene_presence_local = retrieve_gene_emb(
+                        ns_tokens=ns_tokens,
+                        seq_len_cell=seq_len_cell,
+                        gene_type="cell",
+                        gene_id=gene_id,
+                        emb=emb,
+                        aggregate_multiple=True,
+                        max_occ=MAX_OCC
+                    )
+                    neb_occ_list.append(gene_occ)       # gene_occ: (N, max_occ, D)
+                    neb_occ_mask_list.append(occ_mask)    # occ_mask: (N, max_occ)
+                    if return_gene:
+                        if itr == 0:
+                            all_neighborhood_gene_emb_dict[gene_id] = [gene_occ * occ_mask.unsqueeze(-1)]
+                        else:
+                            all_neighborhood_gene_emb_dict[gene_id].append(gene_occ * occ_mask.unsqueeze(-1))
+                # Stack neighborhood gene occurrence tensors along gene dimension:
+                # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
+                if len(neighborhood_gene_ids) != 0:
+                    neb_occ_tensor = torch.stack(neb_occ_list, dim=1)
+                    neb_occ_mask_tensor = torch.stack(neb_occ_mask_list, dim=1)
+                # Compute cosine similarity components using our function for multiple occurrences.
+                if return_cosine_sim:
                     if itr == 0:
-                        all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
+                        sum_cos_sim, count = compute_running_mean_cosine_mult_occ(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
                     else:
-                        all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                
-
+                        sum_cos_sim_temp, count_temp = compute_running_mean_cosine_mult_occ(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
+                        sum_cos_sim.add_(sum_cos_sim_temp)
+                        count.add_(count_temp)
     # Add metadata
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
@@ -470,14 +514,19 @@ def infer(args: dict,
 
     # Store cell and neighborhood gene embeddings of all observations in the
     # last layer
-    for gene_id in cell_gene_ids:
-        adata.obsm[f"cell_emb_gene{gene_id}"] = np.array(torch.cat(
-            all_cell_gene_emb_dict[gene_id],
-            dim=0).cpu())
-    for gene_id in neighborhood_gene_ids:
-        adata.obsm[f"neighborhood_emb_gene{gene_id}"] = np.array(torch.cat(
-            all_neighborhood_gene_emb_dict[gene_id],
-            dim=0).cpu())
+    if return_gene:
+        for gene_id in cell_gene_ids:
+            adata.obsm[f"cell_emb_gene{gene_id}"] = np.array(torch.cat(
+                all_cell_gene_emb_dict[gene_id],
+                dim=0).cpu())
+        for gene_id in neighborhood_gene_ids:
+            adata.obsm[f"neighborhood_emb_gene{gene_id}"] = np.array(torch.cat(
+                all_neighborhood_gene_emb_dict[gene_id],
+                dim=0).cpu())
+    if return_cosine_sim:
+        adata.uns['sum_cos_sim'] = sum_cos_sim.numpy()
+        adata.uns['count'] = count.numpy()
+        adata.uns['cos_sim'] = adata.uns['sum_cos_sim'] / adata.uns['count']
 
     return adata
 

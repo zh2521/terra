@@ -1,6 +1,6 @@
 
 import os
-from typing import Literal
+from typing import List, Literal, Optional, Tuple
 
 import anndata as ad
 import numpy as np
@@ -348,6 +348,61 @@ def retrieve_gene_emb(ns_tokens: torch.Tensor,
         gene_indices = gene_mask_float.argmax(dim=1) # (N,)
         return gene_presence, gene_indices
 
+def compute_running_mean_cosine_mult_occ(
+    cell_embs: torch.Tensor,
+    cell_presence: torch.Tensor,
+    neb_occ: torch.Tensor,
+    neb_mask: torch.Tensor
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Computes the total (summed) cosine similarity and the total count of valid occurrence pairs
+    between each cell gene (unique per sequence) and each neighborhood gene (across max_occ occurrences).
+    No averaging per sequence is performed.
+
+    Parameters
+    ----------
+    cell_embs : torch.Tensor
+        Shape: (N, num_cell_genes, D) -- cell gene embeddings.
+    cell_presence : torch.Tensor
+        Shape: (N, num_cell_genes) -- binary presence indicator.
+    neb_occ : torch.Tensor
+        Shape: (N, num_neb_genes, max_occ, D) -- neighborhood gene occurrence embeddings.
+    neb_mask : torch.Tensor
+        Shape: (N, num_neb_genes, max_occ) -- binary mask indicating valid occurrences.
+
+    Returns
+    -------
+    total_cs : torch.Tensor
+        Shape: (num_cell_genes, num_neb_genes) -- total sum of cosine similarities.
+    total_count : torch.Tensor
+        Shape: (num_cell_genes, num_neb_genes) -- total count of valid occurrence pairs.
+    """
+    # Normalize embeddings along the last dimension.
+    cell_embs = F.normalize(cell_embs, p=2, dim=-1)
+    neb_occ = F.normalize(neb_occ, p=2, dim=-1)
+    
+    # Compute cosine similarity between each cell gene and each neighborhood occurrence.
+    # Resulting shape: (N, num_cell_genes, num_neb_genes, max_occ)
+    cs = torch.einsum("ncd,njod->ncjo", cell_embs, neb_occ)
+    
+    # Expand neb_mask to match cs shape.
+    neb_mask_exp = neb_mask.unsqueeze(1)  # (N, 1, num_neb_genes, max_occ)
+    cs_masked = cs * neb_mask_exp  # zero out invalid occurrences
+    
+    # Sum cosine similarities over the occurrence dimension.
+    occ_sum = cs_masked.sum(dim=-1)  # (N, num_cell_genes, num_neb_genes)
+    occ_count = neb_mask_exp.sum(dim=-1)  # (N, num_cell_genes, num_neb_genes)
+    
+    # Only count sequences where the cell gene is present.
+    cell_pres_exp = cell_presence.unsqueeze(-1)  # (N, num_cell_genes, 1)
+    occ_sum_masked = occ_sum * cell_pres_exp
+    occ_count_masked = occ_count * cell_pres_exp
+    
+    # Sum over all sequences.
+    total_cs = occ_sum_masked.sum(dim=0)       # (num_cell_genes, num_neb_genes)
+    total_count = occ_count_masked.sum(dim=0)    # (num_cell_genes, num_neb_genes)
+    
+    return total_cs, total_count
 
 def collect_adata_from_folder(load_folder_path: str,
                               cell_ids: list,
