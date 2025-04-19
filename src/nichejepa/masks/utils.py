@@ -1,3 +1,10 @@
+"""
+Adapted from Bardes, A et al. Revisiting Feature Prediction for Learning
+Visual Representations from Video. arXiv:2404.08471 (2024);
+https://github.com/facebookresearch/jepa/blob/main/src/masks/utils.py
+(25.03.2025).
+"""
+
 import torch
 
 

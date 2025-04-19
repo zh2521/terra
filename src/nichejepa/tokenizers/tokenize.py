@@ -47,7 +47,8 @@ def process_gene_expr(gene_expr: list[float],
                       length: int,
                       ) -> np.ndarray:
     """
-    Pad gene expression with '0.' or truncate gene expression based on length.
+    Pad gene expression with '0.' or truncate gene expression based on
+    length.
 
     Parameters
     ----------
@@ -83,7 +84,8 @@ def rank_gene_tokens(gene_scores: np.ndarray,
                      n_tokens: int | None = None,
                      ) -> np.ndarray:
     """
-    Rank gene tokens based on matching gene scores (highest score -> rank 1).
+    Rank gene tokens based on matching gene scores (highest score ->
+    rank 1).
 
     Parameters
     ----------

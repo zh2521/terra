@@ -19,12 +19,12 @@ import pandas as pd
 import wandb
 from sklearn.model_selection import train_test_split
 
-from src.nichejepa.datasets.utils import prepare_dataset
-from src.nichejepa.infer import infer
-from src.nichejepa.train import train
-from src.nichejepa.utils.config import create_params_from_YAML_wandb_config
-from src.nichejepa.utils.distributed import init_distributed
-from src.nichejepa.utils.evaluation import clustering_metrics
+from nichejepa.datasets.utils import prepare_dataset
+from app.infer import infer
+from app.train import train
+from nichejepa.utils.config import create_params_from_YAML_wandb_config
+from nichejepa.utils.distributed import init_distributed
+from nichejepa.utils.evaluation import clustering_metrics
 
 
 # Setup argument parsing

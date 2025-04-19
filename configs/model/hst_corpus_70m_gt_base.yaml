@@ -2,19 +2,19 @@ data:
   dataset_name: 'hst_corpus_70m'
   raw_data_folder_path: '/lustre/scratch126/cellgen/team361/DATASETS/silver/hst_corpus_70m'
   token_dict_folder_path: '/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/token_dictionary_homo_sapiens.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/team361/DATASETS/gold/cell-graph-tokenizer/hst_corpus_70m/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_6.dataset'
-  precomputed_split: '/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_6_precomputed_split_train.pkl'
-  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_6_n_nonzero_tokens_train.pkl'
+  tokenized_data_folder_path: '/lustre/scratch126/cellgen/team361/DATASETS/gold/cell-graph-tokenizer/hst_corpus_70m/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_10.dataset'
+  precomputed_split: '/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_10_precomputed_split_train.pkl'
+  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/team361/DATASETS/tokenizer/hst_corpus_70m_32_None_None_None_None_None_shifted_log_knn_10_n_nonzero_tokens_train.pkl'
   tokenizer_type: 'cell_graph'
   random_state: 0
   sample_subset: False
   split: 0
   stratify: False
-  seq_len_cell: 256 # 64, 128, 256
-  seq_len_neighborhood: 1536 # 384/640, 1536/2816
-  n_segments: 7 # 7, 11; number of unique segment tokens (gene segments)
+  seq_len_cell: 256 # 128, 256
+  seq_len_neighborhood: 2560 # 1536 (6knn, 256t), 2560 (10knn, 256t), 
+  n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 144 # 144 (randmask50; mem allocated 2x 91.39%, 2x 91.22%), 176 (randmask70)
+  batch_size: 80 # 96 (higher mask ratios) # 128 (10knn, 256t), 144 (6knn, 256t)
   num_workers: 24
   pin_memory: True
 meta:
@@ -25,7 +25,7 @@ meta:
   enc_depth: 12
   enc_emb_dim: 768
   pred_depth: 6
-  pred_emb_dim: 384
+  pred_emb_dim: 192
   num_heads: 12
   special_tokens: [] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
   pos_learnable: False
@@ -35,26 +35,26 @@ meta:
   use_layer_norm: True
 mask:
   n_contexts: 1 # 1
-  n_targets: 1 # 1 =, this is the number of blocks in block masking
+  n_targets: 10 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.5 # 0.5, 0.7
+  per_block_mask_ratio: 0.7 # 0.5, 0.7
 optimization:
-  warmup: 4
-  epochs: 16
+  warmup: 1
+  epochs: 4
   ema:
-  - 0.98 # 0.996
+  - 0.998 # 0.996
   - 1.0
   start_lr: 2.0e-05 # 1.0e-0.5
-  lr: 6.0e-05 # 1.0e-0.4
+  lr: 0.000625 # 1.0e-0.4
   final_lr: 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
   ipe_scale: 1.25
-  clip_grad: 10.0
+  clip_grad: 2.0
 state:
   log_freq: 20
   checkpoint_freq: 1
