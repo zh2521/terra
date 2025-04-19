@@ -429,7 +429,7 @@ def infer(args: dict,
             # Store cell and neighborhood gene embeddings of last layer
             if i == (len(neighborhood_emb_list) - 1):
                 emb = n_emb
-                if len(cell_gene_ids) != 0:
+                if len(cell_gene_ids) != 0 or len(neighborhood_gene_ids) != 0 :
                     if itr == 0 or itr == len(loader)-1:
                         cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
                         cell_presence = torch.zeros((emb.shape[0], len(cell_gene_ids)), device=emb.device)
@@ -481,7 +481,7 @@ def infer(args: dict,
                             all_neighborhood_gene_emb_dict[gene_id].append(compute_mean_unmasked_emb(gene_occ,occ_mask))
                 # Stack neighborhood gene occurrence tensors along gene dimension:
                 # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
-                if len(neighborhood_gene_ids) != 0:
+                if len(neighborhood_gene_ids) != 0 and return_cosine_sim:
                     neb_occ_tensor = torch.stack(neb_occ_list, dim=1)
                     neb_occ_mask_tensor = torch.stack(neb_occ_mask_list, dim=1)
                 # Compute cosine similarity components using our function for multiple occurrences.
