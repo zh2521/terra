@@ -29,7 +29,7 @@ from nichejepa.utils.embedding import (create_binary_selection_mask,
                                        compute_unmasked_rank_based_weights,
                                        collect_adata_from_folder,
                                        retrieve_gene_emb,
-                                       compute_running_mean_cosine_mult_occ)
+                                       compute_count_mean_cosine_sim)
 from nichejepa.utils.logging import CSVLogger
 
 
@@ -151,6 +151,7 @@ def infer(args: dict,
     seq_len_cell = args['data']['seq_len_cell']
     seq_len_neighborhood = args['data']['seq_len_neighborhood']
     n_segments = args['data']['n_segments']
+    MAX_OCC = args['data']['n_segments'] -1 
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -208,8 +209,8 @@ def infer(args: dict,
 
     os.makedirs(save_folder, exist_ok=True)
     dump = os.path.join(save_folder, f'params.yaml')
-    with open(dump, 'w') as f:
-        yaml.dump(args, f)
+    #with open(dump, 'w') as f:
+    #    yaml.dump(args, f)
 
     # Define checkpointing path
     latest_path = os.path.join(load_folder_path, f'{tag}-latest.pth.tar')
@@ -423,7 +424,8 @@ def infer(args: dict,
                 all_neighborhood_emb_list[i].append(neighborhood_emb)
 
             # Store cell and neighborhood gene embeddings of last layer
-            if i == (len(emb_list) - 1):
+            if i == (len(neighborhood_emb_list) - 1):
+                emb = n_emb
                 if len(cell_gene_ids) != 0:
                     if itr == 0 or itr == len(loader)-1:
                         cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
@@ -479,9 +481,9 @@ def infer(args: dict,
                 # Compute cosine similarity components using our function for multiple occurrences.
                 if return_cosine_sim:
                     if itr == 0:
-                        sum_cos_sim, count = compute_running_mean_cosine_mult_occ(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
+                        sum_cos_sim, count = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
                     else:
-                        sum_cos_sim_temp, count_temp = compute_running_mean_cosine_mult_occ(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
+                        sum_cos_sim_temp, count_temp = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
                         sum_cos_sim.add_(sum_cos_sim_temp)
                         count.add_(count_temp)
     # Add metadata
