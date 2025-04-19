@@ -62,6 +62,7 @@ def infer(args: dict,
           top_k: int | None = None,
           return_gene: bool=True,
           return_cosine_sim: bool=False,
+          compute_cosine_with: str='neighborhood',
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -100,7 +101,9 @@ def infer(args: dict,
         If 'True' will return gene_embedding.
     return_cosine_sim: 
         If 'True' will compute and return cosine_sim matrix.
-
+    compute_cosine_with:
+       If set to 'neighborhood', it will compute the cosine similarity between each cell and its neighborhood. 
+       If set to 'cell', it will compute the cosine similarity between cells itself.
     Returns
     -----------
     adata:
@@ -460,7 +463,7 @@ def infer(args: dict,
                     gene_occ, occ_mask, gene_presence_local = retrieve_gene_emb(
                         ns_tokens=ns_tokens,
                         seq_len_cell=seq_len_cell,
-                        gene_type="cell",
+                        gene_type=compute_cosine_with,
                         gene_id=gene_id,
                         emb=emb,
                         aggregate_multiple=True,
