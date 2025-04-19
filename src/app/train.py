@@ -118,6 +118,10 @@ def train(args: dict,
         num_heads = args['meta']['num_heads']
     else:
         num_heads = 8
+    if 'mlp_ratio' in args['meta'].keys():
+        mlp_ratio = args['meta']['mlp_ratio']
+    else:
+        mlp_ratio = 4.0
     if 'loss_fn_type' in args['meta'].keys():
         loss_fn_type = args['meta']['loss_fn_type']
     else:
@@ -254,6 +258,7 @@ def train(args: dict,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
         num_heads=num_heads,
+        mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm)
     target_encoder = copy.deepcopy(encoder)

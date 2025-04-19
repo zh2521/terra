@@ -14,7 +14,7 @@ data:
   seq_len_neighborhood: 2560 # 1536 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 32 # 64 # 224 # 96 # 128 # 192 # 96 (norm, no bfloat), 128 (dyt, bfloat), 144 (norm, bfloat)
+  batch_size: 24 # 64 # 224 # 96 # 128 # 192 # 96 (norm, no bfloat), 128 (dyt, bfloat), 144 (norm, bfloat)
   num_workers: 24
   pin_memory: True
 meta:
@@ -25,7 +25,7 @@ meta:
   enc_depth: 24
   enc_emb_dim: 1024
   pred_depth: 12
-  pred_emb_dim: 512
+  pred_emb_dim: 384
   num_heads: 16
   special_tokens: ['assay'] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
   pos_learnable: False
@@ -35,21 +35,21 @@ meta:
   use_layer_norm: True
 mask:
   n_contexts: 1 # 1
-  n_targets: 1 # 1 =, this is the number of blocks in block masking
+  n_targets: 10 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.8 # 0.5, 
+  per_block_mask_ratio: 0.7 # 0.5, 
 optimization:
-  warmup: 4
-  epochs: 16
+  warmup: 1
+  epochs: 4
   ema:
-  - 0.996 # 0.996
+  - 0.998
   - 1.0
   start_lr: 2.0e-05
-  lr: 1.0e-04
+  lr: 0.000625
   final_lr: 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4

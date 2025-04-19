@@ -1114,13 +1114,11 @@ def init_gt_encoder(
         ) -> GeneTransformerRankEncoder | GeneTransformerCountEncoder:
     if encoder_type == 'rank':
         model = GeneTransformerRankEncoder(
-            mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **encoder_kwargs)
     elif encoder_type == 'counts':
         model = GeneTransformerCountEncoder(
-            mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **encoder_kwargs)

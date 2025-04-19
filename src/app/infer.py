@@ -125,6 +125,10 @@ def infer(args: dict,
         num_heads = args['meta']['num_heads']
     else:
         num_heads = 8
+    if 'mlp_ratio' in args['meta'].keys():
+        mlp_ratio = args['meta']['mlp_ratio']
+    else:
+        mlp_ratio = 4.0
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -225,6 +229,7 @@ def infer(args: dict,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
         num_heads=num_heads,
+        mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
         api_version=api_version)
 
