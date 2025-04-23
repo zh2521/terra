@@ -24,8 +24,8 @@ meta:
   n_value_bins: 100
   enc_depth: 12
   enc_emb_dim: 768
-  pred_depth: 6
-  pred_emb_dim: 192
+  pred_depth: 12
+  pred_emb_dim: 384
   num_heads: 12
   special_tokens: [] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
   pos_learnable: False
