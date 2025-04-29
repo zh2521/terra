@@ -183,7 +183,6 @@ def infer(args: dict,
             n_nonzero_tokens = pickle.load(f)
     else:
         n_nonzero_tokens = None
-        print(n_nonzero_tokens)
     
     # Load token dict and get token dict-specfic params
     with open(token_dict_folder_path, 'rb') as file:

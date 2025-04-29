@@ -162,12 +162,14 @@ def train(args: dict,
     r_file = args['state']['read_checkpoint']
     load_folder_path = args['state']['folder_path']
 
-    if args['data']['precomputed_n_nonzero_tokens']:
+    if 'precomputed_epoch_n_nonzero_tokens' in args['data'].keys():
+        with open(args['data']['precomputed_epoch_n_nonzero_tokens'], "rb") as f: 
+            epoch_n_nonzero_tokens = pickle.load(f)
+    elif args['data']['precomputed_n_nonzero_tokens']:
         with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
-            n_nonzero_tokens= pickle.load(f)
+            n_nonzero_tokens = pickle.load(f)
     else:
         n_nonzero_tokens = None
-        print(n_nonzero_tokens)
 
     # Load token dict and get token dict-specfic params
     with open(token_dict_folder_path, 'rb') as file:
@@ -285,28 +287,63 @@ def train(args: dict,
             targets_list=targets_list)
     
     # Initialize train and test datasets, dataloaders and samplers
-    train_cell_dataset = make_cell_dataset(
-        dataset=train_dataset,
-        vocab_size=vocab_size,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
-        tokenizer_type=tokenizer_type,
-        gt_type=gt_type,
-        special_tokens=special_tokens,
-        sampling_strategy=sampling_strategy,
-        n_nonzero_tokens_list=n_nonzero_tokens)
+    if isinstance(train_dataset, list):
+        train_cell_datasets = []
+        for d, nz in zip(train_dataset, epoch_n_nonzero_tokens):
+            cell_d = make_cell_dataset(
+                dataset=d,
+                vocab_size=vocab_size,
+                seq_len_cell=seq_len_cell,
+                seq_len_neighborhood=seq_len_neighborhood,
+                tokenizer_type=tokenizer_type,
+                gt_type=gt_type,
+                special_tokens=special_tokens,
+                sampling_strategy=sampling_strategy,
+                n_nonzero_tokens_list=nz)
+            train_cell_datasets.append(cell_d)
 
-    train_loader, train_sampler = init_dataloader_and_sampler(
-        cell_dataset=train_cell_dataset,
-        batch_size=batch_size,
-        distributed=True,
-        world_size=world_size,
-        rank=rank,
-        collate_fn=mask_collator,
-        pin_memory=pin_memory,
-        num_workers=num_workers,
-        drop_last=False,
-        persistent_workers=False)
+    else:
+        train_cell_dataset = make_cell_dataset(
+            dataset=train_dataset,
+            vocab_size=vocab_size,
+            seq_len_cell=seq_len_cell,
+            seq_len_neighborhood=seq_len_neighborhood,
+            tokenizer_type=tokenizer_type,
+            gt_type=gt_type,
+            special_tokens=special_tokens,
+            sampling_strategy=sampling_strategy,
+            n_nonzero_tokens_list=n_nonzero_tokens)
+
+    if isinstance(train_dataset, list):
+        train_loaders = []
+        train_samplers = []
+        for cell_d in train_cell_datasets:
+            train_loader, train_sampler = init_dataloader_and_sampler(
+                cell_dataset=cell_d,
+                batch_size=batch_size,
+                distributed=True,
+                world_size=world_size,
+                rank=rank,
+                collate_fn=mask_collator,
+                pin_memory=pin_memory,
+                num_workers=num_workers,
+                drop_last=False,
+                persistent_workers=False)
+            train_loaders.append(train_loader)
+            train_samplers.append(train_sampler)
+
+    else:
+        train_loader, train_sampler = init_dataloader_and_sampler(
+            cell_dataset=train_cell_dataset,
+            batch_size=batch_size,
+            distributed=True,
+            world_size=world_size,
+            rank=rank,
+            collate_fn=mask_collator,
+            pin_memory=pin_memory,
+            num_workers=num_workers,
+            drop_last=False,
+            persistent_workers=False)
 
     ipe = len(train_loader)
 
@@ -370,6 +407,7 @@ def train(args: dict,
                      'opt': optimizer.state_dict(),
                      'scaler': None if scaler is None else scaler.state_dict(),
                      'epoch': epoch,
+                     'zero_epoch_tracking': True,
                      'loss': loss_meter.avg,
                      'batch_size': batch_size,
                      'world_size': world_size,
@@ -384,7 +422,11 @@ def train(args: dict,
 
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
-        logger.info(f"Epoch {epoch + 1}")
+        if isinstance(train_dataset, list):
+            logger.info(f"Using train loader and sampler from epoch {epoch}.")
+            train_loader = train_loaders[epoch]
+            train_sampler = train_samplers[epoch] 
+        logger.info(f"Epoch {epoch}")
 
         # Update distributed dataloader epoch
         train_sampler.set_epoch(epoch)
@@ -394,8 +436,7 @@ def train(args: dict,
         maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(
-        train_loader):
+        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
             if gt_type == 'rank':
@@ -516,7 +557,13 @@ def train(args: dict,
                     scaler.unscale_(optimizer)
                 else:
                     loss.backward()
-                if (itr > (warmup * ipe)) and (clip_grad is not None):
+                if warmup >= 1: # iteration-based clipping didn't always work # TODO
+                    if (epoch >= warmup) and (clip_grad is not None):
+                        _enc_norm = torch.nn.utils.clip_grad_norm_(
+                            encoder.parameters(), clip_grad)
+                        _pred_norm = torch.nn.utils.clip_grad_norm_(
+                            predictor.parameters(), clip_grad)
+                elif (itr > (warmup * ipe)) and (clip_grad is not None):
                     _enc_norm = torch.nn.utils.clip_grad_norm_(
                         encoder.parameters(), clip_grad)
                     _pred_norm = torch.nn.utils.clip_grad_norm_(
@@ -540,6 +587,7 @@ def train(args: dict,
                         param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
                 return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
+
             (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
                 train_step)
             loss_meter.update(loss)
@@ -547,7 +595,7 @@ def train(args: dict,
 
             # Logging
             #def log_stats():
-            #    csv_logger.log(epoch + 1,
+            #    csv_logger.log(epoch,
             #                   itr,
             #                   loss,
             #                   grad_stats.global_norm,
@@ -561,7 +609,7 @@ def train(args: dict,
             #                    '[wd: %.2e] [lr: %.2e] '
             #                    '[mem: %.2e] '
             #                    '(%.1f ms)'
-            #                    % (epoch + 1, itr,
+            #                    % (epoch, itr,
             #                       loss_meter.avg,
             #                       maskA_meter.avg,
             #                       maskB_meter.avg,
@@ -573,7 +621,7 @@ def train(args: dict,
             #        if grad_stats is not None:
             #            logger.info(
             #                '[%d, %5d] grad_stats: [%.2e %.2e] (%.2e, %.2e)'
-            #                % (epoch + 1, itr,
+            #                % (epoch, itr,
             #                grad_stats.first_layer,
             #                grad_stats.last_layer,
             #                grad_stats.min,
@@ -591,8 +639,8 @@ def train(args: dict,
             assert not np.isnan(loss), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
-                save_checkpoint(epoch + 1, itr // checkpoint_freq_iter)
+                save_checkpoint(epoch, itr // checkpoint_freq_iter)
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch + 1)
+        save_checkpoint(epoch)

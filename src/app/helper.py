@@ -84,7 +84,10 @@ def load_checkpoint(device: str,
         checkpoint = torch.load(
             r_path, map_location=torch.device(device))
 
-        epoch = checkpoint['epoch']
+        if 'zero_epoch_tracking' in checkpoint.keys():
+            epoch = checkpoint['epoch']
+        else: # just for backwards compatibility of old epoch tracking
+            epoch = checkpoint['epoch'] - 1
 
         # Load state into context encoder
         if encoder is not None:
