@@ -386,7 +386,7 @@ def train(args: dict,
     start_epoch = 0
     # Load training checkpoint
     if load_model:
-        encoder, predictor, target_encoder, optimizer, scaler, start_epoch = load_checkpoint(
+        encoder, predictor, target_encoder, optimizer, scaler, start_epoch, iter_number = load_checkpoint(
             device=device,
             r_path=load_path,
             encoder=encoder,
@@ -398,7 +398,7 @@ def train(args: dict,
             scheduler.step()
             wd_scheduler.step()
             next(momentum_scheduler)
-            mask_collator.step()
+            #mask_collator.step()
 
     def save_checkpoint(epoch, iter_number=None):
         save_dict = {'encoder': encoder.state_dict(),
@@ -412,6 +412,8 @@ def train(args: dict,
                      'batch_size': batch_size,
                      'world_size': world_size,
                      'lr': lr}
+        if iter_number is not None:
+            save_dict['iter_number'] = iter_number
         if rank == 0:
             torch.save(save_dict, latest_path)
             if (epoch) % checkpoint_freq == 0:
@@ -437,6 +439,9 @@ def train(args: dict,
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
+            #if iter_number is not None:
+            #    if itr < iter_number:
+            #        continue
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
             if gt_type == 'rank':

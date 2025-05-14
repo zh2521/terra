@@ -293,7 +293,7 @@ def infer(args: dict,
         drop_last=False,
         persistent_workers=False)
     
-    _, _, target_encoder, _, _, start_epoch = load_checkpoint(
+    _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
             device=device,
             r_path=load_path,
             encoder=None,
@@ -839,7 +839,7 @@ def embed_dataset(dataset: Dataset,
         persistent_workers=False)
 
     # Load model checkpoint
-    _, _, target_encoder, _, _, start_epoch = load_checkpoint(
+    _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
             device=device,
             r_path=model_checkpoint_path,
             encoder=None,

@@ -11,6 +11,7 @@ import sys
 from typing import Literal
 
 import torch
+#from peft import get_peft_model, LoraConfig
 
 import nichejepa.models.gene_transformers as gt
 from nichejepa.models.multimask import (EncoderMultiMaskWrapper,
@@ -23,6 +24,13 @@ from nichejepa.utils.schedulers import (CosineWDSchedule,
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
+"""
+def apply_peft(model, peft_method='lora', rank=8):
+    if peft_method == 'lora':
+        peft_config = LoraConfig(r=rank)
+        model = get_peft_model(model, peft_config)
+    return model
+"""
 
 def load_checkpoint(device: str,
                     r_path: str,
@@ -83,11 +91,17 @@ def load_checkpoint(device: str,
     try:
         checkpoint = torch.load(
             r_path, map_location=torch.device(device))
-
-        if 'zero_epoch_tracking' in checkpoint.keys():
+        
+        if ('zero_epoch_tracking' in checkpoint.keys()) and not ('iter_number' in checkpoint.keys()):
+            epoch = checkpoint['epoch'] + 1
+        else: # just for backwards compatibility
             epoch = checkpoint['epoch']
-        else: # just for backwards compatibility of old epoch tracking
-            epoch = checkpoint['epoch'] - 1
+
+        # TO DO: Update
+        if 'iter_number' in checkpoint.keys():
+            iter_number = checkpoint['iter_number']
+        else:
+            iter_number = None
 
         # Load state into context encoder
         if encoder is not None:
@@ -131,7 +145,7 @@ def load_checkpoint(device: str,
         logger.info(f'Encountered exception when loading checkpoint: {e}.')
         epoch = 0
 
-    return encoder, predictor, target_encoder, opt, scaler, epoch
+    return encoder, predictor, target_encoder, opt, scaler, epoch, iter_number
 
 
 def init_model(gt_type: Literal['rank', 'count'],
