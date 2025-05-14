@@ -144,6 +144,7 @@ def load_checkpoint(device: str,
     except Exception as e:
         logger.info(f'Encountered exception when loading checkpoint: {e}.')
         epoch = 0
+        iter_number = None
 
     return encoder, predictor, target_encoder, opt, scaler, epoch, iter_number
 
@@ -224,7 +225,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         use_layer_norm=use_layer_norm,
         api_version=api_version)
     if api_version == 'v3':
-        encoder = EncoderMultiMaskWrapper(encoder)
+        encoder = EncoderMultiMaskWrapper(encoder, encoder_type=gt_type)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
         n_special_values=n_special_values,
@@ -239,7 +240,7 @@ def init_model(gt_type: Literal['rank', 'count'],
         use_layer_norm=use_layer_norm,
         api_version=api_version)
     if api_version == 'v3':
-        predictor = PredictorMultiMaskWrapper(predictor)
+        predictor = PredictorMultiMaskWrapper(predictor, predictor_type=gt_type)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):

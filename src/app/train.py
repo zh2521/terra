@@ -467,7 +467,7 @@ def train(args: dict,
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                         if gt_type == 'rank':
-                            h, _ = target_encoder(
+                            h, _, _ = target_encoder(
                                 tokens=tokens,
                                 segments=segments,
                                 positions=positions,
@@ -499,7 +499,7 @@ def train(args: dict,
                     # minmum context size in the batch after removal of
                     # overlapping targets
                     if gt_type == 'rank':
-                        z, pos_emb, seg_emb, token_emb = encoder(
+                        z, pos_emb, token_emb = encoder(
                             positions=positions,
                             segments=segments,
                             tokens=tokens,
