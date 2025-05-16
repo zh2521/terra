@@ -6,6 +6,8 @@ https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transforme
 (05.06.2024).
 """
 
+from typing import Literal
+
 import torch
 import torch.nn as nn
 from torch.nn.attention import SDPBackend, sdpa_kernel
@@ -213,7 +215,10 @@ class ClassificationModel(nn.Module):
     for classification based on the output of a base model.
     """
 
-    def __init__(self, base_model: nn.Module, num_classes: int, use_mlp: bool = False, hidden_dim: int = 512):
+    def __init__(self,
+                 base_model: nn.Module,
+                 gt_type: Literal['rank', 'counts'],
+                 num_classes: int, use_mlp: bool = False, hidden_dim: int = 512):
         """
         Initialize the classification head.
 
@@ -231,6 +236,7 @@ class ClassificationModel(nn.Module):
         super(ClassificationModel, self).__init__()
 
         self.base_model = base_model
+        self.gt_type = gt_type
 
         if use_mlp:
             # Using MLP with one hidden layer
@@ -243,7 +249,7 @@ class ClassificationModel(nn.Module):
             # Using a simple linear layer
             self.classification_head = nn.Linear(base_model.output_dim, num_classes)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, **base_model_kwargs) -> torch.Tensor:
         """
         Forward pass through the classification head.
 
@@ -253,8 +259,15 @@ class ClassificationModel(nn.Module):
         Returns:
         - Tensor: The class logits.
         """
-        features = self.base_model(x)
-        logits = self.classification_head(features)
+        if self.gt_type == 'rank':
+            h, _, _ = self.base_model(**base_model_kwargs)
+        elif self.gt_type == 'counts':
+            h, _ = self.base_model(**base_model_kwargs)
+
+        # Normalize over feature dim
+        h = F.layer_norm(h, (h.size(-1),))
+        
+        logits = self.classification_head(h)
         return logits
 
 

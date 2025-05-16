@@ -1,3 +1,17 @@
+import logging
+import yaml
+from typing import Literal
+
+import anndata as ad
+import torch
+from tqdm import tqdm
+
+from app.helper import init_model, load_checkpoint
+from nichejepa.datasets.cell_datasets import CellBaseDataset
+from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
+from nichejepa.models.modules import ClassificationModel
+
+
 @torch.no_grad()
 def finetune(args: dict,
              dataset: CellBaseDataset,
@@ -14,6 +28,7 @@ def finetune(args: dict,
                 masked_tokens: list[int] | None = None,
                 agg_excluded_tokens: list[int] | None = None,
                 feature_norm: bool = False,
+                use_peft: bool = False,
                 ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -174,7 +189,7 @@ def finetune(args: dict,
     load_path = (os.path.join(load_folder_path, r_file) if r_file is not None 
         else latest_path)
 
-    # Initialize encoder, predictor, and target encoder
+    # Initialize target encoder
     target_encoder, _ = init_model(
         gt_type=gt_type,
         count_encoding=count_encoding,
@@ -192,33 +207,13 @@ def finetune(args: dict,
         num_heads=num_heads,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
+        use_layer_norm=use_layer_norm,
         api_version=api_version)
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
     else:
         return_layer_emb_fn = target_encoder.backbone.return_layer_emb
-
-    # Initialize mask collator
-    if block_masking:
-       mask_collator = BlockMaskCollator(
-            n_targets=n_targets,
-            n_contexts=n_contexts,
-            n_segments=n_segments,
-            seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood,
-            n_special_tokens=n_special_tokens,
-            per_block_mask_ratio=per_block_mask_ratio)
-    elif cell_masking:
-       mask_collator = CellMaskCollator(
-            n_targets=n_targets,
-            n_contexts=n_contexts,
-            n_segments=n_segments,
-            seq_len_cell=seq_len_cell,
-            seq_len_neighborhood=seq_len_neighborhood,
-            n_special_tokens=n_special_tokens,
-            per_block_mask_ratio=per_block_mask_ratio,
-            targets_list=targets_list)
 
     # Initialize train and test datasets, dataloaders and samplers
     cell_dataset = make_cell_dataset(
@@ -244,7 +239,7 @@ def finetune(args: dict,
         drop_last=False,
         persistent_workers=False)
     
-    _, _, target_encoder, _, _, start_epoch = load_checkpoint(
+    _, _, target_encoder, _, _, start_epoch_ iter_number = load_checkpoint(
             device=device,
             r_path=load_path,
             encoder=None,
@@ -255,10 +250,11 @@ def finetune(args: dict,
             is_training=False)
     
     # Apply PEFT
-    target_encoder = apply_peft(target_encoder, peft_method='lora', rank=8)
+    if use_peft:
+        target_encoder = apply_peft(target_encoder, peft_method='lora', rank=8)
 
     # Convert target encoder to a classification model
-    model = ClassificationModel(target_encoder, num_classes)
+    model = ClassificationModel(target_encoder, gt_type, num_classes)
     model.to(device)
 
     # Loss function
@@ -268,6 +264,8 @@ def finetune(args: dict,
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
 
+    def save_checkpoint():
+
     # Run training loop
     for epoch in range(num_epochs):
         logger.info(f"Epoch {epoch}")
@@ -275,10 +273,10 @@ def finetune(args: dict,
         correct_preds = 0
         total_preds = 0
 
-        # Update distributed dataloader epoch
-        train_sampler.set_epoch(epoch)
+        for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
 
-        for itr, (udata, _, _, masks_attention) in enumerate(train_loader):
+            optimizer.zero_grad()
+
             tokens = udata[0].to(device, non_blocking=True)
             segments = udata[1].to(device, non_blocking=True)
             if gt_type == 'rank':
@@ -287,59 +285,51 @@ def finetune(args: dict,
                 counts = udata[2].to(device, non_blocking=True)
             masks_attention = masks_attention.to(device, non_blocking=True)
 
-                    # Target encorder forward pass with output dim 
-                    # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                    if gt_type == 'rank':
-                        h, _ = target_encoder(
-                            tokens=tokens,
-                            segments=segments,
-                            positions=positions,
-                            masks_attention=masks_attention)
-                    elif gt_type == 'counts':
-                        h, _ = target_encoder(
-                            tokens=tokens,
-                            segments=segments,
-                            counts=counts,
-                            masks_attention=masks_attention)
+            # Get class logits
+            if gt_type == 'rank':
+                logits = model(
+                    tokens=tokens,
+                    segments=segments,
+                    positions=positions,
+                    masks_attention=masks_attention)
+            elif gt_type == 'counts':
+                logits = model(
+                    tokens=tokens,
+                    segments=segments,
+                    counts=counts,
+                    masks_attention=masks_attention)
 
-                    # Normalize over feature dim
-                    h = F.layer_norm(h, (h.size(-1),))
+            # Forward pass
+            loss = criterion(logits, labels)  # Compute the loss
 
-                    return h
+            # Backward pass and optimization
+            loss.backward()
+            optimizer.step()
 
-                    # Forward pass
-                    optimizer.zero_grad()
-                    logits = model(inputs)  # Get class logits
-                    loss = criterion(logits, labels)  # Compute the loss
+            # Track statistics
+            running_loss += loss.item()
+            _, predicted = torch.max(logits, 1)
+            correct_preds += (predicted == labels).sum().item()
+            total_preds += labels.size(0)
 
-                    # Backward pass and optimization
-                    loss.backward()
-                    optimizer.step()
+        epoch_loss = running_loss / len(loader)
+        accuracy = correct_preds / total_preds
+        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}")
 
-                    # Track statistics
-                    running_loss += loss.item()
-                    _, predicted = torch.max(logits, 1)
-                    correct_preds += (predicted == labels).sum().item()
-                    total_preds += labels.size(0)
+    #log_stats()
+    if LOCAL_RANK == 0:
+        wandb.log(
+            {"loss": loss,
+            'lr':_new_lr,
+            'epoch': epoch,
+            'global_norm_enc': grad_stats.global_norm,
+            'global_norm_pred': grad_stats_pred.global_norm,
+            })
+    assert not np.isnan(loss), 'loss is nan'
+    if itr % checkpoint_freq_iter == 0:
+        logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
+        save_checkpoint(epoch, itr // checkpoint_freq_iter)
 
-                epoch_loss = running_loss / len(loader)
-                accuracy = correct_preds / total_preds
-                print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}")
-
-            #log_stats()
-            if LOCAL_RANK == 0:
-                wandb.log(
-                    {"loss": loss,
-                    'lr':_new_lr,
-                    'epoch': epoch,
-                    'global_norm_enc': grad_stats.global_norm,
-                    'global_norm_pred': grad_stats_pred.global_norm,
-                    })
-            assert not np.isnan(loss), 'loss is nan'
-            if itr % checkpoint_freq_iter == 0:
-                logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
-                save_checkpoint(epoch, itr // checkpoint_freq_iter)
-
-        # -- Save Checkpoint after every epoch
-        logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch)
+# Save checkpoint
+logger.info('avg. loss %.3f' % loss_meter.avg)
+save_checkpoint(epoch)

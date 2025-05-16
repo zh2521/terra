@@ -14,7 +14,7 @@ import pandas as pd
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-from datasets import Dataset, load_from_disk
+from datasets import Dataset
 from tqdm import tqdm
 from pyensembl import EnsemblRelease
 
