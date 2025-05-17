@@ -70,6 +70,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         normalization.
     api_version:
         Version of the API to use.
+    sep_gene_tokens_neb:
+        If `True`, use separate gene tokens for neighborhood.
     """
     def __init__(self,
                  vocab_size: int,
@@ -91,6 +93,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  use_flash_attention: bool = True,
                  use_layer_norm: bool = True,
                  api_version: Literal['v1', 'v2', 'v3'] = 'v3',
+                 sep_gene_tokens_neb: bool = False,
                  **kwargs
                  ):
         super().__init__()
@@ -102,10 +105,11 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.num_heads = num_heads
         self.init_std = init_std
         self.api_version = api_version
+        self.sep_gene_tokens_neb = sep_gene_tokens_neb
             
         # Initialize token embeddings
         self.token_embed = nn.Embedding(
-            vocab_size, # already includes <pad>
+            vocab_size + (vocab_size if sep_gene_tokens_neb else 0), # already includes <pad>
             embed_dim,
             padding_idx=0)
 

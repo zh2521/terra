@@ -160,6 +160,11 @@ def infer(args: dict,
     n_segments = args['data']['n_segments']
     MAX_OCC = args['data']['n_segments'] -1 
 
+    if 'sep_gene_tokens_neb' in args['data'].keys():
+        sep_gene_tokens_neb = args['data']['sep_gene_tokens_neb']
+    else:
+        sep_gene_tokens_neb = False
+
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
     block_masking = args['mask']['block_masking']
@@ -241,7 +246,8 @@ def infer(args: dict,
         num_heads=num_heads,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
-        api_version=api_version)
+        api_version=api_version,
+        sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
@@ -279,7 +285,8 @@ def infer(args: dict,
         gt_type=gt_type,
         special_tokens=special_tokens,
         sampling_strategy=None,
-        n_nonzero_tokens_list=n_nonzero_tokens)
+        n_nonzero_tokens_list=n_nonzero_tokens,
+        sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     loader = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
@@ -800,7 +807,8 @@ def embed_dataset(dataset: Dataset,
         pred_emb_dim=model_config['meta']['pred_emb_dim'],
         pred_depth=model_config['meta']['pred_depth'],
         num_heads=model_config['meta']['num_heads'],
-        use_flash_attention=model_config['meta']['use_flash_attention'])
+        use_flash_attention=model_config['meta']['use_flash_attention'],
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Create mask collator
     mask_collator = BlockMaskCollator(
@@ -823,7 +831,8 @@ def embed_dataset(dataset: Dataset,
         gt_type=model_config['meta']['gt_type'],
         special_tokens=model_config['meta']['special_tokens'],
         sampling_strategy=None,
-        n_nonzero_tokens_list=None)
+        n_nonzero_tokens_list=None,
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader
     loader = init_dataloader_and_sampler(

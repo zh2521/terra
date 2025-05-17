@@ -106,6 +106,11 @@ def train(args: dict,
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
 
+    if 'sep_gene_tokens_neb' in args['data'].keys():
+        sep_gene_tokens_neb = args['data']['sep_gene_tokens_neb']
+    else:
+        sep_gene_tokens_neb = False
+
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
     count_encoding = args['meta']['count_encoding']
@@ -262,7 +267,8 @@ def train(args: dict,
         num_heads=num_heads,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
-        use_layer_norm=use_layer_norm)
+        use_layer_norm=use_layer_norm,
+        sep_gene_tokens_neb=sep_gene_tokens_neb)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -299,7 +305,8 @@ def train(args: dict,
                 gt_type=gt_type,
                 special_tokens=special_tokens,
                 sampling_strategy=sampling_strategy,
-                n_nonzero_tokens_list=nz)
+                n_nonzero_tokens_list=nz,
+                sep_gene_tokens_neb=sep_gene_tokens_neb)
             train_cell_datasets.append(cell_d)
 
     else:
@@ -312,7 +319,8 @@ def train(args: dict,
             gt_type=gt_type,
             special_tokens=special_tokens,
             sampling_strategy=sampling_strategy,
-            n_nonzero_tokens_list=n_nonzero_tokens)
+            n_nonzero_tokens_list=n_nonzero_tokens,
+            sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     if isinstance(train_dataset, list):
         train_loaders = []
