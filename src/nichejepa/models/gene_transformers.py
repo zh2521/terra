@@ -479,9 +479,6 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             x = pos_emb + seg_emb + token_emb
             # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN,
             # D: EMBED_DIM
-                
-            # Remove special tokens before encoding
-            x = x[:, self.n_special_tokens:]
 
             # Mask token embeddings if masks are provided
             if masks is not None:
@@ -553,11 +550,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         x = pos_emb + seg_emb + token_emb
         #B, N, D = x.shape
 
-        # Remove special tokens before encoding
-        x = x[:, self.n_special_tokens:]
-
         if pad_neighborhood:
-            x[:, self.seq_len_cell:] = 0
+            x[:, (self.n_special_tokens+self.seq_len_cell):] = 0
 
             masks_attention = masks_attention.expand(
                 masks_attention.shape[0],
@@ -569,8 +563,8 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             masks_attention[
                 :,
                 :,
-                :self.seq_len_cell,
-                self.seq_len_cell:] = 0
+                self.n_special_tokens:(self.n_special_tokens+self.seq_len_cell),
+                (self.n_special_tokens+self.seq_len_cell):] = 0
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -696,9 +690,6 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         # Add gene token and segment embeddings to value embeddings
         x = token_emb + seg_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
-            
-        # Remove special tokens before encoding
-        x = x[:, self.n_special_tokens:]
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -783,11 +774,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         x = token_emb + seg_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
-        # Remove special tokens before encoding
-        x = x[:, self.n_special_tokens:]
-
         if pad_neighborhood:
-            x[:, self.seq_len_cell:] = 0
+            x[:, (self.n_special_tokens+self.seq_len_cell):] = 0
 
             masks_attention = masks_attention.expand(
                 masks_attention.shape[0],
@@ -799,8 +787,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             masks_attention[
                 :,
                 :,
-                :self.seq_len_cell,
-                self.seq_len_cell:] = 0
+                self.n_special_tokens:(self.n_special_tokens+self.seq_len_cell),
+                (self.n_special_tokens+self.seq_len_cell):] = 0
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -897,16 +885,6 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # Get segment and special value embeddings
             seg_embed = self.seg_embed(segments)
 
-            # Retrieve special token embedding
-            x_special = (
-                pos_embed[:, :self.n_special_tokens] +
-                seg_embed[:, :self.n_special_tokens] +
-                token_embed[:, :self.n_special_tokens])
-
-            # Remove special tokens
-            pos_embed = pos_embed[:, self.n_special_tokens:]
-            seg_embed = seg_embed[:, self.n_special_tokens:]
-
             # Add positional embeddings to tokens from context masks
             # (only keep context mask indices and sum positional and
             # segment embeddings without token embeddings)
@@ -933,14 +911,12 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
             # Repeat context embeddings for all target masks
             z = z.repeat(len(masks_pred), 1, 1)
-            x_special = x_special.repeat(len(masks_pred), 1, 1)
 
             # Concatenate mask tokens and context embeddings of gene
             # tokens
             z = torch.cat([
-                pred_tokens, # target gene tokens (excl. special tokens)
-                x_special, # special_tokens,
-                z # context gene tokens (excl. special tokens)
+                pred_tokens, # target gene tokens (incl. special tokens)
+                z # context gene tokens (incl. special tokens)
                 ], dim=1)
 
             # Run forward prop
@@ -1049,16 +1025,6 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         sp_value_embed = self.special_value_embed(
             counts[:, :self.n_special_tokens].int())
 
-        # Retrieve special token embedding
-        x_special = (
-            token_embed[:, :self.n_special_tokens] +
-            seg_embed[:, :self.n_special_tokens] +
-            sp_value_embed)
-
-        # Remove special tokens
-        token_embed = token_embed[:, self.n_special_tokens:]
-        seg_embed = seg_embed[:, self.n_special_tokens:]
-
         # Add positional embeddings to tokens from context masks (only
         # keep context mask indices and sum positional and segment
         # embeddings without token embeddings)
@@ -1085,13 +1051,11 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
         # Repeat context embeddings for all target masks
         z = z.repeat(len(masks_pred), 1, 1)
-        x_special = x_special.repeat(len(masks_pred), 1, 1)
 
         # Concatenate mask tokens and context embeddings of gene tokens
         z = torch.cat([
-            pred_tokens, # target gene tokens (excl. special tokens)
-            x_special, # special_tokens,
-            z # context gene tokens (excl. special tokens)
+            pred_tokens, # target gene tokens (incl. special tokens)
+            z # context gene tokens (incl. special tokens)
             ], dim=1)
 
         # Run forward prop
