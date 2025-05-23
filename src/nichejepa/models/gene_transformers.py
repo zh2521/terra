@@ -785,12 +785,11 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
         # Pad special tokens
-        x[:, :self.n_special_tokens, :] = 0
-
-        masks_attention[:,
-                        :,
-                        :,
-                        :self.n_special_tokens] = 0
+        #x[:, :self.n_special_tokens, :] = 0
+        #masks_attention[:,
+        #                :,
+        #                :,
+        #                :self.n_special_tokens] = 0
 
         if pad_neighborhood:
             x[:, (self.n_special_tokens+self.seq_len_cell):] = 0
