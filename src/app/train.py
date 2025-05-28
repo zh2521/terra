@@ -447,13 +447,8 @@ def train(args: dict,
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            #if iter_number is not None:
-            #    if itr < iter_number:
-            #        continue
-            tokens = udata[0].to(device, non_blocking=True)
-            segments = udata[1].to(device, non_blocking=True)
-            positions = udata[2].to(device, non_blocking=True)
-            counts = udata[3].to(device, non_blocking=True)
+            for key in udata.keys():
+                udata[key] = udata[key].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -472,11 +467,8 @@ def train(args: dict,
                         # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                        h = target_encoder(
-                            tokens=tokens,
-                            segments=segments,
-                            positions=positions,
-                            counts=counts,
+                        h, _ = target_encoder(
+                            udata=udata,
                             masks_attention=masks_attention)
 
                         # Normalize over feature dim
@@ -498,20 +490,15 @@ def train(args: dict,
                     # MIN_CONTEXT_SIZE, EMB_DIM) where MIN_CONTEXT_SIZE is
                     # minmum context size in the batch after removal of
                     # overlapping targets                     
-                    z = encoder(
-                        positions=positions,
-                        segments=segments,
-                        tokens=tokens,
-                        counts=counts,
+                    z, udata = encoder(
+                        udata=udata,
                         masks=masks_enc,
                         masks_attention=None)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     z = predictor(z=z,
-                                  positions=positions,
-                                  segments=segments,
-                                  counts=counts,
+                                  udata=udata,
                                   masks_enc=masks_enc,
                                   masks_pred=masks_pred,
                                   masks_attention=None)
