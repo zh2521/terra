@@ -5,6 +5,7 @@
 #SBATCH --gres=gpu:4            # Request 4 GPUs
 #SBATCH --constraint=h100_80gb  # Request specific GPU type
 #SBATCH --mem-per-gpu=64G      # Memory per GPU
+#SBATCH --cpus-per-task=4
 #SBATCH --time=48:00:00         # Walltime
 #SBATCH --output=logs/%x_%j.out # Log file with job name and ID
 #SBATCH --error=logs/%x_%j.err  # Error log
