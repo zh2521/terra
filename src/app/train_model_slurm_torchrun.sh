@@ -9,12 +9,12 @@
 #SBATCH --mem=480G
 #SBATCH --constraint=h100_80gb
 #SBATCH --time=48:00:00
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
+#SBATCH --output=/home/aih/sebastian.birk/workspace/projects/nichejepa-reproducibility/logs/hst_corpus_70m/slurm_logs/%x_%j.out
+#SBATCH --error=/home/aih/sebastian.birk/workspace/projects/nichejepa-reproducibility/logs/hst_corpus_70m/slurm_logs/%x_%j.err
 
 # Set experiment identifiers (optional: used in your script)
 export EXPERIMENT_NAME="hst_corpus_70m"
-export RUN_NAME="gtsmall_combined_1000"
+export RUN_NAME="gtsmall_combined_1002"
 
 export RDZV_HOST=$(hostname)
 export RDZV_PORT=29400
@@ -31,7 +31,7 @@ echo "Using Python: $(which python)"
 echo "Using Torchrun: $(which torchrun)"
 
 srun torchrun \
-  --nproc_per_node=2 \
+  --nproc_per_node=4 \
   --rdzv_id=$SLURM_JOB_ID \
   --rdzv_backend=c10d \
   --rdzv_endpoint="$RDZV_HOST:$RDZV_PORT" \
