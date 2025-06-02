@@ -14,7 +14,7 @@
 
 # Set experiment identifiers (optional: used in your script)
 export EXPERIMENT_NAME="hst_corpus_70m"
-export RUN_NAME="gtsmall_combined_1002"
+export RUN_NAME="gtsmall_subsample_combined_2"
 
 export RDZV_HOST=$(hostname)
 export RDZV_PORT=29400
