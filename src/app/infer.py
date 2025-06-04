@@ -29,7 +29,8 @@ from nichejepa.utils.embedding import (create_binary_selection_mask,
                                        compute_unmasked_rank_based_weights,
                                        collect_adata_from_folder,
                                        retrieve_gene_emb,
-                                       compute_count_mean_cosine_sim)
+                                       compute_count_mean_cosine_sim,
+                                       compute_sum_and_nonzero_count)
 from nichejepa.utils.logging import CSVLogger
 
 
@@ -63,6 +64,8 @@ def infer(args: dict,
           return_gene: bool=True,
           return_cosine_sim: bool=False,
           compute_cosine_with: str='neighborhood',
+          return_gene_per_data: bool=False,
+
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -104,6 +107,8 @@ def infer(args: dict,
     compute_cosine_with:
        If set to 'neighborhood', it will compute the cosine similarity between each cell and its neighborhood. 
        If set to 'cell', it will compute the cosine similarity between cells itself.
+    return_gene_per_data:
+        If 'True' will return gene_embedding for each gene per dataset.
     Returns
     -----------
     adata:
@@ -317,6 +322,8 @@ def infer(args: dict,
     all_neighborhood_emb_list = []
     all_cell_gene_emb_dict = {}
     all_neighborhood_gene_emb_dict = {}
+    all_cell_gene_emb_per_data_dict = {}
+    all_neighborhood_gene_emb_per_data_dict = {}
 
     for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
         for key in udata.keys():
@@ -420,13 +427,13 @@ def infer(args: dict,
 
             # Store cell and neighborhood gene embeddings of last layer
             if i == (len(neighborhood_emb_list) - 1):
-                emb = n_emb
+                emb = c_emb
                 if len(cell_gene_ids) != 0 or len(neighborhood_gene_ids) != 0 :
                     if itr == 0 or itr == len(loader)-1:
                         cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
                         cell_presence = torch.zeros((emb.shape[0], len(cell_gene_ids)), device=emb.device)
-                        neb_occ_list: List[torch.Tensor] = []
-                        neb_occ_mask_list: List[torch.Tensor] = []
+                        neb_occ_list  = []
+                        neb_occ_mask_list = []
                         neb_presence = torch.zeros((emb.shape[0], len(neighborhood_gene_ids)), device=emb.device)
                     else:
                         cell_embs.zero_()
@@ -447,10 +454,18 @@ def infer(args: dict,
                     cell_presence[:, j] = gene_presence_local.float()
                     if return_gene:
                         if itr == 0:
-                            all_cell_gene_emb_dict[gene_id] = [cell_embs[:, j, :]]
+                            all_cell_gene_emb_dict[gene_id] = [cell_embs[:, j, :].clone()]
                         else:
-                            all_cell_gene_emb_dict[gene_id].append(cell_embs[:, j, :])
+                            all_cell_gene_emb_dict[gene_id].append(cell_embs[:, j, :].clone())
+                    if return_gene_per_data:
+                        gene_sum, gene_count = compute_sum_and_nonzero_count(cell_embs[:, j, :])
+                        if itr == 0:
+                            all_cell_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
+                        else:
+                            all_cell_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
+                            all_cell_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
                 # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
+                emb = n_emb
                 for j, gene_id in enumerate(neighborhood_gene_ids):
                     gene_occ, occ_mask, gene_presence_local = retrieve_gene_emb(
                         ns_tokens=ns_tokens,
@@ -471,6 +486,13 @@ def infer(args: dict,
                         else:
                             #all_neighborhood_gene_emb_dict[gene_id].append(gene_occ * occ_mask.unsqueeze(-1))
                             all_neighborhood_gene_emb_dict[gene_id].append(compute_mean_unmasked_emb(gene_occ,occ_mask))
+                    if return_gene_per_data:
+                        gene_sum, gene_count = compute_sum_and_nonzero_count(compute_mean_unmasked_emb(gene_occ,occ_mask))
+                        if itr == 0:
+                            all_neighborhood_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
+                        else:
+                            all_neighborhood_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
+                            all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
                 # Stack neighborhood gene occurrence tensors along gene dimension:
                 # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
                 if len(neighborhood_gene_ids) != 0 and return_cosine_sim:
@@ -479,11 +501,12 @@ def infer(args: dict,
                 # Compute cosine similarity components using our function for multiple occurrences.
                 if return_cosine_sim:
                     if itr == 0:
-                        sum_cos_sim, count = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
+                        sum_cos_sim, pair_count, cell_count = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
                     else:
-                        sum_cos_sim_temp, count_temp = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
+                        sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs, cell_presence, neb_occ_tensor, neb_occ_mask_tensor)
                         sum_cos_sim.add_(sum_cos_sim_temp)
-                        count.add_(count_temp)
+                        pair_count.add_(pair_count_temp)
+                        cell_count.add_(cell_count_temp)
     # Add metadata
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
@@ -525,8 +548,41 @@ def infer(args: dict,
                 dim=0).cpu())
     if return_cosine_sim:
         adata.uns['sum_cos_sim'] = sum_cos_sim.numpy()
-        adata.uns['count'] = count.numpy()
-        adata.uns['cos_sim'] = adata.uns['sum_cos_sim'] / adata.uns['count']
+        adata.uns['cos_sim_pair_count'] = pair_count.numpy()
+        adata.uns['cos_sim_cell_count'] = cell_count.numpy()
+        adata.uns['cos_sim'] = adata.uns['sum_cos_sim'] / adata.uns['cos_sim_pair_count']
+    if return_gene_per_data:
+        # Concatenate features for cell and neighborhood gene embeddings
+        cell_gene_emb_features = []
+        cell_gene_emb_counts = []
+
+        neighborhood_gene_emb_features = []
+        neighborhood_gene_emb_counts = []
+
+        for gene_id in cell_gene_ids:
+            if gene_id in all_cell_gene_emb_per_data_dict.keys():
+                sum_emb = all_cell_gene_emb_per_data_dict[gene_id][0].numpy()
+                count_emb = all_cell_gene_emb_per_data_dict[gene_id][1].numpy()
+                cell_gene_emb_features.append((sum_emb / count_emb).reshape(1, -1))
+                cell_gene_emb_counts.append(count_emb.reshape(1, -1))
+
+        for gene_id in neighborhood_gene_ids:
+            if gene_id in all_neighborhood_gene_emb_per_data_dict.keys():
+                sum_emb = all_neighborhood_gene_emb_per_data_dict[gene_id][0].numpy()
+                count_emb = all_neighborhood_gene_emb_per_data_dict[gene_id][1].numpy()
+                neighborhood_gene_emb_features.append((sum_emb / count_emb).reshape(1, -1))
+                neighborhood_gene_emb_counts.append(count_emb.reshape(1, -1))
+
+        # Concatenate all features, sums, and counts into single numpy arrays
+        adata.uns['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
+        adata.uns['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+
+        adata.uns['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
+        adata.uns['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    if len(cell_gene_ids) != 0:
+        adata.uns['cell_gene_ids']=np.array(cell_gene_ids)
+    if len(neighborhood_gene_ids) != 0:
+        adata.uns['neighborhood_gene_ids']=np.array(neighborhood_gene_ids)
 
     return adata
 

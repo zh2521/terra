@@ -10,6 +10,48 @@ import torch
 import torch.nn.functional as F
 
 
+def compute_sum_and_nonzero_count(
+    mat: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute the sum of non-zero rows for each  2D tensor,
+    and the total number of rows that have at least one non-zero entry.
+
+    Parameters
+    -----------
+    mat:
+        A 2D tensor of shape (num_rows, feature_dim).
+
+    Returns
+    -----------
+    col_nonzero_sum:
+        A 1D tensor of shape (feature_dim,) where each element is the sum
+        of the non-zero entries in that feature dimension.
+    nonzero_col_count:
+        A 0-dim tensor (scalar) equal to the count of rows in which
+        at least one element is non-zero.
+
+    Raises
+    -----------
+    ValueError:
+        If `mat` is not a 2D tensor.
+    """
+    # 1) Check that mat is 2D
+    if mat.dim() != 2:
+        raise ValueError(
+            f"Expected a 2D tensor for mat, but got {mat.dim()} dimensions."
+        )
+
+    # 2) Build mask of nonzero entries
+    nonzero_mask = mat != 0
+    # 3) Sum nonzeros along the ROW dimension → gives one sum per COLUMN
+    row_nonzero_sum = mat.masked_fill(~nonzero_mask, 0.0).sum(dim=0)
+
+    # 4) Count how many columns have at least one non-zero
+    nonzero_row_count = nonzero_mask.any(dim=1).sum()
+
+    return row_nonzero_sum, nonzero_row_count
+
 def compute_running_mean_cosine_mult_occ(
         cell_embs: torch.Tensor,
         cell_presence: torch.Tensor,
