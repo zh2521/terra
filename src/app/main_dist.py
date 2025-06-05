@@ -1,5 +1,6 @@
 import os
 import torch
+
 import logging
 import torch.distributed as dist
 from app.train import train
@@ -16,6 +17,7 @@ import warnings
 from datetime import datetime
 from datetime import timedelta
 import random
+from socket import gethostname
 
 warnings.filterwarnings("ignore")
 # logger
@@ -32,6 +34,14 @@ def get_distributed_info():
     Returns:
         tuple: (WORLD_RANK, LOCAL_RANK, WORLD_SIZE)
     """
+    if "SLURM_PROCID" in os.environ:
+        WORLD_RANK = int(os.environ["SLURM_PROCID"])
+        WORLD_SIZE = int(os.environ["WORLD_SIZE"])
+        GPUS_PER_NODE = int(os.environ["SLURM_GPUS_ON_NODE"])
+        assert GPUS_PER_NODE == torch.cuda.device_count()
+        print(f"Hello from rank {WORLD_RANK} of {WORLD_SIZE} on {gethostname()} where there are" \
+            f" {GPUS_PER_NODE} allocated GPUs per node.", flush=True)
+        LOCAL_RANK = WORLD_RANK - GPUS_PER_NODE * (WORLD_RANK // GPUS_PER_NODE)
     if "LOCAL_RANK" in os.environ:
         # Environment variables set by torch.distributed.launch or
         # torchrun
@@ -127,6 +137,8 @@ def main():
 
     print(f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}")
 
+    torch.cuda.set_device(LOCAL_RANK)
+
     # Initialize the distributed backend
     dist.init_process_group(
         backend=backend,
@@ -135,7 +147,6 @@ def main():
         world_size=WORLD_SIZE,
     )
 
-    torch.cuda.set_device(LOCAL_RANK)
     dist.barrier()
     setup_for_distributed(LOCAL_RANK == 0)
 
@@ -158,6 +169,9 @@ if __name__ == "__main__":
     except AttributeError:
         nccl_version = "NCCL not available."
     print(f"torch.cuda.nccl.version(): {nccl_version}")
+    # Print visible CUDA devices
+    print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
+    print("torch.cuda.device_count():", torch.cuda.device_count())
 
     # Set additional environment variables
     os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"

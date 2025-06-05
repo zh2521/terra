@@ -58,10 +58,10 @@ def process_main(rank, args, params, world_size, port, devices, logger, folder_p
     # Execute training or evaluation
     if is_training:
         train_dataset, val_dataset, test_dataset = prepare_dataset(params)
-        train(params, train_dataset, save_folder_path=folder_path)
+        train(params, train_dataset, save_folder_path=folder_path, LOCAL_RANK=rank)
     else:
         train_dataset, test_dataset, val_dataset = prepare_dataset(params)
-        loss_val = train(params, val_dataset, resume_preempt=True, save_folder_path=folder_path)
+        loss_val = train(params, val_dataset, resume_preempt=True, save_folder_path=folder_path, LOCAL_RANK=rank)
         params['data']['test_batch_ids'] = ['1000_batch11', '1000_batch19', '1000_batch32']
         params['data']['split_val'] = 0.0
         train_dataset, test_dataset, val_dataset = prepare_dataset(params)
@@ -119,9 +119,10 @@ def sweep_func(args):
     current_timestamp = (
         datetime.now().strftime("%d%m%Y_%H%M%S") +
         f"_{datetime.now().microsecond // 1000:03d}")
-    logger.info(f'Timestamp {current_timestamp}.')
-    print('Timestamp:', current_timestamp)
-    print('Params:', params)
+    print(f'Run timestamp: {current_timestamp}.')
+    if not wandb.run.resumed:
+        wandb.config.run_timestamp = current_timestamp
+    print(params)
     if params['state']['folder_path'] is None:
         folder_path = os.path.join(artifact_folder_path,
                         params['data']['dataset_name'],
@@ -131,20 +132,7 @@ def sweep_func(args):
 
     port = random.randint(40000, 50000)
 
-    # Run the process_main function in a single or multi-GPU setting
-    if args.test:
-        process_main(0, args, params, num_gpus, port, args.devices, logger, folder_path)
-    else:
-
-        for rank in range(num_gpus):
-            p = mp.Process(target=process_main,
-                           args=(rank, args, params, num_gpus, port, args.devices, logger, folder_path))
-            p.start()
-            processes.append(p)
-
-        for p in processes:
-            p.join()  
-    processes = []
+    # Run the process_main function in a single GPU setting
     if args.test:
        process_main(0, args, params, 1, port, [args.devices[0]], logger, folder_path, is_training=False)
     else:

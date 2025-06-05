@@ -32,7 +32,11 @@ dependencies = [
     # for debug logging (referenced from the issue template)
     "session-info",
     "wandb",
-    "peft"
+    "peft",
+    "jupyterlab",
+    "ipykernel",
+    "pyensembl",
+    "leidenalg",
 ]
 
 [project.optional-dependencies]

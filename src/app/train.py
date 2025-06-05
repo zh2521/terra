@@ -7,16 +7,6 @@ https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 
 import os
 
-# -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
-try:
-    # -- WARNING: IF DOING DISTRIBUTED TRAINING ON A NON-SLURM CLUSTER, MAKE
-    # --          SURE TO UPDATE THIS TO GET LOCAL-RANK ON NODE, OR ENSURE
-    # --          THAT YOUR JOBS ARE LAUNCHED WITH ONLY 1 DEVICE VISIBLE
-    # --          TO EACH PROCESS
-    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ['SLURM_LOCALID']
-except Exception:
-    pass
-
 import copy
 import logging
 import sys
@@ -36,7 +26,7 @@ from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
 from app.helper import init_model, init_opt, load_checkpoint
-from nichejepa.datasets.cell_datasets import make_cell_dataset
+from nichejepa.datasets.cell_datasets import init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.cell_masking import CellMaskCollator
@@ -90,7 +80,7 @@ def train(args: dict,
         device = torch.device('cpu')
     elif LOCAL_RANK is not None:
         device = torch.device(f"cuda:{LOCAL_RANK}")
-    elif LOCAL_RANK is  None:
+    elif LOCAL_RANK is None:
         device = torch.device('cuda:0')
         torch.cuda.set_device(device)
 
@@ -296,7 +286,7 @@ def train(args: dict,
     if isinstance(train_dataset, list):
         train_cell_datasets = []
         for d, nz in zip(train_dataset, epoch_n_nonzero_tokens):
-            cell_d = make_cell_dataset(
+            cell_d = init_cell_dataset(
                 dataset=d,
                 vocab_size=vocab_size,
                 seq_len_cell=seq_len_cell,
@@ -310,7 +300,7 @@ def train(args: dict,
             train_cell_datasets.append(cell_d)
 
     else:
-        train_cell_dataset = make_cell_dataset(
+        train_cell_dataset = init_cell_dataset(
             dataset=train_dataset,
             vocab_size=vocab_size,
             seq_len_cell=seq_len_cell,
@@ -447,15 +437,9 @@ def train(args: dict,
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            #if iter_number is not None:
-            #    if itr < iter_number:
-            #        continue
-            tokens = udata[0].to(device, non_blocking=True)
-            segments = udata[1].to(device, non_blocking=True)
-            if gt_type == 'rank':
-                positions = udata[2].to(device, non_blocking=True)
-            elif gt_type == 'counts':
-                counts = udata[2].to(device, non_blocking=True)
+            for key in udata.keys():
+                if key != 'cell_id':
+                    udata[key] = udata[key].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -469,23 +453,14 @@ def train(args: dict,
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
 
-                def forward_target():
+                def forward_target(udata):
                     with torch.no_grad(): 
                         # no backward pass for target encoder
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                        if gt_type == 'rank':
-                            h, _, _ = target_encoder(
-                                tokens=tokens,
-                                segments=segments,
-                                positions=positions,
-                                masks_attention=masks_attention)
-                        elif gt_type == 'counts':
-                            h, _ = target_encoder(
-                                tokens=tokens,
-                                segments=segments,
-                                counts=counts,
-                                masks_attention=masks_attention)
+                        h, _ = target_encoder(
+                            udata=udata,
+                            masks_attention=masks_attention)
 
                         # Normalize over feature dim
                         h = F.layer_norm(h, (h.size(-1),))
@@ -501,44 +476,22 @@ def train(args: dict,
 
                         return h
 
-                def forward_context():
+                def forward_context(udata):
                     # Context encoder forward pass with output dim (BATCH_SIZE,
                     # MIN_CONTEXT_SIZE, EMB_DIM) where MIN_CONTEXT_SIZE is
                     # minmum context size in the batch after removal of
-                    # overlapping targets
-                    if gt_type == 'rank':
-                        z, pos_emb, token_emb = encoder(
-                            positions=positions,
-                            segments=segments,
-                            tokens=tokens,
-                            masks=masks_enc,
-                            masks_attention=None)                       
-                    elif gt_type == 'counts':
-                        z, token_emb = encoder(
-                            tokens=tokens,
-                            segments=segments,
-                            counts=counts,
-                            masks=masks_enc,
-                            masks_attention=None)
+                    # overlapping targets                     
+                    z, udata = encoder(udata=udata,
+                                       masks=masks_enc,
+                                       masks_attention=None)
 
                     # Predictor forward pass with output dim (BATCH_SIZE *
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
-                    if gt_type == 'rank':
-                        z = predictor(z=z,
-                                      pos_embed=pos_emb,
-                                      segments=segments,
-                                      token_embed=token_emb,
-                                      masks_enc=masks_enc,
-                                      masks_pred=masks_pred,
-                                      masks_attention=None)
-                    elif gt_type == 'counts':
-                        z = predictor(z=z,
-                                      token_embed=token_emb,
-                                      segments=segments,
-                                      counts=counts,
-                                      masks_enc=masks_enc,
-                                      masks_pred=masks_pred,
-                                      masks_attention=None)
+                    z = predictor(z=z,
+                                  udata=udata,
+                                  masks_enc=masks_enc,
+                                  masks_pred=masks_pred,
+                                  masks_attention=None)
                     return z
 
                 def loss_fn(z, h, loss_exp=1.0):
@@ -559,8 +512,8 @@ def train(args: dict,
                 # Step 1: forward pass
                 with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                              enabled=use_bfloat16):
-                    h = forward_target()
-                    z = forward_context()
+                    h = forward_target(udata)
+                    z = forward_context(udata)
                     loss = loss_fn(z, h)
 
                 # Step 2: backward pass and step

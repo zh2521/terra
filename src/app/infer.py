@@ -19,7 +19,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 
 from app.helper import init_model, load_checkpoint
-from nichejepa.datasets.cell_datasets import CellBaseDataset, make_cell_dataset
+from nichejepa.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.cell_masking import CellMaskCollator
@@ -276,7 +276,7 @@ def infer(args: dict,
             targets_list=targets_list)
 
     # Initialize train and test datasets, dataloaders and samplers
-    cell_dataset = make_cell_dataset(
+    cell_dataset = init_cell_dataset(
         dataset=dataset,
         vocab_size=vocab_size,
         seq_len_cell=seq_len_cell,
@@ -319,29 +319,25 @@ def infer(args: dict,
     all_neighborhood_gene_emb_dict = {}
 
     for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
-        # Load gene tokens and segmentation label to the specified device
-        tokens = udata[0].to(device, non_blocking=True)
-        segments = udata[1].to(device, non_blocking=True)
-        if gt_type == 'rank':
-            positions = udata[2].to(device, non_blocking=True)
-        elif gt_type == 'counts':
-            counts = udata[2].to(device, non_blocking=True)
+        for key in udata.keys():
+            if key != 'cell_id':
+                udata[key] = udata[key].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Collect cell IDs to join metadata
-        all_cell_ids.extend(udata[-1])
+        all_cell_ids.extend(udata['cell_id'])
 
         # Aggregate gene embeddings into cell and neighborhood
         # embeddings
-        ns_tokens = tokens[:, n_special_tokens:]
+        ns_tokens = udata['tokens'][:, n_special_tokens:]
 
         # Exclude masked tokens from aggregation
         if masked_tokens is not None:
             mask_indices = torch.isin(
-                ns_tokens,
-                torch.tensor(masked_tokens, device=ns_tokens.device)
+                udata['tokens'],
+                torch.tensor(masked_tokens, device=udata['tokens'].device)
                 ).unsqueeze(1).unsqueeze(1).expand(
-                    -1,-1, ns_tokens.shape[-1], -1)
+                    -1,-1, udata['tokens'].shape[-1], -1)
             masks_attention = masks_attention.expand(
                 masks_attention.shape[0],
                 masks_attention.shape[1],
@@ -356,39 +352,19 @@ def infer(args: dict,
             cell_emb_list = []
             neighborhood_emb_list = []
             for emb_layer in emb_layers:
-                if gt_type == 'rank':
-                    cell_emb_list.append(return_layer_emb_fn(
-                        layer=emb_layer,
-                        positions=positions,
-                        segments=segments,
-                        tokens=tokens,
-                        masks_attention=masks_attention,
-                        pad_neighborhood=True).cpu()),
-                    neighborhood_emb_list.append(return_layer_emb_fn(
-                        layer=emb_layer,
-                        positions=positions,
-                        segments=segments,
-                        tokens=tokens,
-                        masks_attention=masks_attention,
-                        pad_neighborhood=False).cpu()),
-                elif gt_type == 'counts':
-                    cell_emb_list.append(return_layer_emb_fn(
-                        layer=emb_layer,
-                        tokens=tokens,
-                        segments=segments,
-                        counts=counts,
-                        masks_attention=masks_attention,
-                        pad_neighborhood=True).cpu()),
-                    neighborhood_emb_list.append(return_layer_emb_fn(
-                        layer=emb_layer,
-                        tokens=tokens,
-                        segments=segments,
-                        counts=counts,
-                        masks_attention=masks_attention,
-                        pad_neighborhood=False).cpu()),
+                cell_emb_list.append(return_layer_emb_fn(
+                    layer=emb_layer,
+                    udata=udata,
+                    masks_attention=masks_attention,
+                    pad_neighborhood=True).cpu())
+                neighborhood_emb_list.append(return_layer_emb_fn(
+                    layer=emb_layer,
+                    udata=udata,
+                    masks_attention=masks_attention,
+                    pad_neighborhood=False).cpu())
         
             if feature_norm and (emb_layers[-1] == enc_depth):
-                # Normalize last layer like in training
+                # Normalize last layer like in training # TO DO should this consider inference padding?
                 cell_emb_list[-1] = F.layer_norm(cell_emb_list[-1],
                                                  (cell_emb_list[-1].size(-1),))
                 neighborhood_emb_list[-1] = F.layer_norm(neighborhood_emb_list[-1],
@@ -826,7 +802,7 @@ def embed_dataset(dataset: Dataset,
         per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
         
     # Create torch dataset
-    cell_dataset = make_cell_dataset(
+    cell_dataset = init_cell_dataset(
         dataset=dataset,
         vocab_size=vocab_size,
         seq_len_cell=model_config['data']['seq_len_cell'],

@@ -93,12 +93,13 @@ class BlockMaskCollator:
 
         # Get non-zero indices and segments excluding special tokens
         ns_tokens = tokens[self.n_special_tokens:]
-        nz_ns_indices = torch.nonzero(ns_tokens).squeeze()
+        nz_ns_indices = torch.nonzero(ns_tokens).add_(
+            self.n_special_tokens).squeeze()
         total_nz_ns = len(nz_ns_indices)
     
         # Initialize masks
         target_masks = []
-        context_mask = torch.zeros(len(ns_tokens), dtype=torch.int32)
+        context_mask = torch.zeros(len(tokens), dtype=torch.int32)
 
         # Compute block length based on number of blocks; avoid zero
         # division
@@ -128,10 +129,8 @@ class BlockMaskCollator:
                 # Set masked indices to 0 in the context mask
                 context_mask[target_mask] = 0
 
-                target_mask = torch.tensor(target_mask)
-
                 # Append masked indices
-                target_masks.append(target_mask)
+                target_masks.append(torch.tensor(target_mask))
             else:
                 # No elements to mask
                 target_masks.append(torch.tensor([]))
@@ -160,6 +159,11 @@ class BlockMaskCollator:
             context_block_mask = context_block_mask[
                 torch.randperm(len(context_block_mask))]
 
+            # Add special tokens to context block mask
+            context_block_mask = torch.cat((
+                torch.arange(self.n_special_tokens),
+                context_block_mask))
+
             context_masks.append(context_block_mask)
 
             start = end
@@ -167,11 +171,7 @@ class BlockMaskCollator:
         return target_masks, context_masks
 
     def __call__(self,
-                 batch: tuple[torch.Tensor,
-                              torch.Tensor,
-                              torch.Tensor,
-                              torch.Tensor,
-                              list[str]],
+                 batch: list[dict],
                  ) -> tuple[torch.Tensor,
                             torch.Tensor,
                             torch.Tensor,
@@ -183,13 +183,13 @@ class BlockMaskCollator:
         Parameters
         ----------
         batch:
-            Tuple containing the input batch including gene tokens,
-            segments, positions, counts and cell IDs.
+            List containing the input batch dictionaries including positions,
+            segments, gene tokens, counts and cell IDs.
 
         Returns
         ----------
         collated_batch:
-            Input gene tokens, segments, positions, counts and cell IDs
+            Input positions, segments, gene tokens, counts and cell IDs
             collated by batch.
         collated_context_masks:
             Sampled context masks collated by batch.
@@ -217,8 +217,8 @@ class BlockMaskCollator:
             # Sample target and context masks for the current
             # observation
             target_masks, context_masks = self._sample_gene_mask(
-                tokens=batch[i][0],
-                segments=batch[i][1])
+                tokens=batch[i]['tokens'],
+                segments=batch[i]['segments'])
 
             keep_tokens_target = min(
                 keep_tokens_target, min(mask.size(0) for mask in target_masks))
@@ -230,9 +230,7 @@ class BlockMaskCollator:
             # collated lists
             collated_target_masks.append(target_masks)
             collated_context_masks.append(context_masks)
-
-            collated_masks_attention.append(
-                (batch[i][0][self.n_special_tokens:] != 0).int())
+            collated_masks_attention.append((batch[i]['tokens'] != 0).int())
 
         # Trim masks to the minimum size across the batch and collate
         # them
