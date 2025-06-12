@@ -395,6 +395,7 @@ def train(args: dict,
                 special_tokens=special_tokens,
                 sampling_strategy=sampling_strategy,
                 n_nonzero_tokens_list=nz,
+                include_cell_id=False,
                 sep_gene_tokens_neb=sep_gene_tokens_neb)
             train_cell_datasets.append(cell_d)
 
@@ -409,6 +410,7 @@ def train(args: dict,
             special_tokens=special_tokens,
             sampling_strategy=sampling_strategy,
             n_nonzero_tokens_list=n_nonzero_tokens,
+            include_cell_id=False,
             sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     if isinstance(train_dataset, list):
@@ -535,10 +537,12 @@ def train(args: dict,
         #maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
+        logger.info(f"Before iteration 0.")
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
+            if itr == 0:
+                logger.info(f"Starting iteration 0.")
             for key in udata.keys():
-                if key != 'cell_id':
-                    udata[key] = udata[key].to(device, non_blocking=True)
+                udata[key] = udata[key].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)

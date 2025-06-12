@@ -291,6 +291,7 @@ def infer(args: dict,
         special_tokens=special_tokens,
         sampling_strategy=None,
         n_nonzero_tokens_list=n_nonzero_tokens,
+        include_cell_id=True,
         sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     loader = init_dataloader_and_sampler(
@@ -869,6 +870,7 @@ def embed_dataset(dataset: Dataset,
         special_tokens=model_config['meta']['special_tokens'],
         sampling_strategy=None,
         n_nonzero_tokens_list=None,
+        include_cell_id=True,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader

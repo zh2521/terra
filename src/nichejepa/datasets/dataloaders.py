@@ -1,3 +1,4 @@
+import gc
 import math
 from collections.abc import Iterator
 from logging import getLogger
@@ -108,6 +109,9 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         indices = indices[self.rank:self.total_size:self.num_replicas]
         assert len(indices) == self.num_samples
 
+        del g
+        gc.collect()
+
         return iter(indices)
 
     def _get_length_grouped_indices(self,
@@ -157,7 +161,11 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
             megabatches[max_idx][0],
             megabatches[0][0])
 
-        return [item for sublist in megabatches for item in sublist]
+        indices = [item for sublist in megabatches for item in sublist]
+        del megabatches
+        gc.collect()
+
+        return indices
 
 
 def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
