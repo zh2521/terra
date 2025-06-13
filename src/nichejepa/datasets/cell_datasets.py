@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 class CellBaseDataset(Dataset):
     def __init__(self,
                  gt_type: Literal['rank', 'counts', 'combined'],
+                 cell_pos_enc: Literal['segment', 'coord'],
                  dataset: datasets.Dataset,
                  vocab_size: int,
                  seq_len_cell: int,
@@ -30,6 +31,8 @@ class CellBaseDataset(Dataset):
         -----------
         gt_type:
             Gene transformer type.
+        cell_pos_enc:
+            Encoding used to encode cell positions.
         dataset:
             Hugging Face dataset with tokenized data.
         vocab_size:
@@ -52,8 +55,11 @@ class CellBaseDataset(Dataset):
         """
         if gt_type not in ['rank', 'counts', 'combined']:
             raise ValueError(f'Invalid "gt_type": {gt_type}.')
+        if cell_pos_enc not in ['segment', 'coord']:
+            raise ValueError(f'Invalid "cell_pos_enc": {cell_pos_enc}.')
         
         self.gt_type = gt_type
+        self.cell_pos_enc = cell_pos_enc
         self.dataset = dataset
         self.len = len(self.dataset)
         self.vocab_size = vocab_size
@@ -118,11 +124,22 @@ class CellBaseDataset(Dataset):
             [torch.zeros(self.n_special_tokens, dtype=torch.long),
              item_dict['segments']])
 
+        # Add special token coords
+        if self.cell_pos_enc == 'coord':
+            item_dict['rel_x_coords'] = torch.cat(
+                [torch.full((self.n_special_tokens,), -1.0, dtype=torch.float),
+                item_dict['rel_x_coords']])   
+            item_dict['rel_y_coords'] = torch.cat(
+                [torch.full((self.n_special_tokens,), -1.0, dtype=torch.float),
+                item_dict['rel_y_coords']])
+
         return item_dict
 
     def _sample_seq(self,
                     tokens: list[int],
                     values: list[float] | None,
+                    rel_x_coords: list[float] | None,
+                    rel_y_coords: list[float] | None,
                     n_nz_tokens: int,
                     size: int,
                     ) -> tuple[list[int], list[float]]:
@@ -136,6 +153,10 @@ class CellBaseDataset(Dataset):
             List of tokens.
         values:
             List of values.
+        rel_x_coords:
+            List of relative x coordinates.
+        rel_y_coords:
+            List of relative y coordinates.
         n_nz_tokens:
             Number of nonzero tokens in `tokens`.
         size:
@@ -181,13 +202,30 @@ class CellBaseDataset(Dataset):
             sampled_values = [values[i] for i in sampled_indices]
         else:
             sampled_values = None
+        if rel_x_coords is not None: # the coordinates are all the same so sampling is just for length
+            sampled_rel_x_coords = rel_x_coords[:len(sampled_indices)]
+        else:
+            sampled_rel_x_coords = None
+        if rel_y_coords is not None: # the coordinates are all the same so sampling is just for length
+            sampled_rel_y_coords = rel_y_coords[:len(sampled_indices)]
+        else:
+            sampled_rel_y_coords = None
 
         if size > n_nz_tokens:
             sampled_tokens.extend([0] * (size - len(sampled_tokens)))
             if values is not None:
                 sampled_values.extend([0.0] * (size - len(sampled_values)))
+            if sampled_rel_x_coords is not None:
+                sampled_rel_x_coords.extend([0] * (
+                    size - len(sampled_rel_x_coords)))
+            if sampled_rel_y_coords is not None:
+                sampled_rel_y_coords.extend([0] * (
+                    size - len(sampled_rel_y_coords)))
 
-        return sampled_tokens, sampled_values
+        return sampled_tokens, /
+               sampled_values, /
+               sampled_rel_x_coords, /
+               sampled_rel_y_coords
          
     def _get_segment_seq(self, 
                          item: int,
@@ -245,6 +283,15 @@ class CellBaseDataset(Dataset):
             else:
                 segment_values = None
 
+            if self.cell_pos_enc == 'coord':
+                segment_rel_x_coords = item['rel_x_coords'][
+                    segment_start_idx: segment_end_idx]
+                segment_rel_y_coords = item['rel_y_coords'][
+                    segment_start_idx: segment_end_idx]
+            else:
+                segment_rel_x_coords = None
+                segment_rel_y_coords = None
+
             # Validate that segment length is specified correctly
             if (self.sampling_strategy is not None and 'rep' in
             self.sampling_strategy):
@@ -262,19 +309,30 @@ class CellBaseDataset(Dataset):
                 segment_tokens = segment_tokens[:segment_seq_len]
                 if self.gt_type != 'rank':
                     segment_values = segment_values[:segment_seq_len]
+                if self.cell_pos_enc == 'coord':
+                    segment_rel_x_coords = segment_rel_x_coords[:segment_seq_len]
+                    segment_rel_y_coords = segment_rel_y_coords[:segment_seq_len]
             # Otherwise, sample a subset of tokens based on the sampling
             # strategy
             else:
                 segment_n_nz_tokens = torch.count_nonzero(
                     segment_tokens).item()
 
-                segment_tokens, segment_values = self._sample_seq(
+                segment_tokens, /
+                segment_values, /
+                segment_rel_x_coords, /
+                segment_rel_y_coords = self._sample_seq(
                     tokens=segment_tokens,
                     values=segment_values,
+                    rel_x_coords=rel_x_coords,
+                    rel_y_coords=rel_y_coords,
                     n_nz_tokens=segment_n_nz_tokens,
                     size=segment_seq_len)       
                     
-            return segment_tokens, segment_values
+            return segment_tokens, \
+                   segment_values, \
+                   segment_rel_x_coords, \
+                   segment_rel_y_coords
 
 
 class CellGraphDataset(CellBaseDataset):
@@ -302,7 +360,10 @@ class CellGraphDataset(CellBaseDataset):
 
         # Get (sampled) gene tokens, positions, segments, and values for
         # index cell segment
-        item_dict['tokens'], item_dict['values'] = self._get_segment_seq(
+        item_dict['tokens'], \
+        item_dict['values'], \
+        item_dict['rel_x_coords'], \
+        item_dict['rel_y_coords'] = self._get_segment_seq(
             item=item,
             segment=1, # index cell segment
             segment_seq_len=self.seq_len_cell)
@@ -317,6 +378,15 @@ class CellGraphDataset(CellBaseDataset):
             torch.ones_like(item_dict['tokens']),
             torch.zeros_like(item_dict['tokens']))
 
+        item_dict['rel_x_coords'] = torch.where(
+            item_dict['tokens'] != 0,
+            item_dict['rel_x_coords'],
+            torch.tensor(-1.0, dtype=torch.float))
+        item_dict['rel_y_coords'] = torch.where(
+            item_dict['tokens'] != 0,
+            item_dict['rel_y_coords'],
+            torch.tensor(-1.0, dtype=torch.float))
+
         # Get (sampled) gene tokens, positions, segments and values for
         # neighbor cell segments
         # TODO: Fix tokenization index after removal of 100 <cls> tokens
@@ -327,7 +397,10 @@ class CellGraphDataset(CellBaseDataset):
 
         for segment in torch.unique(seg_tokens):
             if segment.item() > 1: # neighbor cell segments
-                segment_tokens, segment_values = self._get_segment_seq(
+                segment_tokens, \
+                segment_values, \
+                segment_rel_x_coords, \
+                segment_rel_y_coords = self._get_segment_seq(
                     item=item,
                     segment=segment.item(),
                     segment_seq_len=self.seq_len_cell)
@@ -351,6 +424,19 @@ class CellGraphDataset(CellBaseDataset):
                     torch.tensor(0, dtype=torch.long))
                 item_dict['segments'] = torch.cat(
                     [item_dict['segments'], segment_tensor], dim=0)
+                if self.cell_pos_enc == 'coord':
+                    masked_rel_x_coords = torch.where(
+                        segment_tokens != 0,
+                        segment_rel_x_coords,
+                        torch.tensor(-1.0, dtype=torch.float))
+                    masked_rel_y_coords = torch.where(
+                        segment_tokens != 0,
+                        segment_rel_x_coords,
+                        torch.tensor(-1.0, dtype=torch.float))                   
+                    item_dict['rel_x_coords'] = torch.cat(
+                    [item_dict['rel_x_coords'], masked_rel_x_coords], dim=0)
+                    item_dict['rel_y_coords'] = torch.cat(
+                    [item_dict['rel_y_coords'], masked_rel_y_coords], dim=0)
 
 
         if item_dict['tokens'].size(0) > (self.seq_len_cell + self.seq_len_neighborhood):
@@ -363,6 +449,11 @@ class CellGraphDataset(CellBaseDataset):
                     :self.seq_len_cell + self.seq_len_neighborhood]
             if self.gt_type != 'rank':
                 item_dict['values'] = item_dict['values'][
+                    :self.seq_len_cell + self.seq_len_neighborhood]
+            if self.cell_pos_enc == 'coord':
+                item_dict['rel_x_coords'] = item_dict['rel_x_coords'][
+                    :self.seq_len_cell + self.seq_len_neighborhood]
+                item_dict['rel_y_coords'] = item_dict['rel_y_coords'][
                     :self.seq_len_cell + self.seq_len_neighborhood]
 
         elif item_dict['tokens'].size(0) < (self.seq_len_cell + self.seq_len_neighborhood):
@@ -380,6 +471,11 @@ class CellGraphDataset(CellBaseDataset):
                 if self.gt_type != 'rank':
                     item_dict['values'] = F.pad(
                         item_dict['values'], (0, pad_len), value=0.0)
+                if self.cell_pos_enc == 'coord':
+                    item_dict['rel_x_coords'] = F.pad(
+                        item_dict['rel_x_coords'], (0, pad_len), value=-1.0)
+                    item_dict['rel_y_coords'] = F.pad(
+                        item_dict['rel_y_coords'], (0, pad_len), value=-1.0)                     
 
         # Add special tokens
         item_dict = self._add_special_seq(item=item,
@@ -416,11 +512,17 @@ class CellNeighborhoodDataset(CellBaseDataset):
         item = self.dataset[item]
 
         # Get (sampled) gene tokens, positions, segments, and values
-        gene_tokens_cell, values_cell = self._get_segment_seq(
+        gene_tokens_cell, \
+        values_cell, \
+        rel_x_coords_cell, \
+        rel_y_coords_cell = self._get_segment_seq(
             item=item,
             segment=1, # cell seg
             segment_seq_len=self.seq_len_cell)
-        gene_tokens_neigh, values_neigh = self._get_segment_seq(
+        gene_tokens_neigh, \
+        values_neigh \
+        rel_x_coords_neigh \
+        rel_y_coords_neigh = self._get_segment_seq(
             item=item,
             segment=2, # neigh seg
             segment_seq_len=self.seq_len_neighborhood)
@@ -433,6 +535,11 @@ class CellNeighborhoodDataset(CellBaseDataset):
             gene_tokens_neigh != 0, torch.tensor(2), torch.tensor(0))
         item_dict['segments'] = torch.cat(
             [segments_cell, segments_neigh], dim=0)
+        if self.cell_pos_enc == 'coord':
+            item_dict['rel_x_coords'] = torch.cat(
+                [rel_x_coords_cell, rel_x_coords_neigh], dim=0)
+            item_dict['rel_y_coords'] = torch.cat(
+                [rel_y_coords_cell, rel_y_coords_neigh], dim=0)
 
         if self.gt_type != 'count':
             item_dict['positions'] = torch.cat([
