@@ -347,7 +347,7 @@ class CellGraphDataset(CellBaseDataset):
                     [item_dict['tokens'], segment_tokens], dim=0)
                 segment_tensor = torch.where(
                     segment_tokens != 0,
-                    torch.tensor(segment, dtype=torch.long),
+                    segment,
                     torch.tensor(0, dtype=torch.long))
                 item_dict['segments'] = torch.cat(
                     [item_dict['segments'], segment_tensor], dim=0)
