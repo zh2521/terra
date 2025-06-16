@@ -226,8 +226,7 @@ class CellBaseDataset(Dataset):
             sampled_tokens,
             sampled_values,
             sampled_rel_x_coords,
-            sampled_rel_y_coords,
-        )
+            sampled_rel_y_coords)
          
     def _get_segment_seq(self, 
                          item: int,
@@ -286,9 +285,9 @@ class CellBaseDataset(Dataset):
                 segment_values = None
 
             if self.cell_pos_enc == 'coord':
-                segment_rel_x_coords = item['rel_x_coords'][
+                segment_rel_x_coords = item['rel_x_coord'][
                     segment_start_idx: segment_end_idx]
-                segment_rel_y_coords = item['rel_y_coords'][
+                segment_rel_y_coords = item['rel_y_coord'][
                     segment_start_idx: segment_end_idx]
             else:
                 segment_rel_x_coords = None
@@ -320,9 +319,9 @@ class CellBaseDataset(Dataset):
                 segment_n_nz_tokens = torch.count_nonzero(
                     segment_tokens).item()
 
-                segment_tokens, /
-                segment_values, /
-                segment_rel_x_coords, /
+                segment_tokens, \
+                segment_values, \
+                segment_rel_x_coords, \
                 segment_rel_y_coords = self._sample_seq(
                     tokens=segment_tokens,
                     values=segment_values,
@@ -331,10 +330,11 @@ class CellBaseDataset(Dataset):
                     n_nz_tokens=segment_n_nz_tokens,
                     size=segment_seq_len)       
                     
-            return segment_tokens, \
-                   segment_values, \
-                   segment_rel_x_coords, \
-                   segment_rel_y_coords
+            return (
+                segment_tokens,
+                segment_values,
+                segment_rel_x_coords,
+                segment_rel_y_coords)
 
 
 class CellGraphDataset(CellBaseDataset):
@@ -522,8 +522,8 @@ class CellNeighborhoodDataset(CellBaseDataset):
             segment=1, # cell seg
             segment_seq_len=self.seq_len_cell)
         gene_tokens_neigh, \
-        values_neigh \
-        rel_x_coords_neigh \
+        values_neigh, \
+        rel_x_coords_neigh, \
         rel_y_coords_neigh = self._get_segment_seq(
             item=item,
             segment=2, # neigh seg

@@ -37,7 +37,7 @@ def get_1d_sincos_pos_embed(embed_dim: int,
         embed_dim).
     """
     sincos_pos = np.arange(n_sincos_pos, dtype=float)
-    pos_embed = get_1d_sincos_pos_embed_from_pos(embed_dim, sincos_pos)
+    pos_embed = _get_1d_sincos_pos_embed_from_pos(embed_dim, sincos_pos)
     if n_zero_pos > 0:
         pos_embed = np.concatenate(
             [np.zeros([n_zero_pos, embed_dim]), pos_embed],
@@ -106,7 +106,7 @@ def trunc_normal_(tensor: torch.Tensor,
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
-def get_1d_sincos_pos_embed_from_pos(embed_dim: int,
+def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
                                       pos: np.ndarray,
                                       ) -> np.ndarray:
     """
@@ -140,6 +140,48 @@ def get_1d_sincos_pos_embed_from_pos(embed_dim: int,
 
     pos_emb = np.concatenate([emb_sin, emb_cos], axis=1) # shape (SEQ_LEN,
                                                          # EMBED_DIM)
+
+    return pos_emb
+
+
+def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
+                                       coord: torch.Tensor,
+                                       ) -> torch.Tensor:
+    """
+    Retrieve 1D sin cos positional embedding from a tensor of relative
+    coordinates.
+
+    Parameters
+    -----------
+    embed_dim:
+        Output dimension of the positional embedding (for each
+        position). Has to be divisible by 2.
+    coord:
+        A tensor containing the relative coordinates to be embedded.
+        
+    Returns
+    -----------
+    pos_emb:
+        The positional embedding with shape (len(coord), embed_dim).
+    """
+    assert embed_dim % 2 == 0
+
+    coord = coord.reshape(-1)  # (seq_len,)
+    device = coord.device
+
+    # compute omega: 1 / 10000^{2i/dim}
+    omega = torch.arange(embed_dim // 2, dtype=torch.float32, device=device)
+    omega = 1.0 / (10000 ** (omega / (embed_dim / 2)))
+
+    # outer product: (seq_len, embed_dim // 2)
+    out = torch.einsum('m,d->md', coord, omega)
+
+    # sin and cos embeddings
+    emb_sin = torch.sin(out)
+    emb_cos = torch.cos(out)
+
+    # concatenate along last dimension
+    pos_emb = torch.cat([emb_sin, emb_cos], dim=1)  # (seq_len, embed_dim)
 
     return pos_emb
 
