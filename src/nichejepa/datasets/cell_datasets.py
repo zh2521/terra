@@ -260,12 +260,10 @@ class CellBaseDataset(Dataset):
                 item['seg_tokens'])
 
             # TODO: Fix repeating coordinates which is not done during tokenization
-            item['rel_x_coord'] = [
-                coord for coord in item['rel_x_coord'] for _ in range(
-                    self.seq_len_cell)]
-            item['rel_y_coord'] = [
-                coord for coord in item['rel_y_coord'] for _ in range(
-                    self.seq_len_cell)]
+            item['rel_x_coord'] = torch.repeat_interleave(
+                x_coords, self.seq_len_cell)
+            item['rel_y_coord'] = torch.repeat_interleave(
+                y_coords, self.seq_len_cell)
 
             # Only keep gene tokens and values in specified segment
             mask_segment = seg_tokens == segment
