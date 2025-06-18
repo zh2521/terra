@@ -209,8 +209,12 @@ class BlockMaskCollator:
         if self.sample_segments:
             if 'positions' in batch[0].keys(): # self.gt_type != 'counts'
                 pad_positions = True
+            else:
+                pad_positions = False
             if 'values' in batch[0].keys(): # self.gt_type != 'rank'
                 pad_values = True
+            else:
+                pad_values = False
             k = torch.randint(low=1, high=self.n_segments, size=(1,)).item()
             for i in range(B):
                 batch[i]['tokens'][self.seq_len_cell * k:] = 0
