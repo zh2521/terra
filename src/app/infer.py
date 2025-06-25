@@ -528,13 +528,15 @@ def infer(args: dict,
                                                                                                neb_occ_dict[compute_cosine_with][1])
                         else:
                             sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs,
-                                                                                                                cell_presence,                               
+                                                                                                                cell_presence,                                
                                                                                                                 neb_occ_dict[compute_cosine_with][0],  
                                                                                                                 neb_occ_dict[compute_cosine_with][1])
-
-                            cos_sim_dict[compute_cosine_with][0]= cos_sim_dict[compute_cosine_with][0] + sum_cos_sim_temp 
-                            cos_sim_dict[compute_cosine_with][1]= cos_sim_dict[compute_cosine_with][1] + pair_count_temp 
-                            cos_sim_dict[compute_cosine_with][2]= cos_sim_dict[compute_cosine_with][2] + cell_count_temp 
+                            sum_cos_sim, pair_count, cell_count = cos_sim_dict[compute_cosine_with]
+                            cos_sim_dict[compute_cosine_with] = (
+                                sum_cos_sim + sum_cos_sim_temp,
+                                pair_count + pair_count_temp,
+                                cell_count + cell_count_temp
+                            )
                 if returen_distance:
                     cos_sim_temp = []
                     for compute_cosine_with in compute_cosine_with_list:
