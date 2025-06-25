@@ -461,7 +461,7 @@ def compute_count_mean_cosine_sim(
     occ_sum_masked = occ_sum * cell_pres_exp
     occ_count_masked = occ_count * cell_pres_exp
     if return_per_cell:
-        return occ_sum_masked, occ_count_masked, 0
+        return occ_sum_masked, occ_count_masked, (occ_count_masked!= 0).float()
     total_cell_count = (occ_count_masked!= 0).float().sum(dim=0)       # (num_cell_genes, num_neb_genes)
 
     # Sum over all sequences.
@@ -490,7 +490,6 @@ def batch_rowwise_distances(
     """
     A = A.numpy()
     B = B.numpy()
-
     assert A.shape == B.shape
     B_sz, G, G2 = A.shape
     assert G == G2
