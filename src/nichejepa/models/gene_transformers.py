@@ -1427,7 +1427,7 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         # Get positional and segment embeddings
         pos_embed = self.pos_embed(udata['positions'])
         if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
+            seg_embed = self.seg_embed(udata['segments'])
         elif self.cell_pos_enc == 'coord':
             rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
@@ -1435,7 +1435,7 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
             rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
                 coord=udata['rel_y_coords'])
-            seg_emb = torch.cat(
+            seg_embed = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
 
         # Add positional embeddings to tokens from context masks (only

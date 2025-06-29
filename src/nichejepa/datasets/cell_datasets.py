@@ -127,10 +127,10 @@ class CellBaseDataset(Dataset):
         # Add special token coords
         if self.cell_pos_enc == 'coord':
             item_dict['rel_x_coords'] = torch.cat(
-                [torch.full((self.n_special_tokens,), float(-'inf'), dtype=torch.float),
+                [torch.full((self.n_special_tokens,), float('-inf'), dtype=torch.float),
                 item_dict['rel_x_coords']])   
             item_dict['rel_y_coords'] = torch.cat(
-                [torch.full((self.n_special_tokens,), float(-'inf'), dtype=torch.float),
+                [torch.full((self.n_special_tokens,), float('-inf'), dtype=torch.float),
                 item_dict['rel_y_coords']])
 
         return item_dict
@@ -474,9 +474,9 @@ class CellGraphDataset(CellBaseDataset):
                         item_dict['values'], (0, pad_len), value=0.0)
                 if self.cell_pos_enc == 'coord':
                     item_dict['rel_x_coords'] = F.pad(
-                        item_dict['rel_x_coords'], (float('-inf'), pad_len), value=-1.0)
+                        item_dict['rel_x_coords'], (0, pad_len), value=float('-inf'))
                     item_dict['rel_y_coords'] = F.pad(
-                        item_dict['rel_y_coords'], (float('-inf'), pad_len), value=-1.0)                     
+                        item_dict['rel_y_coords'], (0, pad_len), value=float('-inf'))                     
 
         # Add special tokens
         item_dict = self._add_special_seq(item=item,

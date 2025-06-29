@@ -166,22 +166,28 @@ def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
     """
     assert embed_dim % 2 == 0
 
-    coord = coord.reshape(-1)  # (seq_len,)
     device = coord.device
+
+    mask = torch.isneginf(coord)
+    # Replace -inf with zero for computation (safe dummy value)
+    coord[mask] = 0.0
 
     # compute omega: 1 / 10000^{2i/dim}
     omega = torch.arange(embed_dim // 2, dtype=torch.float32, device=device)
     omega = 1.0 / (10000 ** (omega / (embed_dim / 2)))
 
     # outer product: (seq_len, embed_dim // 2)
-    out = torch.einsum('m,d->md', coord, omega)
+    out = torch.einsum('bl,d->bld', coord, omega)  # (B, seq_len, emb_dim/2)
 
     # sin and cos embeddings
     emb_sin = torch.sin(out)
     emb_cos = torch.cos(out)
 
     # concatenate along last dimension
-    pos_emb = torch.cat([emb_sin, emb_cos], dim=1)  # (seq_len, embed_dim)
+    pos_emb = torch.cat([emb_sin, emb_cos], dim=-1)  # (seq_len, embed_dim)
+
+    # Zero out positions where coord == -inf
+    pos_emb[mask.unsqueeze(-1).expand_as(pos_emb)] = 0.0  # (B, L, D)
 
     return pos_emb
 
