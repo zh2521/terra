@@ -216,13 +216,14 @@ class BlockMaskCollator:
             else:
                 pad_values = False
             k = torch.randint(low=1, high=self.n_segments, size=(1,)).item()
+            cutoff_idx = self.seq_len_cell * k
             for i in range(B):
-                batch[i]['tokens'][self.seq_len_cell * k:] = 0
-                batch[i]['segments'][self.seq_len_cell * k:] = 0
+                batch[i]['tokens'][cutoff_idx:] = 0
+                batch[i]['segments'][cutoff_idx:] = 0
                 if pad_positions:
-                    batch[i]['positions'][self.seq_len_cell * k:] = 0
+                    batch[i]['positions'][cutoff_idx:] = 0
                 if pad_values:
-                    batch[i]['values'][self.seq_len_cell * k:] = 0.0
+                    batch[i]['values'][cutoff_idx:] = 0.0
 
         # Collate the batch
         collated_batch = torch.utils.data.default_collate(batch)
