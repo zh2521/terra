@@ -389,6 +389,9 @@ class CellGraphDataset(CellBaseDataset):
                 item_dict['tokens'] != 0,
                 item_dict['rel_y_coords'],
                 torch.tensor(float('-inf'), dtype=torch.float))
+        else:
+            del(item_dict['rel_x_coords'])
+            del(item_dict['rel_y_coords'])
 
         # Get (sampled) gene tokens, positions, segments and values for
         # neighbor cell segments
