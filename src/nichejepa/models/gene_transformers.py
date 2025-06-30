@@ -1032,7 +1032,19 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         # Get embeddings for positions, segments and gene tokens
         pos_emb = self.pos_embed(udata['positions'])
-        seg_emb = self.seg_embed(udata['segments'])
+
+        if self.cell_pos_enc == 'segment':
+            seg_emb = self.seg_embed(udata['segments'])
+        elif self.cell_pos_enc == 'coord':
+            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                coord=udata['rel_x_coords'])
+            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                coord=udata['rel_y_coords'])
+            seg_emb = torch.cat(
+                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+
         token_emb = self.token_embed(udata['tokens'])
 
         # Get value embeddings

@@ -380,14 +380,15 @@ class CellGraphDataset(CellBaseDataset):
             torch.ones_like(item_dict['tokens']),
             torch.zeros_like(item_dict['tokens']))
 
-        item_dict['rel_x_coords'] = torch.where(
-            item_dict['tokens'] != 0,
-            item_dict['rel_x_coords'],
-            torch.tensor(float('-inf'), dtype=torch.float))
-        item_dict['rel_y_coords'] = torch.where(
-            item_dict['tokens'] != 0,
-            item_dict['rel_y_coords'],
-            torch.tensor(float('-inf'), dtype=torch.float))
+        if self.cell_pos_enc == 'coord':
+            item_dict['rel_x_coords'] = torch.where(
+                item_dict['tokens'] != 0,
+                item_dict['rel_x_coords'],
+                torch.tensor(float('-inf'), dtype=torch.float))
+            item_dict['rel_y_coords'] = torch.where(
+                item_dict['tokens'] != 0,
+                item_dict['rel_y_coords'],
+                torch.tensor(float('-inf'), dtype=torch.float))
 
         # Get (sampled) gene tokens, positions, segments and values for
         # neighbor cell segments
