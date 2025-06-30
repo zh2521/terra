@@ -588,7 +588,9 @@ def infer(args: dict,
     return adata
 
 
-def harmonize_adata(adata: ad.AnnData) -> ad.AnnData:
+def harmonize_adata(adata: ad.AnnData,
+                    ensembl_release: int=110, # 111
+                    ) -> ad.AnnData:
     """
     Harmonize an AnnData object prior to tokenization.
 
@@ -605,9 +607,9 @@ def harmonize_adata(adata: ad.AnnData) -> ad.AnnData:
     print('==================================================')
     print('STEP 1: ADDING ENSEMBL IDS...')
     print('==================================================')
-    print('Adding ensembl IDs from release 111...')
+    print(f'Adding ensembl IDs from release {ensembl_release}...')
     # Extract ensembl IDs of protein coding and miRNA mouse genes
-    ensembl = EnsemblRelease(release=111, species='human')
+    ensembl = EnsemblRelease(release=ensembl_release, species='human')
     ensembl.download()
     ensembl.index()
     all_genes = ensembl.genes()
@@ -660,7 +662,8 @@ def harmonize_adata(adata: ad.AnnData) -> ad.AnnData:
 
 def tokenize_adata(adata: ad.AnnData,
                    model_folder_path: str,
-                   perturb_df: pd.DataFrame | None = None,                   
+                   gene_perturb_df: pd.DataFrame | None = None,
+                   cell_perturb_df: pd.DataFrame | None = None,                   
                    nproc: int = 4,
                    processing_mode: Literal['sequential',
                                             'parallel'] = 'parallel'
@@ -677,16 +680,26 @@ def tokenize_adata(adata: ad.AnnData,
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
-    perturb_df:
-        DataFrame with perturbation data, e.g.
+    gene_perturb_df:
+        DataFrame with gene perturbation data, e.g.
         ```
-        perturb_df =  pd.DataFrame({
+        gene_perturb_df =  pd.DataFrame({
             'ensembl_id': ['ENSG00000169194', 'ENSG00000131724'],
             'target': ['neighborhood', 'cell'],
             'perturbation_type': ['foldchange', 'knockout'],
             'foldchange': [0.5, np.nan]
         })
         ```.
+    cell_perturb_df:
+        DataFrame with cell perturbation data, e.g.
+        ```
+        cell_perturb_df =  pd.DataFrame({
+            'selection_col': ['cell_type'],
+            'selection_vals': ['epithelial', 'endothelial'],
+            'perturbation_type': ['replace', 'knockout'],
+            'replace_vals': ['endothelial', np.nan]
+        })
+        ```.        
     n_proc:
         Number of processes used.
     processing_mode:
@@ -709,11 +722,11 @@ def tokenize_adata(adata: ad.AnnData,
         model_config = yaml.safe_load(file)
 
     print('==================================================')
-    if not isinstance(perturb_df, pd.DataFrame):
-        if perturb_df is None:
+    if not isinstance(gene_perturb_df, pd.DataFrame):
+        if gene_perturb_df is None:
             print('STEP 2: TOKENIZING ANNDATA OBJECT...')
         else:
-            raise ValueError('`perturb_df` must be a pd.DataFrame.')
+            raise ValueError('`gene_perturb_df` must be a pd.DataFrame.')
     else:
         print('STEP 2: TOKENIZING ANNDATA OBJECT AND APPLYING PERTURBATIONS...')
     print('==================================================')
@@ -738,12 +751,19 @@ def tokenize_adata(adata: ad.AnnData,
         norm_factor_file_path=norm_factor_file_path,
         token_dictionary_file_path=token_dictionary_file_path)
     dataset_dict = tk._tokenize_adata(adata=adata,
-                                      perturb_df=perturb_df)
+                                      gene_perturb_df=gene_perturb_df)
     dataset = tk._create_dataset(
         dataset_dict=dataset_dict,
         use_generator=False,
         cache_directory_path=None,
         keep_in_memory=False)
+
+    columns = list(dataset.features.keys())
+    columns.remove("cell_id")
+    dataset.set_format(
+        type="torch",
+        columns=columns,
+        output_all_columns=True)
     
     return dataset
 
@@ -834,6 +854,8 @@ def embed_dataset(dataset: Dataset,
     # Initialize encoder, predictor, and target encoder
     target_encoder, _ = init_model(
         gt_type=model_config['meta']['gt_type'],
+        count_encoding=model_config['meta']['count_encoding'],
+        n_value_bins=model_config['meta']['n_value_bins'],
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -845,8 +867,15 @@ def embed_dataset(dataset: Dataset,
         pred_emb_dim=model_config['meta']['pred_emb_dim'],
         pred_depth=model_config['meta']['pred_depth'],
         num_heads=model_config['meta']['num_heads'],
+        mlp_ratio=model_config['meta']['mlp_ratio'],
         use_flash_attention=model_config['meta']['use_flash_attention'],
+        api_version=model_config['meta']['api_version'],
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
+
+    if model_config['meta']['api_version'] != 'v3':
+        return_layer_emb_fn = target_encoder.return_layer_emb
+    else:
+        return_layer_emb_fn = target_encoder.backbone.return_layer_emb
 
     # Create mask collator
     mask_collator = BlockMaskCollator(
@@ -864,7 +893,6 @@ def embed_dataset(dataset: Dataset,
         vocab_size=vocab_size,
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
-        max_special_tokens=max_special_tokens,
         tokenizer_type=model_config['data']['tokenizer_type'],
         gt_type=model_config['meta']['gt_type'],
         special_tokens=model_config['meta']['special_tokens'],
@@ -894,7 +922,8 @@ def embed_dataset(dataset: Dataset,
             predictor=None,
             target_encoder=target_encoder,
             opt=None,
-            scaler=None)
+            scaler=None,
+            is_training=False)
     target_encoder.eval()
 
     # Retrieve embeddings
@@ -904,37 +933,29 @@ def embed_dataset(dataset: Dataset,
     all_neighborhood_gene_emb_dict = {}
 
     for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
-        # Load gene tokens and segmentation label to the specified device
-        tokens = udata[0].to(device, non_blocking=True)
-        segments = udata[1].to(device, non_blocking=True)
-        if model_config['meta']['gt_type'] == 'rank':
-            positions = udata[2].to(device, non_blocking=True)
-        elif model_config['meta']['gt_type'] == 'counts':
-            counts = udata[2].to(device, non_blocking=True)
+        for key in udata.keys():
+            if key != 'cell_id':
+                udata[key] = udata[key].to(device, non_blocking=True)
         masks_attention = masks_attention.to(device, non_blocking=True)
 
         # Aggregate gene embeddings into cell and neighborhood embeddings
-        ns_tokens = tokens[:, n_special_tokens:]
+        ns_tokens = udata['tokens'][:, n_special_tokens:]
 
         # Retrieve gene embeddings from different layers
         with torch.cuda.amp.autocast(
             dtype=torch.bfloat16,
             enabled=model_config['meta']['use_bfloat16']):
 
-            if model_config['meta']['gt_type'] == 'rank':
-                emb = target_encoder.return_layer_emb(
-                    layer=emb_layer,
-                    positions=positions,
-                    segments=segments,
-                    tokens=tokens,
-                    masks_attention=masks_attention).cpu()
-            elif model_config['meta']['gt_type'] == 'counts':
-                emb = target_encoder.return_layer_emb(
-                    layer=emb_layer,
-                    tokens=tokens,
-                    segments=segments,
-                    counts=counts,
-                    masks_attention=masks_attention).cpu()
+            c_emb = return_layer_emb_fn(
+                layer=emb_layer,
+                udata=udata,
+                masks_attention=masks_attention,
+                pad_neighborhood=True).cpu()
+            n_emb = return_layer_emb_fn(
+                layer=emb_layer,
+                udata=udata,
+                masks_attention=masks_attention,
+                pad_neighborhood=False).cpu()
         
         # Create mask for index cell genes
         cell_mask = create_binary_selection_mask(
@@ -962,8 +983,8 @@ def embed_dataset(dataset: Dataset,
                 n_segments=model_config['data']['n_segments']).cpu()
 
         # Average gene embeddings into cell and neighborhood embedding                    
-        cell_emb = compute_mean_unmasked_emb(emb, cell_mask)
-        neighborhood_emb = compute_mean_unmasked_emb(emb, neighborhood_mask)
+        cell_emb = compute_mean_unmasked_emb(c_emb, cell_mask)
+        neighborhood_emb = compute_mean_unmasked_emb(n_emb, neighborhood_mask)
 
         all_cell_emb_list.append(cell_emb)
         all_neighborhood_emb_list.append(neighborhood_emb)
@@ -971,24 +992,22 @@ def embed_dataset(dataset: Dataset,
         # Store cell and neighborhood gene embeddings
         for gene_id in cell_gene_ids:
             gene_emb = retrieve_gene_emb(
-                tokens=tokens,
-                emb=emb,
+                ns_tokens=ns_tokens,
+                emb=c_emb,
                 gene_id=gene_id,
                 gene_type="cell",
-                seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens)
+                seq_len_cell=seq_len_cell)
             if itr == 0:
                 all_cell_gene_emb_dict[gene_id] = [gene_emb]
             else:
                 all_cell_gene_emb_dict[gene_id].append(gene_emb)
         for gene_id in neighborhood_gene_ids:
             gene_emb = retrieve_gene_emb(
-                tokens=tokens,
-                emb=emb,
+                ns_tokens=ns_tokens,
+                emb=n_emb,
                 gene_id=gene_id,
                 gene_type="neighborhood",
-                seq_len_cell=seq_len_cell,
-                n_special_tokens=n_special_tokens)
+                seq_len_cell=seq_len_cell)
             if itr == 0:
                 all_neighborhood_gene_emb_dict[gene_id] = [gene_emb]
             else:
@@ -1021,7 +1040,7 @@ def embed_dataset(dataset: Dataset,
 def harmonize_tokenize_embed_pipeline(
         adata: ad.AnnData,
         model_folder_path: str,
-        perturb_df: pd.DataFrame | None = None,               
+        gene_perturb_df: pd.DataFrame | None = None,               
         nproc: int = 4,
         processing_mode: Literal['sequential',
                                  'parallel'] = 'parallel',
@@ -1046,10 +1065,10 @@ def harmonize_tokenize_embed_pipeline(
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
-    perturb_df:
+    gene_perturb_df:
         DataFrame with perturbation data, e.g.
         ```
-        perturb_df =  pd.DataFrame({
+        gene_perturb_df =  pd.DataFrame({
             'ensembl_id': ['ENSG00000169194', 'ENSG00000131724'],
             'target': ['neighborhood', 'cell'],
             'perturbation_type': ['foldchange', 'knockout'],
@@ -1098,7 +1117,7 @@ def harmonize_tokenize_embed_pipeline(
     dataset = tokenize_adata(
         adata=adata,
         model_folder_path=model_folder_path,
-        perturb_df=perturb_df,                   
+        gene_perturb_df=gene_perturb_df,                   
         nproc=nproc,
         processing_mode=processing_mode)
 
