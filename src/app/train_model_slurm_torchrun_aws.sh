@@ -44,4 +44,4 @@ srun torchrun \
   --rdzv_endpoint="$RDZV_HOST:$RDZV_PORT" \
   /home/ubuntu/nichejepa/src/app/main_dist.py \
   --backend nccl \
-  --fname /home/ubuntu/nichejepa/configs/model/hst_corpus_80m_gt_small_aws.yaml
+  --fname /home/ubuntu/nichejepa/configs/model/hst_corpus80m/hst_corpus_80m_gtsmall_aws.yaml
