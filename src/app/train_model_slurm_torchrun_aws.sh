@@ -33,7 +33,7 @@ echo "GPUs visible to this job: $CUDA_VISIBLE_DEVICES"
 nvidia-smi
 
 # Load Python environment
-source nichejepa/bin/activate 
+source ../nichejepa_env/bin/activate
 echo "Using Python: $(which python)"
 echo "Using Torchrun: $(which torchrun)"
 
