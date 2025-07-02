@@ -657,22 +657,22 @@ class CellGraphTokenizer(CellBaseTokenizer):
             [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
 
         # Add coordinate tokens of index cells
-        #adata_dict['rel_x_coord'] = [
-        #    [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 0].tolist()]
-        #adata_dict['rel_y_coord'] = [
-        #    [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 1].tolist()]
+        adata_dict['rel_x_coord'] = [
+            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 0].tolist()]
+        adata_dict['rel_y_coord'] = [
+            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 1].tolist()]
 
         # Add coordinate tokens of neighbor cells
-        #for i in range(len(adata)):
-        #    neighbor_indices = adata_neigh.obsp[
-        #        'spatial_connectivities'][i].indices
-        #    for j in neighbor_indices:
-        #        adata_dict['rel_x_coord'][i].extend([(
-        #            adata.obsm['spatial'][j, 0] - adata.obsm['spatial'][i, 0]
-        #            ).tolist()] * self.seq_len_cell)
-        #        adata_dict['rel_y_coord'][i].extend([(
-        #            adata.obsm['spatial'][j, 1] - adata.obsm['spatial'][i, 1]
-        #            ).tolist()] * self.seq_len_cell)
+        for i in range(len(adata)):
+            neighbor_indices = adata_neigh.obsp[
+                'spatial_connectivities'][i].indices
+            for j in neighbor_indices:
+                adata_dict['rel_x_coord'][i].extend([(
+                    adata.obsm['spatial'][j, 0] - adata.obsm['spatial'][i, 0]
+                    ).tolist()] * self.seq_len_cell)
+                adata_dict['rel_y_coord'][i].extend([(
+                    adata.obsm['spatial'][j, 1] - adata.obsm['spatial'][i, 1]
+                    ).tolist()] * self.seq_len_cell)
 
         # Prepare gene tokens for cell and neighborhood for this batch
         adata_dict['gene_tokens_cell'] = []
