@@ -152,6 +152,7 @@ def load_checkpoint(device: str,
 def init_model(gt_type: Literal['rank', 'count', 'combined'],
                count_encoding: Literal['value_bins', 'mlp'],
                n_value_bins: int,
+               cell_pos_enc: Literal['segment', 'coord'],
                device: str,
                vocab_size: int,
                seq_len: int,
@@ -177,6 +178,12 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
     -----------
     gt_type:
         Gene transformer type.
+    count_encoding:
+        How counts are encoded.
+    n_value_bins:
+        Number of value bins if `value_bin` count encoding is used.
+    cell_pos_enc:
+        How cell positions are encoded.
     device:
         Device on which the model will be initialized.
     vocab_size:
@@ -214,6 +221,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         n_special_values=n_special_values,
         count_encoding=count_encoding,
         n_value_bins=n_value_bins,
+        cell_pos_enc=cell_pos_enc,
         vocab_size=vocab_size,
         seq_len=seq_len,
         n_special_tokens=n_special_tokens,
@@ -235,6 +243,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         seq_len=seq_len,
         n_special_tokens=n_special_tokens,
         n_segments=n_segments,
+        cell_pos_enc=cell_pos_enc,
         predictor_embed_dim=pred_emb_dim,
         depth=pred_depth,
         num_heads=num_heads,

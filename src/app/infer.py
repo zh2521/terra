@@ -141,6 +141,10 @@ def infer(args: dict,
         n_value_bins = args['meta']['n_value_bins']
     else:
         n_value_bins = 100
+    if 'cell_pos_enc' in args['meta'].keys():
+        cell_pos_enc = args['meta']['cell_pos_enc']
+    else:
+        cell_pos_enc = 'segment'
     enc_depth = args['meta']['enc_depth']
     enc_emb_dim = args['meta']['enc_emb_dim']
     pred_depth = args['meta']['pred_depth']
@@ -247,6 +251,7 @@ def infer(args: dict,
         gt_type=gt_type,
         count_encoding=count_encoding,
         n_value_bins=n_value_bins,
+        cell_pos_enc=cell_pos_enc,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -297,6 +302,7 @@ def infer(args: dict,
         seq_len_neighborhood=seq_len_neighborhood,
         tokenizer_type=tokenizer_type,
         gt_type=gt_type,
+        cell_pos_enc=cell_pos_enc,
         special_tokens=special_tokens,
         sampling_strategy=None,
         n_nonzero_tokens_list=n_nonzero_tokens,
@@ -945,6 +951,7 @@ def embed_dataset(dataset: Dataset,
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
         tokenizer_type=model_config['data']['tokenizer_type'],
         gt_type=model_config['meta']['gt_type'],
+        cell_pos_enc=model_config['meta']['cell_pos_enc'],
         special_tokens=model_config['meta']['special_tokens'],
         sampling_strategy=None,
         n_nonzero_tokens_list=None,

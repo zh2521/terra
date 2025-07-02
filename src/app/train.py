@@ -200,6 +200,10 @@ def train(args: dict,
     gt_type = args['meta']['gt_type']
     count_encoding = args['meta']['count_encoding']
     n_value_bins = args['meta']['n_value_bins']
+    if 'cell_pos_enc' in args['meta'].keys():
+        cell_pos_enc = args['meta']['cell_pos_enc']
+    else:
+        cell_pos_enc = 'segment'
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
@@ -343,6 +347,7 @@ def train(args: dict,
         gt_type=gt_type,
         count_encoding=count_encoding,
         n_value_bins=n_value_bins,
+        cell_pos_enc=cell_pos_enc,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -393,6 +398,7 @@ def train(args: dict,
                 seq_len_neighborhood=seq_len_neighborhood,
                 tokenizer_type=tokenizer_type,
                 gt_type=gt_type,
+                cell_pos_enc=cell_pos_enc,
                 special_tokens=special_tokens,
                 sampling_strategy=sampling_strategy,
                 n_nonzero_tokens_list=nz,
@@ -408,6 +414,7 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             tokenizer_type=tokenizer_type,
             gt_type=gt_type,
+            cell_pos_enc=cell_pos_enc,
             special_tokens=special_tokens,
             sampling_strategy=sampling_strategy,
             n_nonzero_tokens_list=n_nonzero_tokens,
