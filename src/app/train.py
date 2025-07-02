@@ -8,6 +8,16 @@ https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 import gc
 import os
 
+# -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
+try:
+    # -- WARNING: IF DOING DISTRIBUTED TRAINING ON A NON-SLURM CLUSTER, MAKE
+    # --          SURE TO UPDATE THIS TO GET LOCAL-RANK ON NODE, OR ENSURE
+    # --          THAT YOUR JOBS ARE LAUNCHED WITH ONLY 1 DEVICE VISIBLE
+    # --          TO EACH PROCESS
+    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ['SLURM_LOCALID']
+except Exception:
+    pass
+
 import copy
 import logging
 import sys
