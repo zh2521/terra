@@ -197,6 +197,9 @@ class CellBaseTokenizer(ABC):
         self.norm_factor_file_path = norm_factor_file_path
         self.token_dictionary_file_path = token_dictionary_file_path
 
+        # TODO fix this for radius and delaunay
+        self.seq_len_cell = int(self.model_input_size / (self.n_neighs + 1))
+
         # Load token dictionary
         logger.info('Loading token dictionary from '
                     f'{self.token_dictionary_file_path}.')
@@ -412,7 +415,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
     def _tokenize_adata(self,
                         adata_file_path: Path | str | None = None,
                         adata: ad.AnnData | None = None,
-                        perturb_df: pd.DataFrame | None = None,
                         ) -> dict:
         """
         Tokenize cells from an `.h5ad` (AnnData) file, equivalent to one
@@ -424,16 +426,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
             Path to AnnData file containing cells to be tokenized.
         adata:
             AnnData object to be tokenized.
-        perturb_df:
-            DataFrame with perturbation data, e.g.
-            ```
-            perturb_df =  pd.DataFrame({
-                'ensembl_id': ['ENSG00000169194', 'ENSG00000131724'],
-                'target': ['neighborhood', 'cell'],
-                'perturbation_type': ['foldchange', 'knockout'],
-                'foldchange': [0.5, np.nan]
-            })
-        ```.
 
         Returns
         ----------
@@ -486,62 +478,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Filter cells based on adata.obs['filter_pass']
         adata = filter_cells(adata)
 
-        if isinstance(perturb_df, pd.DataFrame):
-            # Apply perturbations based on perturb_df
-            print('Applying perturbations...')
-            adata_neigh = adata.copy()
-
-            # Divide genes by target and perturbation type
-            cell_foldchange_genes = perturb_df[
-                (perturb_df['perturbation_type'] == 'foldchange') & 
-                (perturb_df['target'] == 'cell')]['ensembl_id'].values.tolist()
-            cell_foldchanges = perturb_df[
-                (perturb_df['perturbation_type'] == 'foldchange') & 
-                (perturb_df['target'] == 'cell')]['foldchange'].values.tolist()
-            cell_knockout_genes = perturb_df[
-                (perturb_df['perturbation_type'] == 'knockout') & 
-                (perturb_df['target'] == 'cell')]['ensembl_id'].values.tolist()
-
-            neighborhood_foldchange_genes = perturb_df[
-                (perturb_df['perturbation_type'] == 'foldchange') & 
-                (perturb_df['target'] == 'neighborhood')
-                ]['ensembl_id'].values.tolist()
-            neighborhood_foldchanges = perturb_df[
-                (perturb_df['perturbation_type'] == 'foldchange') & 
-                (perturb_df['target'] == 'neighborhood')
-                ]['foldchange'].values.tolist()
-            neighborhood_knockout_genes = perturb_df[
-                (perturb_df['perturbation_type'] == 'knockout') & 
-                (perturb_df['target'] == 'neighborhood')
-                ]['ensembl_id'].values.tolist()
-
-            # Increase foldchange genes by foldchange
-            for gene, fc in zip(cell_foldchange_genes, cell_foldchanges):
-                if gene in adata.var['ensembl_id'].values.tolist():
-                    col_idx = np.where(adata.var['ensembl_id'] == gene)[0]
-                    adata.X[:, col_idx] = adata.X[:, col_idx].multiply(fc)
-            for gene, fc in zip(neighborhood_foldchange_genes,
-                                neighborhood_foldchanges):
-                if gene in adata_neigh.var['ensembl_id'].values.tolist():
-                    col_idx = np.where(
-                        adata_neigh.var['ensembl_id'] == gene)[0]
-                    adata_neigh.X[:, col_idx] = adata_neigh.X[
-                        :, col_idx].multiply(fc)
-
-            # Knockout knockout genes
-            for gene in cell_knockout_genes:
-                if gene in adata.var['ensembl_id'].values.tolist():
-                    col_idx = np.where(adata.var['ensembl_id'] == gene)[0]
-                    adata.X[:, col_idx] = adata.X[:, col_idx].multiply(0)
-            for gene in neighborhood_knockout_genes:
-                if gene in adata_neigh.var['ensembl_id'].values.tolist():
-                    col_idx = np.where(
-                        adata_neigh.var['ensembl_id'] == gene)[0]
-                    adata_neigh.X[:, col_idx] = adata_neigh.X[
-                        :, col_idx].multiply(0)
-        else:
-            print('No perturbations applied...')
-            adata_neigh = adata        
+        adata_neigh = adata        
 
         print('Computing spatial neighborhood...')
         # Construct neighbor graph
@@ -558,60 +495,36 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # tokenization
         if self.rank_cell_norm_method == 'read_depth':
             adata.layers['X_rank'] = normalize_by_read_depth(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_read_depth(
-                    adata_neigh.X)
 
         elif self.rank_cell_norm_method == 'gene_corrected_read_depth':
             adata.layers['X_rank'] = \
                 normalize_by_gene_corrected_read_depth(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_read_depth(
-                    adata_neigh.X)
 
         elif self.rank_cell_norm_method == 'cell_area':
             adata.layers['X_rank'] = normalize_by_cell_area(
                 adata.X,
                 cell_areas=adata.obs['cell_area'].values)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_cell_area(
-                    adata_neigh.X,
-                    cell_areas=adata_neigh.obs['cell_area'].values)
         else:
             if self.rank_cell_norm_method is None:
                 adata.layers['X_rank'] = adata.X
-                if isinstance(perturb_df, pd.DataFrame):
-                    adata_neigh.layers['X_rank'] = adata_neigh.X
             else:
                 raise ValueError(
                     f"Invalid 'cell_norm_method' {self.rank_cell_norm_method}.")
 
         if self.count_cell_norm_method == 'read_depth':
-            adata.layers['X_count'] = normalize_by_read_depth(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_read_depth(
-                    adata_neigh.X)                    
+            adata.layers['X_count'] = normalize_by_read_depth(adata.X)                
 
         elif self.count_cell_norm_method == 'gene_corrected_read_depth':
             adata.layers['X_count'] = \
-                normalize_by_gene_corrected_read_depth(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = \
-                    normalize_by_gene_corrected_read_depth(adata_neigh.X)                    
+                normalize_by_gene_corrected_read_depth(adata.X)                   
 
         elif self.count_cell_norm_method == 'cell_area':
             adata.layers['X_count'] = normalize_by_cell_area(
                 adata.X,
                 cell_areas=adata.obs['cell_area'].values)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_cell_area(
-                    adata_neigh.X,
-                    cell_areas=adata_neigh.obs['cell_area'].values)
         else:
             if self.count_cell_norm_method is None:
                 adata.layers['X_count'] = adata.X
-                if isinstance(perturb_df, pd.DataFrame):
-                    adata_neigh.layers['X_count'] = adata_neigh.X
             else:
                 raise ValueError(
                     f"Invalid 'cell_norm_method' \
@@ -633,12 +546,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 norm_factor_file_path=self.norm_factor_file_path,
                 probed_genes=adata.var['ensembl_id'],
                 norm_factor=norm_factor)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_factor(
-                    adata_neigh.layers['X_rank'],
-                    norm_factor_file_path=self.norm_factor_file_path,
-                    probed_genes=adata_neigh.var['ensembl_id'],
-                    norm_factor=norm_factor)
         elif self.rank_gene_norm_method == 'nonzero_mean':
             if self.rank_cell_norm_method is None:
                 norm_factor = 'nonzero_mean'
@@ -652,18 +559,9 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 adata.layers['X_rank'],
                 norm_factor_file_path=self.norm_factor_file_path,
                 probed_genes=adata.var['ensembl_id'],
-                norm_factor=norm_factor)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_factor(
-                    adata_neigh.layers['X_rank'],
-                    norm_factor_file_path=self.norm_factor_file_path,
-                    probed_genes=adata_neigh.var['ensembl_id'],
-                    norm_factor=norm_factor)                
+                norm_factor=norm_factor)              
         elif self.rank_gene_norm_method == 'seurat_v3':
             adata.layers['X_rank'] = normalize_by_seurat(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_seurat(
-                    adata_neigh.X)
         else:
             if self.rank_gene_norm_method is None:
                 pass
@@ -684,13 +582,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 adata.layers['X_count'],
                 norm_factor_file_path=self.norm_factor_file_path,
                 probed_genes=adata.var['ensembl_id'],
-                norm_factor=norm_factor)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_factor(
-                    adata_neigh.layers['X_count'],
-                    norm_factor_file_path=self.norm_factor_file_path,
-                    probed_genes=adata_neigh.var['ensembl_id'],
-                    norm_factor=norm_factor)                
+                norm_factor=norm_factor)              
         elif self.count_gene_norm_method == 'nonzero_mean':
             if self.count_cell_norm_method is None:
                 norm_factor = 'nonzero_mean'
@@ -704,18 +596,9 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 adata.layers['X_count'],
                 norm_factor_file_path=self.norm_factor_file_path,
                 probed_genes=adata.var['ensembl_id'],
-                norm_factor=norm_factor)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_factor(
-                    adata_neigh.layers['X_count'],
-                    norm_factor_file_path=self.norm_factor_file_path,
-                    probed_genes=adata_neigh.var['ensembl_id'],
-                    norm_factor=norm_factor)                
+                norm_factor=norm_factor)            
         elif self.count_gene_norm_method == 'seurat_v3':
             adata.layers['X_count'] = normalize_by_seurat(adata.X)
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_seurat(
-                    adata_neigh.X)
         else:
             if self.count_gene_norm_method is None:
                 pass
@@ -730,17 +613,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 self.rank_gene_norm_method is not None):
                 raise ValueError('Invalid combination of norm methods.')
             adata.layers['X_rank'] = \
-                normalize_by_analytic_pearson_residuals(adata.layers['X_rank'])
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = \
-                    normalize_by_analytic_pearson_residuals(
-                        adata_neigh.layers['X_rank'])                
+                normalize_by_analytic_pearson_residuals(adata.layers['X_rank'])           
         elif self.rank_count_norm_method == 'shifted_log':
             adata.layers['X_rank'] = normalize_by_shifted_log(
-                adata.layers['X_rank'])
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_rank'] = normalize_by_shifted_log(
-                    adata_neigh.layers['X_rank'])                
+                adata.layers['X_rank'])               
         else:
             if self.rank_count_norm_method is None:
                 pass
@@ -754,17 +630,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 self.count_gene_norm_method is not None):
                 raise ValueError('Invalid combination of norm methods.')
             adata.layers['X_count'] = \
-                normalize_by_analytic_pearson_residuals(adata.layers['X_count'])
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = \
-                    normalize_by_analytic_pearson_residuals(
-                        adata_neigh.layers['X_count'])                
+                normalize_by_analytic_pearson_residuals(adata.layers['X_count'])            
         elif self.count_count_norm_method == 'shifted_log':
             adata.layers['X_count'] = normalize_by_shifted_log(
-                adata.layers['X_count'])
-            if isinstance(perturb_df, pd.DataFrame):
-                adata_neigh.layers['X_count'] = normalize_by_shifted_log(
-                    adata_neigh.layers['X_count'])                
+                adata.layers['X_count'])               
         else:
             if self.count_count_norm_method is None:
                 pass
@@ -787,14 +656,29 @@ class CellGraphTokenizer(CellBaseTokenizer):
         coding_miRNA_tokens_cell = np.array(
             [self.token_dict[gene_id] for gene_id in coding_miRNA_ids])
 
+        # Add coordinate tokens of index cells
+        adata_dict['rel_x_coord'] = [
+            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 0].tolist()]
+        adata_dict['rel_y_coord'] = [
+            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 1].tolist()]
+
+        # Add coordinate tokens of neighbor cells
+        for i in range(len(adata)):
+            neighbor_indices = adata_neigh.obsp[
+                'spatial_connectivities'][i].indices
+            for j in neighbor_indices:
+                adata_dict['rel_x_coord'][i].extend([(
+                    adata.obsm['spatial'][j, 0] - adata.obsm['spatial'][i, 0]
+                    ).tolist()] * self.seq_len_cell)
+                adata_dict['rel_y_coord'][i].extend([(
+                    adata.obsm['spatial'][j, 1] - adata.obsm['spatial'][i, 1]
+                    ).tolist()] * self.seq_len_cell)
+
         # Prepare gene tokens for cell and neighborhood for this batch
         adata_dict['gene_tokens_cell'] = []
         adata_dict['gene_expr_cell'] = []
         adata_dict['gene_tokens_neighborhood'] = []
         adata_dict['gene_expr_neighborhood'] = []
-        if isinstance(perturb_df, pd.DataFrame):
-            adata_dict['gene_tokens_cell_neigh'] = []
-            adata_dict['gene_expr_cell_neigh'] = []
             
         # Divide cells into chunks and loop through chunks
         print('Ranking gene tokens based on normalized counts.')
@@ -819,25 +703,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
                         np.argsort(-norm_counts_cell_rank[j])]
                     for j in range(norm_counts_cell_count.shape[0])]
 
-                if isinstance(perturb_df, pd.DataFrame):
-                    norm_counts_cell_neigh_rank = adata_neigh[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_rank'].toarray()
-                    norm_counts_cell_neigh_count = adata_neigh[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_count'].toarray()
-
-                    # Rank gene tokens and append across chunks
-                    adata_dict['gene_tokens_cell_neigh'] += [
-                        rank_gene_tokens(norm_counts_cell_neigh_rank[j],
-                        coding_miRNA_tokens_cell)
-                        for j in range(norm_counts_cell_neigh_rank.shape[0])]
-
-                    # Rank gene expression and append across chunks
-                    adata_dict['gene_expr_cell_neigh'] += [
-                        norm_counts_cell_neigh_count[j][
-                            np.argsort(-norm_counts_cell_neigh_rank[j])]
-                        for j in range(norm_counts_cell_neigh_count.shape[0])]
             else:
                 norm_counts_cell_rank = sp.csr_matrix(adata[
                     i : i + self.chunk_size, coding_miRNA_idx].layers[
@@ -859,33 +724,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                         np.argsort(-norm_counts_cell_rank[j].data)]
                     for j in range(norm_counts_cell_count.shape[0])]
 
-                if isinstance(perturb_df, pd.DataFrame):
-                    norm_counts_cell_neigh_rank = sp.csr_matrix(adata_neigh[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_rank'])
-                    norm_counts_cell_neigh_count = sp.csr_matrix(adata_neigh[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_count'])
-
-                    # Rank gene tokens and append across chunks
-                    adata_dict['gene_tokens_cell_neigh'] += [
-                        rank_gene_tokens(
-                            norm_counts_cell_neigh_rank[j].data,
-                            coding_miRNA_tokens_cell[
-                                norm_counts_cell_neigh_rank[j].indices])
-                        for j in range(norm_counts_cell_neigh_rank.shape[0])]
-
-                    # Rank gene expression and append across chunks
-                    adata_dict['gene_expr_cell_neigh'] += [
-                        norm_counts_cell_neigh_count[j].data[
-                            np.argsort(-norm_counts_cell_neigh_rank[j].data)]
-                        for j in range(norm_counts_cell_neigh_count.shape[0])]
-
-        if not isinstance(perturb_df, pd.DataFrame):
-            adata_dict['gene_tokens_cell_neigh'] = adata_dict[
-                'gene_tokens_cell']
-            adata_dict['gene_expr_cell_neigh'] = adata_dict[
-                'gene_expr_cell']
+        adata_dict['gene_tokens_cell_neigh'] = adata_dict[
+            'gene_tokens_cell']
+        adata_dict['gene_expr_cell_neigh'] = adata_dict[
+            'gene_expr_cell']
 
         print('Retrieving tokens for neighborhood cells.')
         adata_dict['gene_tokens_neighborhood'] = [
@@ -895,14 +737,18 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict['seg_tokens_neighborhood'] = [
             np.array([]) for i in range(len(adata))]
         
-        adata_dict['cell_degrees'] = []
+        #adata_dict['cell_degrees'] = []
+
+        # Add cell IDs for cell identification when applying perturbations
+        adata_dict['cell_ids'] = [
+            [cell_id] * self.seq_len_cell for cell_id in adata.obs['cell_id'].values.tolist()]
 
         n_cells = len(adata)
 
         # Add read depth and number of genes
-        adata_dict['cell_total_counts'] = [
-            [total_counts] for total_counts in adata.X.sum(axis=1).A1.tolist()]
-        adata_dict['cell_n_probed_genes'] = [adata.X.shape[1]] * n_cells
+        #adata_dict['cell_total_counts'] = [
+        #    [total_counts] for total_counts in adata.X.sum(axis=1).A1.tolist()]
+        #adata_dict['cell_n_probed_genes'] = [adata.X.shape[1]] * n_cells
         
         # Loop through all cells to add neighbor cell gene tokens based on
         # position of neighbor cell compared to index cell. Gene tokens of cells
@@ -913,7 +759,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 'spatial_connectivities'][i].nonzero()[1]
 
             # Store cell degree (number of neighbors excluding cell i)
-            adata_dict['cell_degrees'].append(int(len(neighbors_i)))
+            #adata_dict['cell_degrees'].append(int(len(neighbors_i)))
 
             # Take into account case where neighbor cells can have 0 distance
             if (adata_neigh.obsp['spatial_connectivities'].getnnz(axis=1)[i] != 
@@ -953,7 +799,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                      [j + self.max_special_tokens + 1] * len(
                         adata_dict['gene_tokens_cell_neigh'][k])))
 
-                adata_dict['cell_total_counts'][i].append(adata.X[j].sum())
+                #adata_dict['cell_total_counts'][i].append(adata.X[k].sum())
+                adata_dict['cell_ids'][i].extend(
+                    [adata.obs['cell_id'].values.tolist()[k]
+                    ] * self.seq_len_cell)
 
         del adata_dict['gene_tokens_cell_neigh']
         del adata_dict['gene_expr_cell_neigh']
@@ -971,17 +820,17 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
         adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
 
-        adata_dict['batch_value_token'] = [
-            self.token_dict[f'spv_{batch_id_key}']] * n_cells
-        adata_dict['gene_panel_value_token'] = [self.token_dict[
-            f'spv_gene_panel{len(adata.var_names)}']
-            ] * n_cells
-        adata_dict['assay_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
-        adata_dict['species_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
-        adata_dict['tissue_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
+        #adata_dict['batch_value_token'] = [
+        #    self.token_dict[f'spv_{batch_id_key}']] * n_cells
+        #adata_dict['gene_panel_value_token'] = [self.token_dict[
+        #    f'spv_gene_panel{len(adata.var_names)}']
+        #    ] * n_cells
+        #adata_dict['assay_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
+        #adata_dict['species_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
+        #adata_dict['tissue_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
 
         # Store values with right embedding index for count tokenizer
         # Leave space for <pad>, (optional) zero count embedding, and
@@ -1105,11 +954,11 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 (self.model_input_size - len(example['gene_expr']))))
         
         # Retrieve special tokens
-        example['cls_tokens'] = [
-            self.token_dict[f'<cls_{i}>'] for i in range(
-                example['cell_degrees'] + 1)] # include cell itself
-        example['cls_tokens'] += [0] * (
-            self.max_cls_tokens - len(example['cls_tokens']))    
+        #example['cls_tokens'] = [
+        #    self.token_dict[f'<cls_{i}>'] for i in range(
+        #        example['cell_degrees'] + 1)] # include cell itself
+        #example['cls_tokens'] += [0] * (
+        #    self.max_cls_tokens - len(example['cls_tokens']))    
 
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
@@ -1117,11 +966,11 @@ class CellGraphTokenizer(CellBaseTokenizer):
         example['gene_panel_token'] = [example['gene_panel_token']]
         example['batch_token'] = [example['batch_token']]
 
-        example['assay_value_token'] = [example['assay_value_token']]
-        example['species_value_token'] = [example['species_value_token']]
-        example['tissue_value_token'] = [example['tissue_value_token']]
-        example['gene_panel_value_token'] = [example['gene_panel_value_token']]
-        example['batch_value_token'] = [example['batch_value_token']] 
+        #example['assay_value_token'] = [example['assay_value_token']]
+        #example['species_value_token'] = [example['species_value_token']]
+        #example['tissue_value_token'] = [example['tissue_value_token']]
+        #example['gene_panel_value_token'] = [example['gene_panel_value_token']]
+        #example['batch_value_token'] = [example['batch_value_token']] 
 
         # Retrieve special token values
         example['assay_value'] = [example['assay_value']]
@@ -1498,12 +1347,12 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         n_cells = len(adata)
 
         # Add read depth and number of genes
-        adata_dict['cell_total_counts'] = [
-            [total_counts, total_neighborhood_counts] for 
-            total_counts, total_neighborhood_counts in zip(
-                adata.X.sum(axis=1).A1.tolist(),
-                adata.layers['X_neighborhood'].sum(axis=1).A1.tolist())]
-        adata_dict['cell_n_probed_genes'] = [adata.X.shape[1]] * n_cells
+        #adata_dict['cell_total_counts'] = [
+        #    [total_counts, total_neighborhood_counts] for 
+        #    total_counts, total_neighborhood_counts in zip(
+        #        adata.X.sum(axis=1).A1.tolist(),
+        #        adata.layers['X_neighborhood'].sum(axis=1).A1.tolist())]
+        #adata_dict['cell_n_probed_genes'] = [adata.X.shape[1]] * n_cells
 
         # Add special tokens (positional tokens and value tokens)
         batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
@@ -1515,17 +1364,17 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
         adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
 
-        adata_dict['batch_value_token'] = [
-            self.token_dict[f'spv_{batch_id_key}']] * n_cells
-        adata_dict['gene_panel_value_token'] = [self.token_dict[
-            f'spv_gene_panel{len(adata.var_names)}']
-            ] * n_cells
-        adata_dict['assay_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
-        adata_dict['species_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
-        adata_dict['tissue_value_token'] = [
-            self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
+        #adata_dict['batch_value_token'] = [
+        #    self.token_dict[f'spv_{batch_id_key}']] * n_cells
+        #adata_dict['gene_panel_value_token'] = [self.token_dict[
+        #    f'spv_gene_panel{len(adata.var_names)}']
+        #    ] * n_cells
+        #adata_dict['assay_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["assay"]}']] * n_cells
+        #adata_dict['species_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["species"]}']] * n_cells
+        #adata_dict['tissue_value_token'] = [
+        #    self.token_dict[f'spv_{adata.uns["tissue"]}']] * n_cells
 
         # Store values with right embedding index for count tokenizer
         # Leave space for <pad>, <mask> and <cls> tokens
@@ -1596,19 +1445,19 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
                        )).astype(int)
         
         # Retrieve special tokens
-        example['cls_tokens'] = [self.token_dict['<cls_0>'],
-                                 self.token_dict['<cls_1>']]
+        #example['cls_tokens'] = [self.token_dict['<cls_0>'],
+        #                         self.token_dict['<cls_1>']]
         example['assay_token'] = [example['assay_token']]
         example['species_token'] = [example['species_token']]
         example['tissue_token'] = [example['tissue_token']]
         example['gene_panel_token'] = [example['gene_panel_token']]
         example['batch_token'] = [example['batch_token']]
 
-        example['assay_value_token'] = [example['assay_value_token']]
-        example['species_value_token'] = [example['species_value_token']]
-        example['tissue_value_token'] = [example['tissue_value_token']]
-        example['gene_panel_value_token'] = [example['gene_panel_value_token']]
-        example['batch_value_token'] = [example['batch_value_token']]        
+        #example['assay_value_token'] = [example['assay_value_token']]
+        #example['species_value_token'] = [example['species_value_token']]
+        #example['tissue_value_token'] = [example['tissue_value_token']]
+        #example['gene_panel_value_token'] = [example['gene_panel_value_token']]
+        #example['batch_value_token'] = [example['batch_value_token']]        
 
         # Retrieve special token values
         example['assay_value'] = [example['assay_value']]

@@ -84,6 +84,27 @@ def prepare_dataset(
     # Load dataset from the specified path
     data_path = args['data']['tokenized_data_folder_path']
     dataset = load_from_disk(data_path)
+    fields_to_remove = ['cell_degrees', # TODO needed for old tokenized data
+                        'batch_value_token',
+                        'gene_panel_value_token',
+                        'assay_value_token',
+                        'species_value_token',
+                        'tissue_value_token',
+                        'cls_tokens',
+                        'cell_total_counts',
+                        'cell_n_probed_genes']  
+    existing_fields = [
+        col for col in fields_to_remove if col in dataset.column_names]
+
+    if existing_fields:
+        dataset = dataset.remove_columns(existing_fields)
+    
+    columns = list(dataset.features.keys())
+    columns.remove("cell_id")
+    dataset.set_format(
+        type="torch",
+        columns=columns,
+        output_all_columns=True)
 
     if 'precomputed_epoch_splits' in args['data'].keys():
         # Load precomputed epoch-wise splits if specified

@@ -5,17 +5,8 @@ Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 """
 
+import gc
 import os
-
-# -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
-try:
-    # -- WARNING: IF DOING DISTRIBUTED TRAINING ON A NON-SLURM CLUSTER, MAKE
-    # --          SURE TO UPDATE THIS TO GET LOCAL-RANK ON NODE, OR ENSURE
-    # --          THAT YOUR JOBS ARE LAUNCHED WITH ONLY 1 DEVICE VISIBLE
-    # --          TO EACH PROCESS
-    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ['SLURM_LOCALID']
-except Exception:
-    pass
 
 import copy
 import logging
@@ -36,7 +27,7 @@ from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
 from app.helper import init_model, init_opt, load_checkpoint
-from nichejepa.datasets.cell_datasets import make_cell_dataset
+from nichejepa.datasets.cell_datasets import init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.cell_masking import CellMaskCollator
@@ -57,11 +48,105 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
+def train_step(udata,
+               masks_enc,
+               masks_pred,
+               masks_attention,
+               encoder,
+               predictor,
+               target_encoder,
+               optimizer,
+               scaler,
+               scheduler,
+               wd_scheduler,
+               momentum_scheduler,
+               loss_fn_type,
+               use_bfloat16,
+               warmup,
+               epoch,
+               itr,
+               ipe,
+               clip_grad):
+    _new_lr = scheduler.step()
+    _new_wd = wd_scheduler.step()
+
+    def forward_target(udata, masks_attention, target_encoder, masks_pred):
+        with torch.no_grad():
+            h, _ = target_encoder(udata=udata, masks_attention=masks_attention)
+            h = F.layer_norm(h, (h.size(-1),))
+            h = apply_masks(h, masks_pred, concat=False)
+            return h
+
+    def forward_context(udata, encoder, predictor, masks_enc, masks_pred):
+        z, udata = encoder(udata=udata, masks=masks_enc, masks_attention=None)
+        z = predictor(z=z, udata=udata, masks_enc=masks_enc,
+                      masks_pred=masks_pred, masks_attention=None)
+        return z
+
+    def loss_fn(z, h, masks_pred, loss_exp=1.0):
+        loss = 0.
+        for zi, hi in zip(z, h):
+            if loss_fn_type == 'smooth_l1':
+                loss += F.smooth_l1_loss(zi, hi)
+            elif loss_fn_type == 'l1':
+                loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
+        loss /= len(masks_pred)
+        return loss
+
+    # Step 1: forward pass
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
+        h = forward_target(udata, masks_attention, target_encoder, masks_pred)
+        z = forward_context(udata, encoder, predictor, masks_enc, masks_pred)
+        loss = loss_fn(z, h, masks_pred)
+
+    # Step 2: backward pass and step
+    _enc_norm, _pred_norm = 0., 0.
+    if use_bfloat16:
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)
+    else:
+        loss.backward()
+    if warmup >= 1: # iteration-based clipping didn't always work # TODO
+        if (epoch >= warmup) and (clip_grad is not None):
+            _enc_norm = torch.nn.utils.clip_grad_norm_(
+                encoder.parameters(), clip_grad)
+            _pred_norm = torch.nn.utils.clip_grad_norm_(
+                predictor.parameters(), clip_grad)
+    elif (itr > (warmup * ipe)) and (clip_grad is not None):
+        _enc_norm = torch.nn.utils.clip_grad_norm_(
+            encoder.parameters(), clip_grad)
+        _pred_norm = torch.nn.utils.clip_grad_norm_(
+            predictor.parameters(), clip_grad)
+    if use_bfloat16:
+        scaler.step(optimizer)
+        scaler.update()
+    else:
+        optimizer.step()
+
+    optimizer.zero_grad()
+
+    # Step 3: momentum update of target encoder
+    with torch.no_grad():
+        m = next(momentum_scheduler)
+        for param_q, param_k in zip(encoder.parameters(),
+                                    target_encoder.parameters()):
+            param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
+
+    # Logging
+    grad_stats = grad_logger(encoder.named_parameters())
+    grad_stats.global_norm = float(_enc_norm)
+    grad_stats_pred = grad_logger(predictor.named_parameters())
+    grad_stats_pred.global_norm = float(_pred_norm)
+
+    return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
+
+
 def train(args: dict,
           train_dataset: datasets.Dataset,
           resume_preempt: bool=False,
           save_folder_path: str | None = None,
           LOCAL_RANK: int | None = None,
+          WORLD_RANK: int | None = None,
           ):
     """
     Train model.
@@ -90,7 +175,7 @@ def train(args: dict,
         device = torch.device('cpu')
     elif LOCAL_RANK is not None:
         device = torch.device(f"cuda:{LOCAL_RANK}")
-    elif LOCAL_RANK is  None:
+    elif LOCAL_RANK is None:
         device = torch.device('cuda:0')
         torch.cuda.set_device(device)
 
@@ -143,6 +228,10 @@ def train(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
+    if 'sample_segments' in args['mask'].keys():
+        sample_segments = args['mask']['sample_segments']
+    else:
+        sample_segments = False
     targets_list = args['mask']['targets_list']
 
     warmup = args['optimization']['warmup']
@@ -280,7 +369,8 @@ def train(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio=per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            sample_segments=sample_segments)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
@@ -296,7 +386,7 @@ def train(args: dict,
     if isinstance(train_dataset, list):
         train_cell_datasets = []
         for d, nz in zip(train_dataset, epoch_n_nonzero_tokens):
-            cell_d = make_cell_dataset(
+            cell_d = init_cell_dataset(
                 dataset=d,
                 vocab_size=vocab_size,
                 seq_len_cell=seq_len_cell,
@@ -306,11 +396,12 @@ def train(args: dict,
                 special_tokens=special_tokens,
                 sampling_strategy=sampling_strategy,
                 n_nonzero_tokens_list=nz,
+                include_cell_id=False,
                 sep_gene_tokens_neb=sep_gene_tokens_neb)
             train_cell_datasets.append(cell_d)
 
     else:
-        train_cell_dataset = make_cell_dataset(
+        train_cell_dataset = init_cell_dataset(
             dataset=train_dataset,
             vocab_size=vocab_size,
             seq_len_cell=seq_len_cell,
@@ -320,6 +411,7 @@ def train(args: dict,
             special_tokens=special_tokens,
             sampling_strategy=sampling_strategy,
             n_nonzero_tokens_list=n_nonzero_tokens,
+            include_cell_id=False,
             sep_gene_tokens_neb=sep_gene_tokens_neb)
 
     if isinstance(train_dataset, list):
@@ -442,167 +534,37 @@ def train(args: dict,
         train_sampler.set_epoch(epoch)
 
         loss_meter = AverageMeter()
-        maskA_meter = AverageMeter()
-        maskB_meter = AverageMeter()
+        #maskA_meter = AverageMeter()
+        #maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
+        logger.info(f"Before iteration 0.")
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            #if iter_number is not None:
-            #    if itr < iter_number:
-            #        continue
-            tokens = udata[0].to(device, non_blocking=True)
-            segments = udata[1].to(device, non_blocking=True)
-            if gt_type == 'rank':
-                positions = udata[2].to(device, non_blocking=True)
-            elif gt_type == 'counts':
-                counts = udata[2].to(device, non_blocking=True)
+            if itr == 0:
+                logger.info(f"Starting iteration 0.")
+            for key in udata.keys():
+                udata[key] = udata[key].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
 
             assert len(masks_enc) == 1, 'Currently require num encoder masks = 1'
 
-            maskA_meter.update(len(masks_enc[0][0]))
-            maskB_meter.update(len(masks_pred[0][0]))
+            #maskA_meter.update(len(masks_enc[0][0]))
+            #maskB_meter.update(len(masks_pred[0][0]))
 
-            def train_step():
-                _new_lr = scheduler.step()
-                _new_wd = wd_scheduler.step()
+            args = (
+                udata, masks_enc, masks_pred, masks_attention,
+                encoder, predictor, target_encoder,
+                optimizer, scaler,
+                scheduler, wd_scheduler,
+                momentum_scheduler,
+                loss_fn_type, use_bfloat16,
+                warmup, epoch, itr, ipe, clip_grad
+            )
 
-                def forward_target():
-                    with torch.no_grad(): 
-                        # no backward pass for target encoder
-                        # Target encorder forward pass with output dim 
-                        # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
-                        if gt_type == 'rank':
-                            h, _, _ = target_encoder(
-                                tokens=tokens,
-                                segments=segments,
-                                positions=positions,
-                                masks_attention=masks_attention)
-                        elif gt_type == 'counts':
-                            h, _ = target_encoder(
-                                tokens=tokens,
-                                segments=segments,
-                                counts=counts,
-                                masks_attention=masks_attention)
+            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(train_step, *args)
 
-                        # Normalize over feature dim
-                        h = F.layer_norm(h, (h.size(-1),))
-
-                        # Only keep encoded targets (masked genes of h); list
-                        # with length N_TARGETS and output dim (BATCH_SIZE,
-                        # TARGET_MASK_SIZE, EMB_SIZE)
-                        h = apply_masks(
-                            h,
-                            masks_pred,
-                            concat=False)
-                        B = len(h)
-
-                        return h
-
-                def forward_context():
-                    # Context encoder forward pass with output dim (BATCH_SIZE,
-                    # MIN_CONTEXT_SIZE, EMB_DIM) where MIN_CONTEXT_SIZE is
-                    # minmum context size in the batch after removal of
-                    # overlapping targets
-                    if gt_type == 'rank':
-                        z, pos_emb, token_emb = encoder(
-                            positions=positions,
-                            segments=segments,
-                            tokens=tokens,
-                            masks=masks_enc,
-                            masks_attention=None)                       
-                    elif gt_type == 'counts':
-                        z, token_emb = encoder(
-                            tokens=tokens,
-                            segments=segments,
-                            counts=counts,
-                            masks=masks_enc,
-                            masks_attention=None)
-
-                    # Predictor forward pass with output dim (BATCH_SIZE *
-                    # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
-                    if gt_type == 'rank':
-                        z = predictor(z=z,
-                                      pos_embed=pos_emb,
-                                      segments=segments,
-                                      token_embed=token_emb,
-                                      masks_enc=masks_enc,
-                                      masks_pred=masks_pred,
-                                      masks_attention=None)
-                    elif gt_type == 'counts':
-                        z = predictor(z=z,
-                                      token_embed=token_emb,
-                                      segments=segments,
-                                      counts=counts,
-                                      masks_enc=masks_enc,
-                                      masks_pred=masks_pred,
-                                      masks_attention=None)
-                    return z
-
-                def loss_fn(z, h, loss_exp=1.0):
-                    #print(len(z))
-                    #print(len(h))
-                    #print(z)
-                    #print(h)
-                    loss = 0.
-                    # Compute loss and accumulate for each mask-enc/mask-pred pair
-                    for zi, hi in zip(z, h):
-                        if loss_fn_type == 'smooth_l1':
-                            loss += F.smooth_l1_loss(zi, hi)
-                        elif loss_fn_type == 'l1':
-                            loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
-                    loss /= len(masks_pred)
-                    return loss
-
-                # Step 1: forward pass
-                with torch.cuda.amp.autocast(dtype=torch.bfloat16,
-                                             enabled=use_bfloat16):
-                    h = forward_target()
-                    z = forward_context()
-                    loss = loss_fn(z, h)
-
-                # Step 2: backward pass and step
-                _enc_norm, _pred_norm = 0., 0.
-                if use_bfloat16:
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
-                else:
-                    loss.backward()
-                if warmup >= 1: # iteration-based clipping didn't always work # TODO
-                    if (epoch >= warmup) and (clip_grad is not None):
-                        _enc_norm = torch.nn.utils.clip_grad_norm_(
-                            encoder.parameters(), clip_grad)
-                        _pred_norm = torch.nn.utils.clip_grad_norm_(
-                            predictor.parameters(), clip_grad)
-                elif (itr > (warmup * ipe)) and (clip_grad is not None):
-                    _enc_norm = torch.nn.utils.clip_grad_norm_(
-                        encoder.parameters(), clip_grad)
-                    _pred_norm = torch.nn.utils.clip_grad_norm_(
-                        predictor.parameters(), clip_grad)
-                if use_bfloat16:
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
-                grad_stats = grad_logger(encoder.named_parameters())
-                grad_stats.global_norm = float(_enc_norm)
-                grad_stats_pred = grad_logger(predictor.named_parameters())
-                grad_stats_pred.global_norm = float(_pred_norm)
-                optimizer.zero_grad()
-
-                # Step 3: momentum update of target encoder
-                with torch.no_grad():
-                    m = next(momentum_scheduler)
-                    for param_q, param_k in zip(encoder.parameters(),
-                                                target_encoder.parameters()):
-                        param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
-
-                return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
-
-            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
-                train_step)
             loss_meter.update(loss)
             time_meter.update(etime)
 
@@ -641,19 +603,24 @@ def train(args: dict,
             #                grad_stats.max))
 
             #log_stats()
-            if LOCAL_RANK == 0:
-                wandb.log(
-                    {"loss": loss,
-                    'lr':_new_lr,
-                    'epoch': epoch,
-                    'global_norm_enc': grad_stats.global_norm,
-                    'global_norm_pred': grad_stats_pred.global_norm,
-                    })
+            if WORLD_RANK == 0:
+                wandb.log({
+                    "loss": float(loss),
+                    "lr": float(_new_lr),
+                    "epoch": int(epoch),
+                    "global_norm_enc": float(grad_stats.global_norm),
+                    "global_norm_pred": float(grad_stats_pred.global_norm),
+                })
             assert not np.isnan(loss), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
                 save_checkpoint(epoch, itr // checkpoint_freq_iter)
+            del udata, masks_enc, masks_pred, masks_attention
+            del loss, _new_lr, _new_wd
+            del grad_stats, grad_stats_pred
+            torch.cuda.empty_cache()
+            gc.collect()
 
         # -- Save Checkpoint after every epoch
-        logger.info('avg. loss %.3f' % loss_meter.avg)
-        save_checkpoint(epoch)
+        #logger.info('avg. loss %.3f' % loss_meter.avg)
+        #save_checkpoint(epoch)
