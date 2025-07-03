@@ -1528,38 +1528,38 @@ def gene_embed_dataset(dataset: Dataset,
                 if len(neighborhood_gene_ids) != 0 and (return_cosine_sim  or returen_distance):
                     neb_occ_dict[compute_cosine_with] = (torch.stack(neb_occ_list, dim=1), torch.stack(neb_occ_mask_list, dim=1))
 
-                # Compute cosine similarity components using our function for multiple occurrences.
-                if return_cosine_sim:
-                    for compute_cosine_with in compute_cosine_with_list: 
-                        if itr == 0:
-                            cos_sim_dict[compute_cosine_with] = compute_count_mean_cosine_sim(cell_embs,
+            # Compute cosine similarity components using our function for multiple occurrences.
+            if return_cosine_sim:
+                for compute_cosine_with in compute_cosine_with_list: 
+                    if itr == 0:
+                        cos_sim_dict[compute_cosine_with] = compute_count_mean_cosine_sim(cell_embs,
                                                                                                cell_presence, 
                                                                                                neb_occ_dict[compute_cosine_with][0], 
                                                                                                neb_occ_dict[compute_cosine_with][1])
-                        else:
-                            sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs,
+                    else:
+                        sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs,
                                                                                                                 cell_presence,                                
                                                                                                                 neb_occ_dict[compute_cosine_with][0],  
                                                                                                                 neb_occ_dict[compute_cosine_with][1])
-                            sum_cos_sim, pair_count, cell_count = cos_sim_dict[compute_cosine_with]
-                            cos_sim_dict[compute_cosine_with] = (
+                        sum_cos_sim, pair_count, cell_count = cos_sim_dict[compute_cosine_with]
+                        cos_sim_dict[compute_cosine_with] = (
                                 sum_cos_sim + sum_cos_sim_temp,
                                 pair_count + pair_count_temp,
                                 cell_count + cell_count_temp
-                            )
-                if returen_distance:
-                    cos_sim_temp = []
-                    for compute_cosine_with in compute_cosine_with_list:
-                        sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
-                        cell_embs, 
-                        cell_presence,
-                        neb_occ_dict[compute_cosine_with][0], 
-                        neb_occ_dict[compute_cosine_with][1],
-                        return_per_cell=True
                         )
-                        cos_sim_temp.append(sum_cos_sim/pair_count)
-                    _, emd_out = batch_rowwise_distances(cos_sim_temp[0], cos_sim_temp[1])
-                    emd_list.append(emd_out)
+            if returen_distance:
+                cos_sim_temp = []
+                for compute_cosine_with in compute_cosine_with_list:
+                    sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
+                    cell_embs, 
+                    cell_presence,
+                    neb_occ_dict[compute_cosine_with][0], 
+                    neb_occ_dict[compute_cosine_with][1],
+                    return_per_cell=True
+                    )
+                    cos_sim_temp.append(sum_cos_sim/pair_count)
+                _, emd_out = batch_rowwise_distances(cos_sim_temp[0], cos_sim_temp[1])
+                emd_list.append(emd_out)
     # last layer
     if return_gene:
         return all_cell_gene_emb_dict, all_neighborhood_gene_emb_dict
