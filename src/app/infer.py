@@ -1580,7 +1580,7 @@ def get_gene_embed(
     batch_size: int = 128,
     pin_memory: bool = False,
     num_workers: int = 12,
-) -> tuple:
+) -> dict[str, np.ndarray]:
     """
     Retrieve gene embeddings for specified cell and neighborhood gene IDs.
 
@@ -1596,8 +1596,9 @@ def get_gene_embed(
     num_workers: Number of workers used.
 
     Returns
-    -----------
-    all_cell_gene_emb_dict, all_neighborhood_gene_emb_dict
+    -------
+    output_gene_embed : dict
+        Dictionary mapping embedding names to numpy arrays.
     """
     # Load token dictionary
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
@@ -1620,6 +1621,7 @@ def get_gene_embed(
         pin_memory=pin_memory,
         num_workers=num_workers,
         return_gene=True,
+        compute_cosine_with_list=['neighborhood'],
         description='GETTING GENE EMBEDDINGS'
     )
     output_gene_embed = {}        
@@ -1648,7 +1650,7 @@ def get_average_gene_embed(
     batch_size: int = 128,
     pin_memory: bool = False,
     num_workers: int = 12,
-) -> tuple:
+) -> dict[str, np.ndarray]:
     """
     Retrieve average gene embeddings for each gene per dataset.
 
@@ -1664,8 +1666,9 @@ def get_average_gene_embed(
     num_workers: Number of workers used.
 
     Returns
-    -----------
-    all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict
+    -------
+    output_average_gene_embed : dict
+        Dictionary mapping average embedding/statistics names to numpy arrays.
     """
     # Load token dictionary
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
@@ -1674,8 +1677,10 @@ def get_average_gene_embed(
 
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
+    # Create reverse mapping from token id to ensembl id
+    id_to_ensembl = {v: k for k, v in token_dict.items()}
 
-    return gene_embed_dataset(
+    all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict= gene_embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
@@ -1684,12 +1689,39 @@ def get_average_gene_embed(
         batch_size=batch_size,
         pin_memory=pin_memory,
         num_workers=num_workers,
-        return_gene=False,
         return_gene_per_data=True,
-        compute_cosine_with_list=[],
-        returen_distance=False,
-        return_cosine_sim=False,
+        compute_cosine_with_list=['neighborhood'],
+        description='GETTING AVERAGE GENE EMBEDDINGS'
     )
+    cell_gene_emb_features = []
+    cell_gene_emb_counts = []
+
+    neighborhood_gene_emb_features = []
+    neighborhood_gene_emb_counts = []
+
+    for gene_id in cell_gene_ids:
+        if gene_id in all_cell_gene_emb_per_data_dict.keys():
+            sum_emb = all_cell_gene_emb_per_data_dict[gene_id][0].numpy()
+            count_emb = all_cell_gene_emb_per_data_dict[gene_id][1].numpy()
+            cell_gene_emb_features.append((sum_emb / count_emb).reshape(1, -1))
+            cell_gene_emb_counts.append(count_emb.reshape(1, -1))
+
+    for gene_id in neighborhood_gene_ids:
+        if gene_id in all_neighborhood_gene_emb_per_data_dict.keys():
+            sum_emb = all_neighborhood_gene_emb_per_data_dict[gene_id][0].numpy()
+            count_emb = all_neighborhood_gene_emb_per_data_dict[gene_id][1].numpy()
+            neighborhood_gene_emb_features.append((sum_emb / count_emb).reshape(1, -1))
+            neighborhood_gene_emb_counts.append(count_emb.reshape(1, -1))
+
+    output_average_gene_embed = {}        
+
+        # Concatenate all features, sums, and counts into single numpy arrays
+    output_average_gene_embed['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
+    output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+
+    output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
+    output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    return output_average_gene_embed
 
 @torch.no_grad()
 def get_spatial_score(
@@ -1719,8 +1751,9 @@ def get_spatial_score(
     compute_cosine_with_list: A list that defines the items with which we want to compute cosine similarity. It could have value of 'cell' or/and 'neighborhood'.
 
     Returns
-    -----------
-    cos_sim_dict
+    -------
+    cos_sim_dict : dict
+        Dictionary containing cosine similarity statistics as numpy arrays.
     """
     # Load token dictionary
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
@@ -1729,8 +1762,9 @@ def get_spatial_score(
 
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
+    compute_cosine_with_list=["cell", "neighborhood"],
 
-    return gene_embed_dataset(
+    cos_sim_dict = gene_embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
@@ -1739,13 +1773,18 @@ def get_spatial_score(
         batch_size=batch_size,
         pin_memory=pin_memory,
         num_workers=num_workers,
-        return_gene=False,
-        return_gene_per_data=False,
         compute_cosine_with_list=compute_cosine_with_list,
-        returen_distance=False,
         return_cosine_sim=True,
-    )
+        description='COMPUTE THE COSINE SIMILARITY SCORE BETWEEN GENES IN THE CELL AND GENES IN THE NEIGHBORHOOD.'
 
+    )
+    out_put_cosine_sim_score = {} 
+    for compute_cosine_with in compute_cosine_with_list:
+        out_put_cosine_sim_score[f"sum_cos_sim_{compute_cosine_with}"] = cos_sim_dict[compute_cosine_with][0].numpy()
+        out_put_cosine_sim_score[f"pair_count_{compute_cosine_with}"] = cos_sim_dict[compute_cosine_with][1].numpy()
+        out_put_cosine_sim_score[f"cell_count_{compute_cosine_with}"] = cos_sim_dict[compute_cosine_with][2].numpy()
+        out_put_cosine_sim_score[f"cos_sim_{compute_cosine_with}"] = out_put_cosine_sim_score[f"sum_cos_sim_{compute_cosine_with}"] / out_put_cosine_sim_score[f"pair_count_{compute_cosine_with}"]
+    return out_put_cosine_sim_score
 @torch.no_grad()
 def get_emd_distance(
     dataset: Dataset,
@@ -1756,8 +1795,7 @@ def get_emd_distance(
     batch_size: int = 128,
     pin_memory: bool = False,
     num_workers: int = 12,
-    compute_cosine_with_list: list[str] = ["cell", "neighborhood"],
-) -> list:
+) -> np.ndarray:
     """
     Compute and return distance between cosine similarity of cell_neb and cell_cell matrix.
 
@@ -1771,11 +1809,11 @@ def get_emd_distance(
     batch_size: Dataloader param.
     pin_memory: Dataloader param.
     num_workers: Number of workers used.
-    compute_cosine_with_list: A list that defines the items with which we want to compute cosine similarity. It could have value of 'cell' or/and 'neighborhood'.
 
     Returns
-    -----------
-    emd_list
+    -------
+    emd_array : np.ndarray
+        Numpy array of EMD distances.
     """
     # Load token dictionary
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
@@ -1785,7 +1823,7 @@ def get_emd_distance(
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
 
-    return gene_embed_dataset(
+    emd_list = gene_embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
@@ -1794,9 +1832,9 @@ def get_emd_distance(
         batch_size=batch_size,
         pin_memory=pin_memory,
         num_workers=num_workers,
-        return_gene=False,
-        return_gene_per_data=False,
-        compute_cosine_with_list=compute_cosine_with_list,
+        compute_cosine_with_list=["cell", "neighborhood"],
         returen_distance=True,
-        return_cosine_sim=False,
+        description='COMPUTE EMD DISTANCE BETWEEN GENE IN CELL AND NEIGHBORHOOD'
     )
+    
+    return np.concatenate(emd_list, axis=0)
