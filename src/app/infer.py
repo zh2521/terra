@@ -1566,7 +1566,7 @@ def gene_embed_dataset(dataset: Dataset,
     if return_gene_per_data:
         return all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict
     if return_cosine_sim:
-        cos_sim_dict
+        return cos_sim_dict
     if returen_distance:
         return emd_list
 
@@ -1760,7 +1760,7 @@ def get_spatial_score(
 
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
-    compute_cosine_with_list=["cell", "neighborhood"],
+    compute_cosine_with_list=["cell", "neighborhood"]
 
     cos_sim_dict = gene_embed_dataset(
         dataset=dataset,
