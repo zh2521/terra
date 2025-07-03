@@ -8,6 +8,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 import gc
 import os
 
+"""
 # -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
 try:
     # -- WARNING: IF DOING DISTRIBUTED TRAINING ON A NON-SLURM CLUSTER, MAKE
@@ -17,6 +18,7 @@ try:
     os.environ['CUDA_VISIBLE_DEVICES'] = os.environ['SLURM_LOCALID']
 except Exception:
     pass
+"""
 
 import copy
 import logging
@@ -639,5 +641,5 @@ def train(args: dict,
             gc.collect()
 
         # -- Save Checkpoint after every epoch
-        #logger.info('avg. loss %.3f' % loss_meter.avg)
-        #save_checkpoint(epoch)
+        logger.info('avg. loss %.3f' % loss_meter.avg)
+        save_checkpoint(epoch)
