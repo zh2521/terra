@@ -1516,13 +1516,13 @@ def gene_embed_dataset(dataset: Dataset,
                         else:
                                 #all_neighborhood_gene_emb_dict[gene_id].append(gene_occ * occ_mask.unsqueeze(-1))
                             all_neighborhood_gene_emb_dict[gene_id].append(compute_mean_unmasked_emb(gene_occ,occ_mask))
-                        if return_gene_per_data and compute_cosine_with=='neighborhood':
-                            gene_sum, gene_count = compute_sum_and_nonzero_count(compute_mean_unmasked_emb(gene_occ,occ_mask))
-                            if itr == 0:
-                                all_neighborhood_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
-                            else:
-                                all_neighborhood_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
-                                all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
+                    if return_gene_per_data and compute_cosine_with=='neighborhood':
+                        gene_sum, gene_count = compute_sum_and_nonzero_count(compute_mean_unmasked_emb(gene_occ,occ_mask))
+                        if itr == 0:
+                            all_neighborhood_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
+                        else:
+                            all_neighborhood_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
+                            all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
                     # Stack neighborhood gene occurrence tensors along gene dimension:
                     # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
                 if len(neighborhood_gene_ids) != 0 and (return_cosine_sim  or returen_distance):
@@ -1533,14 +1533,14 @@ def gene_embed_dataset(dataset: Dataset,
                 for compute_cosine_with in compute_cosine_with_list: 
                     if itr == 0:
                         cos_sim_dict[compute_cosine_with] = compute_count_mean_cosine_sim(cell_embs,
-                                                                                               cell_presence, 
-                                                                                               neb_occ_dict[compute_cosine_with][0], 
-                                                                                               neb_occ_dict[compute_cosine_with][1])
+                                                                                          cell_presence, 
+                                                                                          neb_occ_dict[compute_cosine_with][0], 
+                                                                                          neb_occ_dict[compute_cosine_with][1])
                     else:
                         sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs,
-                                                                                                                cell_presence,                                
-                                                                                                                neb_occ_dict[compute_cosine_with][0],  
-                                                                                                                neb_occ_dict[compute_cosine_with][1])
+                                                                                                           cell_presence,                                
+                                                                                                           neb_occ_dict[compute_cosine_with][0],  
+                                                                                                           neb_occ_dict[compute_cosine_with][1])
                         sum_cos_sim, pair_count, cell_count = cos_sim_dict[compute_cosine_with]
                         cos_sim_dict[compute_cosine_with] = (
                                 sum_cos_sim + sum_cos_sim_temp,
@@ -1563,10 +1563,10 @@ def gene_embed_dataset(dataset: Dataset,
     # last layer
     if return_gene:
         return all_cell_gene_emb_dict, all_neighborhood_gene_emb_dict
-    if return_cosine_sim:
-        cos_sim_dict
     if return_gene_per_data:
         return all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict
+    if return_cosine_sim:
+        cos_sim_dict
     if returen_distance:
         return emd_list
 
@@ -1677,8 +1677,6 @@ def get_average_gene_embed(
 
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
-    # Create reverse mapping from token id to ensembl id
-    id_to_ensembl = {v: k for k, v in token_dict.items()}
 
     all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict= gene_embed_dataset(
         dataset=dataset,
