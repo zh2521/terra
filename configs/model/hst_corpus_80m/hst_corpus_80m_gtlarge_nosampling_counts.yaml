@@ -16,7 +16,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 144 # 104 # 104 # 224 no bfloat16 # 384, 448
+  batch_size: 40 # 104 # 224 no bfloat16 # 384, 448
   num_workers: 48
   pin_memory: True
 meta:
@@ -24,11 +24,11 @@ meta:
   gt_type: 'counts' # 'rank', 'counts'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
-  enc_depth: 12
-  enc_emb_dim: 384
+  enc_depth: 24
+  enc_emb_dim: 1024
   pred_depth: 12
-  pred_emb_dim: 192 # 384
-  num_heads: 6
+  pred_emb_dim: 384
+  num_heads: 16
   special_tokens: [] # ['assay'] # ['batch'], ['assay', 'tissue', 'gene_panel', 'batch']
   pos_learnable: False
   seg_learnable: False
@@ -47,7 +47,7 @@ mask:
   sample_segments: False
 optimization:
   warmup: 3 # 3
-  epochs: 20 # 10
+  epochs: 10 # 30 # 10
   ema:
   - 0.9995 # 0.998
   - 1.0
