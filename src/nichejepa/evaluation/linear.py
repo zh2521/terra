@@ -40,11 +40,12 @@ class LinearRegressor(nn.Module):
 
 
 def linear_classifier(
-    features: np.ndarray,
-    labels: np.ndarray,
-    train_ratio: float = 0.8,
-    val_ratio: float = 0.1,
-    seed: int = 0,
+    features_train: np.ndarray,
+    labels_train: np.ndarray,
+    features_val: np.ndarray,
+    labels_val: np.ndarray,
+    features_test: np.ndarray,
+    labels_test: np.ndarray,
     n_epochs: int = 400,
     batch_size: int = 128,
     lr: float = 0.001,
@@ -58,28 +59,24 @@ def linear_classifier(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    features = torch.tensor(features, dtype=torch.float32)
-    labels = torch.tensor(labels, dtype=torch.long)
+    features_train = torch.tensor(features_train, dtype=torch.float32)
+    labels_train = torch.tensor(labels_train, dtype=torch.long)
+    features_val = torch.tensor(features_val, dtype=torch.float32)
+    labels_val = torch.tensor(labels_val, dtype=torch.long)
+    features_test = torch.tensor(features_test, dtype=torch.float32)
+    labels_test = torch.tensor(labels_test, dtype=torch.long)
 
-    # --- Dataset Splitting ---
-    dataset = TensorDataset(features, labels)
-    total_size = len(dataset)
-    train_size = int(train_ratio * total_size)
-    val_size = int(val_ratio * total_size)
-    test_size = total_size - train_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(seed))
+    train_dataset = TensorDataset(features_train, labels_train)
+    val_dataset = TensorDataset(features_val, labels_val)
+    test_dataset = TensorDataset(features_test, labels_test)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # --- Model, Optimizer, Scheduler ---
-    num_features = features.shape[1]
-    num_classes = len(torch.unique(labels))
+    num_features = features_train.shape[1]
+    num_classes = len(torch.unique(labels_train)) # all classes need to be in train split
     model = LinearClassifier(num_features, num_classes).to(device)
 
     criterion = nn.CrossEntropyLoss()
@@ -170,11 +167,12 @@ def linear_classifier(
 
 
 def linear_regressor(
-    features: np.ndarray,
-    labels: np.ndarray,
-    train_ratio: float = 0.8,
-    val_ratio: float = 0.1,
-    seed: int = 0,
+    features_train: np.ndarray,
+    labels_train: np.ndarray,
+    features_val: np.ndarray,
+    labels_val: np.ndarray,
+    features_test: np.ndarray,
+    labels_test: np.ndarray,
     n_epochs: int = 400,
     batch_size: int = 128,
     lr: float = 0.001,
@@ -189,28 +187,24 @@ def linear_regressor(
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    features = torch.tensor(features, dtype=torch.float32)
-    labels = torch.tensor(labels, dtype=torch.float32)  # float labels for regression
+    features_train = torch.tensor(features_train, dtype=torch.float32)
+    labels_train = torch.tensor(labels_train, dtype=torch.float32)
+    features_val = torch.tensor(features_val, dtype=torch.float32)
+    labels_val = torch.tensor(labels_val, dtype=torch.float32)
+    features_test = torch.tensor(features_test, dtype=torch.float32)
+    labels_test = torch.tensor(labels_test, dtype=torch.float32)
 
-    # --- Dataset Splitting ---
-    dataset = TensorDataset(features, labels)
-    total_size = len(dataset)
-    train_size = int(train_ratio * total_size)
-    val_size = int(val_ratio * total_size)
-    test_size = total_size - train_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset,
-        [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(seed))
+    train_dataset = TensorDataset(features_train, labels_train)
+    val_dataset = TensorDataset(features_val, labels_val)
+    test_dataset = TensorDataset(features_test, labels_test)
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
     # --- Model, Optimizer, Scheduler ---
-    num_features = features.shape[1]
-    num_outputs = labels.shape[1]
+    num_features = features_train.shape[1]
+    num_outputs = labels_train.shape[1] # all classes need to be in train split
     model = LinearRegressor(num_features, num_outputs).to(device)
 
     criterion = nn.MSELoss()
