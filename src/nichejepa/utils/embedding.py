@@ -507,13 +507,22 @@ def batch_rowwise_distances(
             ai = A[b, i, idx]
             bi = B[b, i, idx]
 
-            # Filter non-zero and non-NaN separately for A and B
-            ai_valid = ai[~np.isnan(ai) & (ai != 0)][:, None]
-            bi_valid = bi[~np.isnan(bi) & (bi != 0)][:, None]
+            # Find indices where at least one is non-nan and non-zero
+            valid_idx = (~np.isnan(ai) & (ai != 0)) | (~np.isnan(bi) & (bi != 0))
+            if not np.any(valid_idx):
+                continue
+            ai_valid = ai[valid_idx]
+            bi_valid = bi[valid_idx]
 
-            if ai_valid.shape[0] < 20 or bi_valid.shape[0] < 20:
-                continue  # Skip if either is empty
-            #m_list.append(compute_scalar_mmd(ai_valid, bi_valid))
+            # Replace nan or zero in either with zero if the other is valid
+            ai_valid = np.where((~np.isnan(ai_valid)) & (ai_valid != 0), ai_valid, 0)
+            bi_valid = np.where((~np.isnan(bi_valid)) & (bi_valid != 0), bi_valid, 0)
+
+            ai_valid = ai_valid[:, None]
+            bi_valid = bi_valid[:, None]
+
+            #if ai_valid.shape[0] < 20 or bi_valid.shape[0] < 20:
+            #    continue  # Skip if either is empty
             w_list.append(compute_emd(ai_valid, bi_valid))
 
         if w_list:
