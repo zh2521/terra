@@ -184,8 +184,8 @@ def train(args: dict,
     torch.manual_seed(_GLOBAL_SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(_GLOBAL_SEED)
-    torch.backends.cudnn.deterministic = False # set to True for reproducibility
-    torch.backends.cudnn.benchmark = True # set to False for reproducibility
+    torch.backends.cudnn.deterministic = True # set to True for reproducibility
+    torch.backends.cudnn.benchmark = False # set to False for reproducibility
 
     # Set device
     if not torch.cuda.is_available():
