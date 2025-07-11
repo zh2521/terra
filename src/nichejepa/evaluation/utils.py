@@ -3,6 +3,7 @@ from sklearn.metrics import roc_curve, auc
 import numpy as np
 import pandas as pd
 from scipy.sparse import csr_matrix
+from scipy.special import softmax
 
 
 def compute_neighborhood_composition(adata, cell_type_key='cell_type'):
@@ -33,28 +34,27 @@ def compute_neighborhood_composition(adata, cell_type_key='cell_type'):
     return composition_df
 
 
+def plot_roc_curve(logits, labels):
+    # Convert to numpy arrays
+    logits = np.stack(logits)             # shape (N, 2)
+    labels = np.array(labels)             # shape (N,)
 
+    # Apply softmax to get probabilities
+    probs = softmax(logits, axis=1)       # shape (N, 2)
+    pos_probs = probs[:, 1]               # probability of class 1
 
-def plot_roc_curve(y_true, y_score, title="ROC Curve"):
-    """
-    Plot ROC curve for binary classification.
-
-    Parameters:
-    - y_true: Ground truth binary labels (numpy array of shape (N,))
-    - y_score: Predicted scores or probabilities (numpy array of shape (N,))
-    """
-    fpr, tpr, _ = roc_curve(y_true, y_score)
+    # Compute ROC curve and AUC
+    fpr, tpr, _ = roc_curve(labels, pos_probs)
     roc_auc = auc(fpr, tpr)
 
+    # Plot
     plt.figure()
-    plt.plot(fpr, tpr, label=f'ROC curve (AUC = {roc_auc:.4f})')
-    plt.plot([0, 1], [0, 1], 'k--', label='Random Classifier')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title(title)
-    plt.legend(loc='lower right')
+    plt.plot(fpr, tpr, label=f"ROC curve (AUC = {roc_auc:.4f})")
+    plt.plot([0, 1], [0, 1], "k--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("ROC Curve")
+    plt.legend(loc="lower right")
     plt.grid(True)
     plt.tight_layout()
     plt.show()
-
-    return fpr, tpr, roc_auc
