@@ -1703,12 +1703,21 @@ def get_average_gene_embed(
 
     output_average_gene_embed = {}        
 
-        # Concatenate all features, sums, and counts into single numpy arrays
-    output_average_gene_embed['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
-    output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+    # Concatenate all features, sums, and counts into single numpy arrays
+    if cell_gene_emb_features:
+        output_average_gene_embed['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
+        output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+    else:
+        output_average_gene_embed['cell_gene_emb_average_per_data'] = np.array([]).reshape(0, -1)
+        output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.array([]).reshape(0, -1)
 
-    output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
-    output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    if neighborhood_gene_emb_features:
+        output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
+        output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    else:
+        output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.array([]).reshape(0, -1)
+        output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.array([]).reshape(0, -1)
+    
     return output_average_gene_embed
 
 @torch.no_grad()
