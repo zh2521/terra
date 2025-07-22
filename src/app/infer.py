@@ -1496,21 +1496,37 @@ def gene_embed_dataset(dataset: Dataset,
                             aggregate_multiple=False
                         )
                         
-                        # Find cells where both genes are present
+                        # Case 1: Find cells where both genes are present
                         both_present = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence > 0)
                         
                         if torch.any(both_present):
                             # Get cell gene embeddings where both are present
                             valid_cell_embs = cell_embs[both_present, cell_idx, :]
                             
-                            # Initialize or update receptor average dict
-                            key = (cell_gene_id, neigh_gene_id)
-                            if key not in receptor_average_dict:
-                                receptor_average_dict[key] = [torch.zeros_like(valid_cell_embs[0]), 0]
+                            # Initialize or update receptor average dict for 'present' case
+                            key_present = (cell_gene_id, neigh_gene_id, 'present')
+                            if key_present not in receptor_average_dict:
+                                receptor_average_dict[key_present] = [torch.zeros_like(valid_cell_embs[0]), 0]
                             
-                            # Accumulate sum and count
-                            receptor_average_dict[key][0] += torch.sum(valid_cell_embs, dim=0)
-                            receptor_average_dict[key][1] += valid_cell_embs.shape[0]
+                            # Accumulate sum and count for 'present' case
+                            receptor_average_dict[key_present][0] += torch.sum(valid_cell_embs, dim=0)
+                            receptor_average_dict[key_present][1] += valid_cell_embs.shape[0]
+
+                        # Case 2: Find cells where cell gene is present but neighborhood gene is absent
+                        cell_present_neigh_absent = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence == 0)
+                        
+                        if torch.any(cell_present_neigh_absent):
+                            # Get cell gene embeddings where cell is present but neighborhood is absent
+                            valid_cell_embs_absent = cell_embs[cell_present_neigh_absent, cell_idx, :]
+                            
+                            # Initialize or update receptor average dict for 'absent' case
+                            key_absent = (cell_gene_id, neigh_gene_id, 'absent')
+                            if key_absent not in receptor_average_dict:
+                                receptor_average_dict[key_absent] = [torch.zeros_like(valid_cell_embs_absent[0]), 0]
+                            
+                            # Accumulate sum and count for 'absent' case
+                            receptor_average_dict[key_absent][0] += torch.sum(valid_cell_embs_absent, dim=0)
+                            receptor_average_dict[key_absent][1] += valid_cell_embs_absent.shape[0]
 
             # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
             neb_occ_dict = {}
@@ -1935,13 +1951,22 @@ def average_receptor_embedding(
         description='GETTING AVERAGE RECEPTOR EMBEDDINGS'
     )
 
-    # receptor_sum_count is expected to be a dict[(cell_gene_id, neighborhood_gene_id)] = (sum, count)
+    # receptor_sum_count is expected to be a dict[(cell_gene_id, neighborhood_gene_id, context)] = (sum, count)
     result = {}
-    for (cell_id, neigh_id), (sum_emb, count_emb) in receptor_sum_count.items():
-        ensg_cell = id_to_ensembl[cell_id]
-        ensg_neigh = id_to_ensembl[neigh_id]
+    for key, (sum_emb, count_emb) in receptor_sum_count.items():
+        if len(key) == 3:  # New format with context ('present' or 'absent')
+            cell_id, neigh_id, context = key
+            ensg_cell = id_to_ensembl[cell_id]
+            ensg_neigh = id_to_ensembl[neigh_id]
+            result_key = (ensg_cell, ensg_neigh, context)
+        else:  # Old format without context (backward compatibility)
+            cell_id, neigh_id = key
+            ensg_cell = id_to_ensembl[cell_id]
+            ensg_neigh = id_to_ensembl[neigh_id]
+            result_key = (ensg_cell, ensg_neigh)
+        
         avg_emb = sum_emb.numpy() / count_emb if count_emb > 0 else np.zeros_like(sum_emb.numpy())
-        result[(ensg_cell, ensg_neigh)] = {
+        result[result_key] = {
             'sum': sum_emb.numpy(),
             'count': count_emb,
             'average': avg_emb
