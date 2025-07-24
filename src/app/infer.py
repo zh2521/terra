@@ -1269,6 +1269,7 @@ def gene_embed_dataset(dataset: Dataset,
                   compute_cosine_with_list:  list[str] = [],
                   returen_distance: bool=False,
                   return_cosine_sim: bool=False,
+                  return_receptor_average: bool=False,
                   description: str='',
                   ) -> dict:
     
@@ -1303,6 +1304,8 @@ def gene_embed_dataset(dataset: Dataset,
         and cell_cell matrix.
     return_cosine_sim: 
         If 'True' will compute and return cosine_sim matrix.
+    return_receptor_average:
+        If 'True' will compute and return receptor average embeddings for cell-neighborhood gene pairs.
     description:
         description for task that is currently using this function.
     Returns:
@@ -1434,6 +1437,8 @@ def gene_embed_dataset(dataset: Dataset,
     all_neighborhood_gene_emb_per_data_dict = {}
     cos_sim_dict = {}
     emd_list = []
+    emd_matrix_list = []
+    receptor_average_dict = {}
     MAX_OCC = model_config['data']['n_segments'] -1 
 
 
@@ -1492,7 +1497,53 @@ def gene_embed_dataset(dataset: Dataset,
                     else:
                         all_cell_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
                         all_cell_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
-                # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
+
+            # Compute receptor averages for cell-neighborhood gene pairs
+            if return_receptor_average:
+                for cell_idx, cell_gene_id in enumerate(cell_gene_ids):
+                    for neigh_gene_id in neighborhood_gene_ids:
+                        # Get neighborhood gene presence
+                        neigh_gene_presence, neigh_gene_indices = retrieve_gene_emb(
+                            ns_tokens=ns_tokens,
+                            seq_len_cell=seq_len_cell,
+                            gene_type="neighborhood",
+                            gene_id=neigh_gene_id,
+                            aggregate_multiple=False
+                        )
+                        
+                        # Case 1: Find cells where both genes are present
+                        both_present = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence > 0)
+                        
+                        if torch.any(both_present):
+                            # Get cell gene embeddings where both are present
+                            valid_cell_embs = cell_embs[both_present, cell_idx, :]
+                            
+                            # Initialize or update receptor average dict for 'present' case
+                            key_present = (cell_gene_id, neigh_gene_id, 'present')
+                            if key_present not in receptor_average_dict:
+                                receptor_average_dict[key_present] = [torch.zeros_like(valid_cell_embs[0]), 0]
+                            
+                            # Accumulate sum and count for 'present' case
+                            receptor_average_dict[key_present][0] += torch.sum(valid_cell_embs, dim=0)
+                            receptor_average_dict[key_present][1] += valid_cell_embs.shape[0]
+
+                        # Case 2: Find cells where cell gene is present but neighborhood gene is absent
+                        cell_present_neigh_absent = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence == 0)
+                        
+                        if torch.any(cell_present_neigh_absent):
+                            # Get cell gene embeddings where cell is present but neighborhood is absent
+                            valid_cell_embs_absent = cell_embs[cell_present_neigh_absent, cell_idx, :]
+                            
+                            # Initialize or update receptor average dict for 'absent' case
+                            key_absent = (cell_gene_id, neigh_gene_id, 'absent')
+                            if key_absent not in receptor_average_dict:
+                                receptor_average_dict[key_absent] = [torch.zeros_like(valid_cell_embs_absent[0]), 0]
+                            
+                            # Accumulate sum and count for 'absent' case
+                            receptor_average_dict[key_absent][0] += torch.sum(valid_cell_embs_absent, dim=0)
+                            receptor_average_dict[key_absent][1] += valid_cell_embs_absent.shape[0]
+
+            # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
             neb_occ_dict = {}
             for compute_cosine_with in compute_cosine_with_list:
                 if compute_cosine_with=='neighborhood':
@@ -1561,8 +1612,9 @@ def gene_embed_dataset(dataset: Dataset,
                     return_per_cell=True
                     )
                     cos_sim_temp.append(sum_cos_sim/pair_count)
-                _, emd_out = batch_rowwise_distances(cos_sim_temp[0], cos_sim_temp[1])
+                _, emd_out, emd_matrix = batch_rowwise_distances(cos_sim_temp[0], cos_sim_temp[1])
                 emd_list.append(emd_out)
+                emd_matrix_list.append(emd_matrix)
     # last layer
     if return_gene:
         return all_cell_gene_emb_dict, all_neighborhood_gene_emb_dict
@@ -1571,7 +1623,9 @@ def gene_embed_dataset(dataset: Dataset,
     if return_cosine_sim:
         return cos_sim_dict
     if returen_distance:
-        return emd_list
+        return emd_list, emd_matrix_list
+    if return_receptor_average:
+        return receptor_average_dict
 
 @torch.no_grad()
 def get_gene_embed(
@@ -1716,12 +1770,21 @@ def get_average_gene_embed(
 
     output_average_gene_embed = {}        
 
-        # Concatenate all features, sums, and counts into single numpy arrays
-    output_average_gene_embed['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
-    output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+    # Concatenate all features, sums, and counts into single numpy arrays
+    if cell_gene_emb_features:
+        output_average_gene_embed['cell_gene_emb_average_per_data'] = np.concatenate(cell_gene_emb_features, axis=0)
+        output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.concatenate(cell_gene_emb_counts, axis=0)
+    else:
+        output_average_gene_embed['cell_gene_emb_average_per_data'] =np.array([])
+        output_average_gene_embed['cell_gene_emb_counts_per_data'] = np.array([])
 
-    output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
-    output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    if neighborhood_gene_emb_features:
+        output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.concatenate(neighborhood_gene_emb_features, axis=0)
+        output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.concatenate(neighborhood_gene_emb_counts, axis=0)
+    else:
+        output_average_gene_embed['neighborhood_gene_emb_average_per_data'] = np.array([])
+        output_average_gene_embed['neighborhood_gene_emb_counts_per_data'] = np.array([])
+    
     return output_average_gene_embed
 
 @torch.no_grad()
@@ -1834,7 +1897,7 @@ def get_emd_distance(
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
 
-    emd_list = gene_embed_dataset(
+    emd_list, emd_matrix_list = gene_embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
@@ -1848,4 +1911,79 @@ def get_emd_distance(
         description='COMPUTE EMD DISTANCE BETWEEN GENE IN CELL AND NEIGHBORHOOD'
     )
     
-    return np.concatenate(emd_list, axis=0)
+    return np.concatenate(emd_list, axis=0), np.concatenate(emd_matrix_list, axis=0)
+
+@torch.no_grad()
+def average_receptor_embedding(
+    dataset: Dataset,
+    model_folder_path: str,
+    emb_layer: int | None = None,
+    cell_gene_ensembl_id: list = [],
+    neighborhood_gene_ensembl_id: list = [],
+    batch_size: int = 128,
+    pin_memory: bool = False,
+    num_workers: int = 12,
+) -> dict:
+    """
+    Compute the average embedding for each gene in cell_gene_ensembl_id based on its co-occurrence with genes in neighborhood_gene_ensembl_id.
+
+    For each gene i in cell_gene_ensembl_id and each gene j in neighborhood_gene_ensembl_id, 
+    accumulate the sum and count of gene i's embedding when both i and j co-occur in cell and neighborhood, 
+    respectively. Return the sum, count, and average for each (i, j) pair.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with keys (i, j) for each gene pair, 
+        each containing sum, count, and average embedding for gene i when co-occurring with gene j.
+    """
+    #check for duplicates
+    if len(cell_gene_ensembl_id) != len(set(cell_gene_ensembl_id)):
+        raise ValueError("The list cell_gene_ensembl_id has duplication.")
+    if len(neighborhood_gene_ensembl_id) != len(set(neighborhood_gene_ensembl_id)):
+        raise ValueError("The list neighborhood_gene_ensembl_id has duplication.")
+
+    # Load token dictionary
+    token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
+    with open(token_dictionary_file_path, 'rb') as f:
+        token_dict = pickle.load(f)
+
+    neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
+    cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
+    id_to_ensembl = {v: k for k, v in token_dict.items()}
+
+    # Call gene_embed_dataset with a new flag for receptor averaging
+    receptor_sum_count = gene_embed_dataset(
+        dataset=dataset,
+        model_folder_path=model_folder_path,
+        emb_layer=emb_layer,
+        cell_gene_ids=cell_gene_ids,
+        neighborhood_gene_ids=neighborhood_gene_ids,
+        batch_size=batch_size,
+        pin_memory=pin_memory,
+        num_workers=num_workers,
+        return_receptor_average=True,  # This flag should be handled in gene_embed_dataset
+        description='GETTING AVERAGE RECEPTOR EMBEDDINGS'
+    )
+
+    # receptor_sum_count is expected to be a dict[(cell_gene_id, neighborhood_gene_id, context)] = (sum, count)
+    result = {}
+    for key, (sum_emb, count_emb) in receptor_sum_count.items():
+        if len(key) == 3:  # New format with context ('present' or 'absent')
+            cell_id, neigh_id, context = key
+            ensg_cell = id_to_ensembl[cell_id]
+            ensg_neigh = id_to_ensembl[neigh_id]
+            result_key = (ensg_cell, ensg_neigh, context)
+        else:  # Old format without context (backward compatibility)
+            cell_id, neigh_id = key
+            ensg_cell = id_to_ensembl[cell_id]
+            ensg_neigh = id_to_ensembl[neigh_id]
+            result_key = (ensg_cell, ensg_neigh)
+        
+        avg_emb = sum_emb.numpy() / count_emb if count_emb > 0 else np.zeros_like(sum_emb.numpy())
+        result[result_key] = {
+            'sum': sum_emb.numpy(),
+            'count': count_emb,
+            'average': avg_emb
+        }
+    return result

@@ -53,69 +53,6 @@ def compute_sum_and_nonzero_count(
 
     return row_nonzero_sum, nonzero_row_count
 
-def compute_running_mean_cosine_mult_occ(
-        cell_embs: torch.Tensor,
-        cell_presence: torch.Tensor,
-        neb_occ: torch.Tensor,
-        neb_mask: torch.Tensor
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-    """
-    Computes the total (summed) cosine similarity and the total count of
-    valid occurrence pairs between each cell gene (unique per sequence)
-    and each neighborhood gene (across max_occ occurrences). No
-    averaging per sequence is performed.
-    
-    Parameters
-    ----------
-    cell_embs:
-        Shape: (N, num_cell_genes, D) -- cell gene embeddings.
-    cell_presence:
-        Shape: (N, num_cell_genes) -- binary presence indicator.
-    neb_occ:
-        Shape: (N, num_neb_genes, max_occ, D) -- neighborhood gene
-        occurrence embeddings.
-    neb_mask:
-        Shape: (N, num_neb_genes, max_occ) -- binary mask indicating
-        valid occurrences.
-
-    Returns
-    -------
-    total_cs:
-        Shape: (num_cell_genes, num_neb_genes) -- total sum of cosine
-        similarities.
-    total_count:
-        Shape: (num_cell_genes, num_neb_genes) -- total count of valid
-        occurrence pairs.
-    """
-    # Normalize embeddings along the last dimension.
-    cell_embs = F.normalize(cell_embs, p=2, dim=-1)
-    neb_occ = F.normalize(neb_occ, p=2, dim=-1)
-
-    # Compute cosine similarity between each cell gene and each
-    # neighborhood occurrence.
-    # Resulting shape: (N, num_cell_genes, num_neb_genes, max_occ)
-    cs = torch.einsum("ncd,njod->ncjo", cell_embs, neb_occ)
-
-    # Expand neb_mask to match cs shape.
-    neb_mask_exp = neb_mask.unsqueeze(1) # (N, 1, num_neb_genes, max_occ)
-    cs_masked = cs * neb_mask_exp # zero out invalid occurrences
-
-    # Sum cosine similarities over the occurrence dimension.
-    occ_sum = cs_masked.sum(dim=-1) # (N, num_cell_genes, num_neb_genes)
-    occ_count = neb_mask_exp.sum(dim=-1) # (N, num_cell_genes, num_neb_genes)
-
-    # Only count sequences where the cell gene is present.
-    cell_pres_exp = cell_presence.unsqueeze(-1) # (N, num_cell_genes, 1)
-    occ_sum_masked = occ_sum * cell_pres_exp
-    occ_count_masked = occ_count * cell_pres_exp
-
-    # Sum over all sequences.
-    total_cs = occ_sum_masked.sum(dim=0) # (num_cell_genes, num_neb_genes)
-    total_count = occ_count_masked.sum(dim=0) # (num_cell_genes, num_neb_genes)
-
-    return total_cs, total_count
-
-
 def compute_unmasked_rank_based_weights(tokens: torch.Tensor,
                                         mask: torch.Tensor
                                         ) -> torch.Tensor:
@@ -496,6 +433,7 @@ def batch_rowwise_distances(
 
     mmd_out = np.zeros(B_sz, dtype=float)
     emd_out = np.zeros(B_sz, dtype=float)
+    emd_matrix = np.zeros((B_sz, G), dtype=float)
 
     for b in range(B_sz):
         m_list, w_list = [], []
@@ -511,17 +449,20 @@ def batch_rowwise_distances(
             ai_valid = ai[~np.isnan(ai) & (ai != 0)][:, None]
             bi_valid = bi[~np.isnan(bi) & (bi != 0)][:, None]
 
-            if ai_valid.shape[0] < 20 or bi_valid.shape[0] < 20:
+            if ai_valid.shape[0] < 1 or bi_valid.shape[0] < 1:
+                emd_matrix[b, i] = 0.0
                 continue  # Skip if either is empty
             #m_list.append(compute_scalar_mmd(ai_valid, bi_valid))
-            w_list.append(compute_emd(ai_valid, bi_valid))
+            emd_val = compute_emd(ai_valid, bi_valid)
+            emd_matrix[b, i] = emd_val
+            w_list.append(emd_val)
 
         if w_list:
             #mmd_out[b] = float(np.mean(m_list))
             emd_out[b] = float(np.mean(w_list))
         else:
             mmd_out[b] = emd_out[b] = 0.0
-    return mmd_out, emd_out
+    return mmd_out, emd_out, emd_matrix
 
 
 def collect_adata_from_folder(load_folder_path: str,
