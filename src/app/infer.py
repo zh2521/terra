@@ -11,6 +11,7 @@ from typing import Literal
 import anndata as ad
 import numpy as np
 import pandas as pd
+import scanpy as sc
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
