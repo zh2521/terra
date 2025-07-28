@@ -672,6 +672,7 @@ def infer(args: dict,
 
 def harmonize_adata(adata: ad.AnnData,
                     ensembl_release: int=110, # 111
+                    min_genes_per_cell: int=10,
                     ) -> ad.AnnData:
     """
     Harmonize an AnnData object prior to tokenization.
@@ -680,6 +681,10 @@ def harmonize_adata(adata: ad.AnnData,
     -----------
     adata:
         An unharmonized AnnData object.
+    ensembl_release:
+        Ensembl release used to retrieve ensembl IDs.
+    min_genes_per_cell:
+        Minimum amount of genes per cell for a cell not to be filtered.
 
     Returns:
     -----------
@@ -738,6 +743,11 @@ def harmonize_adata(adata: ad.AnnData,
         adata.uns['species'] = 'homo_sapiens' # just dummy values
     if 'tissue' not in adata.uns.keys():
         adata.uns['tissue'] = 'lung' # just dummy values
+
+    # Filter cells with less than min_genes_per_cell genes
+    sc.pp.filter_cells(
+        adata,
+        min_genes=min_genes_per_cell)
 
     return adata
 
