@@ -37,7 +37,6 @@ dependencies = [
     "ipykernel",
     "pyensembl",
     "leidenalg",
-    "numpy<2.0.0",
 ]
 
 [project.optional-dependencies]
