@@ -31,7 +31,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 export NCCL_DEBUG=INFO
 
-export TMPDIR=/fsx-shared/data/tmp
+export TMPDIR=/fsx-shared/tmp
 
 # activate environment
 source ../nichejepa_env/bin/activate
