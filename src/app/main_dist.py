@@ -82,7 +82,7 @@ def main():
     # Retrieve distributed environment variables
     WORLD_RANK, LOCAL_RANK, WORLD_SIZE = get_distributed_info()
 
-    # Argument parsing (as in your original script)
+    # Argument parsing
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -113,6 +113,7 @@ def main():
     logger.info(f'Params: {params}.')
     if WORLD_RANK==0:
         wandb.init(
+            settings=wandb.Settings(init_timeout=120),
             project='nichejepa-pretraining',
             id=run_id,
             resume="allow",

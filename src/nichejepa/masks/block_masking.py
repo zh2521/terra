@@ -215,11 +215,18 @@ class BlockMaskCollator:
                 pad_values = True
             else:
                 pad_values = False
+            if 'rel_x_coords' in batch[0].keys(): # cell_pos_enc == 'coord'
+                pad_rel_coords = True
+            else:
+                pad_rel_coords = False
             k = torch.randint(low=1, high=self.n_segments, size=(1,)).item()
             cutoff_idx = self.seq_len_cell * k
             for i in range(B):
                 batch[i]['tokens'][cutoff_idx:] = 0
                 batch[i]['segments'][cutoff_idx:] = 0
+                if pad_rel_coords:
+                    batch[i]['rel_x_coords'][cutoff_idx:] = float('-inf')
+                    batch[i]['rel_y_coords'][cutoff_idx:] = float('-inf')
                 if pad_positions:
                     batch[i]['positions'][cutoff_idx:] = 0
                 if pad_values:

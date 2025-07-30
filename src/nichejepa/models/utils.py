@@ -144,6 +144,54 @@ def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
     return pos_emb
 
 
+def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
+                                       coord: torch.Tensor,
+                                       ) -> torch.Tensor:
+    """
+    Retrieve 1D sin cos positional embedding from a tensor of relative
+    coordinates.
+
+    Parameters
+    -----------
+    embed_dim:
+        Output dimension of the positional embedding (for each
+        position). Has to be divisible by 2.
+    coord:
+        A tensor containing the relative coordinates to be embedded.
+        
+    Returns
+    -----------
+    pos_emb:
+        The positional embedding with shape (len(coord), embed_dim).
+    """
+    assert embed_dim % 2 == 0
+
+    device = coord.device
+
+    mask = torch.isneginf(coord)
+    # Replace -inf with zero for computation (safe dummy value)
+    coord[mask] = 0.0
+
+    # compute omega: 1 / 10000^{2i/dim}
+    omega = torch.arange(embed_dim // 2, dtype=torch.float32, device=device)
+    omega = 1.0 / (10000 ** (omega / (embed_dim / 2)))
+
+    # outer product: (seq_len, embed_dim // 2)
+    out = torch.einsum('bl,d->bld', coord, omega)  # (B, seq_len, emb_dim/2)
+
+    # sin and cos embeddings
+    emb_sin = torch.sin(out)
+    emb_cos = torch.cos(out)
+
+    # concatenate along last dimension
+    pos_emb = torch.cat([emb_sin, emb_cos], dim=-1)  # (seq_len, embed_dim)
+
+    # Zero out positions where coord == -inf
+    pos_emb[mask.unsqueeze(-1).expand_as(pos_emb)] = 0.0  # (B, L, D)
+
+    return pos_emb
+
+
 def _no_grad_trunc_normal_(tensor: torch.Tensor,
                            mean: float,
                            std: float,

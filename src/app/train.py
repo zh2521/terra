@@ -8,6 +8,18 @@ https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 import gc
 import os
 
+"""
+# -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
+try:
+    # -- WARNING: IF DOING DISTRIBUTED TRAINING ON A NON-SLURM CLUSTER, MAKE
+    # --          SURE TO UPDATE THIS TO GET LOCAL-RANK ON NODE, OR ENSURE
+    # --          THAT YOUR JOBS ARE LAUNCHED WITH ONLY 1 DEVICE VISIBLE
+    # --          TO EACH PROCESS
+    os.environ['CUDA_VISIBLE_DEVICES'] = os.environ['SLURM_LOCALID']
+except Exception:
+    pass
+"""
+
 import copy
 import logging
 import sys
@@ -72,7 +84,8 @@ def train_step(udata,
 
     def forward_target(udata, masks_attention, target_encoder, masks_pred):
         with torch.no_grad():
-            h, _ = target_encoder(udata=udata, masks_attention=masks_attention)
+            h, _ = target_encoder(
+                udata=udata, masks_attention=masks_attention)
             h = F.layer_norm(h, (h.size(-1),))
             h = apply_masks(h, masks_pred, concat=False)
             return h
@@ -143,7 +156,7 @@ def train_step(udata,
 
 def train(args: dict,
           train_dataset: datasets.Dataset,
-          resume_preempt: bool=False,
+          resume_preempt: bool = False,
           save_folder_path: str | None = None,
           LOCAL_RANK: int | None = None,
           WORLD_RANK: int | None = None,
@@ -156,20 +169,24 @@ def train(args: dict,
     args:
         Dictionary containing the hyperparams from the config file.
     train_dataset:
-        Train split of huggingface dataset.
+        Train split of the huggingface dataset.
     resume_preempt:
+        If `True`, resume a preempted job.
     save_folder_path:
         Path for saving model artifacts.
     LOCAL_RANK:
-        Rank of the process.
+        Local rank of the process.
+    WORLD_RANK:
+        World rank of the process.
     """
     # Set random seeds
     np.random.seed(_GLOBAL_SEED)
     torch.manual_seed(_GLOBAL_SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(_GLOBAL_SEED)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True # set to True for reproducibility
+    torch.backends.cudnn.benchmark = False # set to False for reproducibility
+
     # Set device
     if not torch.cuda.is_available():
         device = torch.device('cpu')
@@ -200,6 +217,10 @@ def train(args: dict,
     gt_type = args['meta']['gt_type']
     count_encoding = args['meta']['count_encoding']
     n_value_bins = args['meta']['n_value_bins']
+    if 'cell_pos_enc' in args['meta'].keys():
+        cell_pos_enc = args['meta']['cell_pos_enc']
+    else:
+        cell_pos_enc = 'segment'
     enc_depth = args['meta']['enc_depth'] 
     enc_emb_dim = args['meta']['enc_emb_dim']    
     pred_depth = args['meta']['pred_depth']
@@ -269,9 +290,11 @@ def train(args: dict,
     with open(token_dict_folder_path, 'rb') as file:
         token_dict = pickle.load(file)
     vocab_size = len(token_dict)
-    n_special_values = sum(1 for key in token_dict if "spv" in key) # this only works now because of the dummy special values
-    max_special_tokens = sum(1 for key in token_dict if "cls" in key) + sum(
-            1 for key in token_dict if "spt" in key)
+    n_special_values = sum(
+        1 for key in token_dict if "spv" in key) # this only works now because of the dummy special values
+    max_special_tokens = sum(
+        1 for key in token_dict if "cls" in key) + sum(
+        1 for key in token_dict if "spt" in key)
 
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
@@ -343,6 +366,7 @@ def train(args: dict,
         gt_type=gt_type,
         count_encoding=count_encoding,
         n_value_bins=n_value_bins,
+        cell_pos_enc=cell_pos_enc,
         device=device,
         vocab_size=vocab_size,
         seq_len=seq_len,
@@ -393,6 +417,7 @@ def train(args: dict,
                 seq_len_neighborhood=seq_len_neighborhood,
                 tokenizer_type=tokenizer_type,
                 gt_type=gt_type,
+                cell_pos_enc=cell_pos_enc,
                 special_tokens=special_tokens,
                 sampling_strategy=sampling_strategy,
                 n_nonzero_tokens_list=nz,
@@ -408,6 +433,7 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             tokenizer_type=tokenizer_type,
             gt_type=gt_type,
+            cell_pos_enc=cell_pos_enc,
             special_tokens=special_tokens,
             sampling_strategy=sampling_strategy,
             n_nonzero_tokens_list=n_nonzero_tokens,
@@ -480,8 +506,9 @@ def train(args: dict,
         p.requires_grad = False
 
     # Define momentum schedule
-    momentum_scheduler = (ema[0] + i*(ema[1]-ema[0])/(ipe*num_epochs*ipe_scale)
-                          for i in range(int(ipe*num_epochs*ipe_scale)+1))
+    momentum_scheduler = (
+        ema[0] + i*(ema[1]-ema[0])/(ipe*num_epochs*ipe_scale)
+        for i in range(int(ipe*num_epochs*ipe_scale)+1))
 
     start_epoch = 0
     # Load training checkpoint
@@ -524,11 +551,11 @@ def train(args: dict,
 
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
+        logger.info(f"Epoch {epoch}")
         if isinstance(train_dataset, list):
             logger.info(f"Using train loader and sampler from epoch {epoch}.")
             train_loader = train_loaders[epoch]
             train_sampler = train_samplers[epoch] 
-        logger.info(f"Epoch {epoch}")
 
         # Update distributed dataloader epoch
         train_sampler.set_epoch(epoch)
@@ -538,10 +565,7 @@ def train(args: dict,
         #maskB_meter = AverageMeter()
         time_meter = AverageMeter()
 
-        logger.info(f"Before iteration 0.")
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            if itr == 0:
-                logger.info(f"Starting iteration 0.")
             for key in udata.keys():
                 udata[key] = udata[key].to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
@@ -563,7 +587,8 @@ def train(args: dict,
                 warmup, epoch, itr, ipe, clip_grad
             )
 
-            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(train_step, *args)
+            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
+                train_step, *args)
 
             loss_meter.update(loss)
             time_meter.update(etime)
@@ -622,5 +647,5 @@ def train(args: dict,
             gc.collect()
 
         # -- Save Checkpoint after every epoch
-        #logger.info('avg. loss %.3f' % loss_meter.avg)
-        #save_checkpoint(epoch)
+        logger.info('avg. loss %.3f' % loss_meter.avg)
+        save_checkpoint(epoch)
