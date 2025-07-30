@@ -757,7 +757,8 @@ def tokenize_adata(adata: ad.AnnData,
                    model_folder_path: str,             
                    nproc: int = 4,
                    processing_mode: Literal['sequential',
-                                            'parallel'] = 'parallel'
+                                            'parallel'] = 'parallel',
+                   add_neigh_cell_ids: bool = True,
                    ) -> Dataset:
     """
     Harmonize and tokenize an AnnData object based on the parameters in the
@@ -775,6 +776,9 @@ def tokenize_adata(adata: ad.AnnData,
         Number of processes used.
     processing_mode:
         Mode of processing.
+    add_neigh_cell_ids:
+        Whether neighbor cell IDs should be stored in tokenized data (used for
+        perturbations).
 
     Returns
     -----------
@@ -814,7 +818,8 @@ def tokenize_adata(adata: ad.AnnData,
         count_gene_norm_method=model_config['data']['count_gene_norm_method'],
         count_count_norm_method=model_config['data']['count_count_norm_method'],
         norm_factor_file_path=norm_factor_file_path,
-        token_dictionary_file_path=token_dictionary_file_path)
+        token_dictionary_file_path=token_dictionary_file_path,
+        add_neigh_cell_ids=add_neigh_cell_ids)
     dataset_dict = tk._tokenize_adata(adata=adata)
     dataset = tk._create_dataset(
         dataset_dict=dataset_dict,

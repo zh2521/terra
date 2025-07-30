@@ -179,6 +179,7 @@ class CellBaseTokenizer(ABC):
                 ] | None = 'shifted_log',
             norm_factor_file_path: Path | str = norm_factor_file_path,
             token_dictionary_file_path: Path | str = token_dictionary_file_path,
+            add_neigh_cell_ids: bool = False,
             ):
         self.nproc = nproc
         self.processing_mode = processing_mode
@@ -196,6 +197,7 @@ class CellBaseTokenizer(ABC):
         self.count_count_norm_method = count_count_norm_method
         self.norm_factor_file_path = norm_factor_file_path
         self.token_dictionary_file_path = token_dictionary_file_path
+        self.add_neigh_cell_ids = add_neigh_cell_ids
 
         # TODO fix this for radius and delaunay
         self.seq_len_cell = int(self.model_input_size / (self.n_neighs + 1))
@@ -740,8 +742,9 @@ class CellGraphTokenizer(CellBaseTokenizer):
         #adata_dict['cell_degrees'] = []
 
         # Add cell IDs for cell identification when applying perturbations
-        adata_dict['cell_ids'] = [
-            [cell_id] * self.seq_len_cell for cell_id in adata.obs['cell_id'].values.tolist()]
+        if self.add_neigh_cell_ids:
+            adata_dict['cell_ids'] = [
+                [cell_id] * self.seq_len_cell for cell_id in adata.obs['cell_id'].values.tolist()]
 
         n_cells = len(adata)
 
@@ -800,9 +803,10 @@ class CellGraphTokenizer(CellBaseTokenizer):
                         adata_dict['gene_tokens_cell_neigh'][k])))
 
                 #adata_dict['cell_total_counts'][i].append(adata.X[k].sum())
-                adata_dict['cell_ids'][i].extend(
-                    [adata.obs['cell_id'].values.tolist()[k]
-                    ] * self.seq_len_cell)
+                if self.add_neigh_cell_ids:
+                    adata_dict['cell_ids'][i].extend(
+                        [adata.obs['cell_id'].values.tolist()[k]
+                        ] * self.seq_len_cell)
 
         del adata_dict['gene_tokens_cell_neigh']
         del adata_dict['gene_expr_cell_neigh']
