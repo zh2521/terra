@@ -52,10 +52,10 @@ optimization:
   warmup: 5 # 3
   epochs: 30 # 30 # 10
   ema:
-  - 0.998 # 0.998, 0.9995
+  - 0.9995 # 0.998, 0.9995
   - 1.0
   start_lr: 1.0e-06 # 2.0e-05
-  lr: 0.000625 # 6.0e-05, 0.000625
+  lr: 6.0e-05 # 6.0e-05, 0.000625
   final_lr: 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4

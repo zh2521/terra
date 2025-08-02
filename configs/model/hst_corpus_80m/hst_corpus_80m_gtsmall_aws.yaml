@@ -18,7 +18,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 80
+  batch_size: 144
   num_workers: 48
   pin_memory: True
 meta:
@@ -49,8 +49,8 @@ mask:
   per_block_mask_ratio: 0.6 # 0.5, 0.6, 0.7, 0.8
   sample_segments: True
 optimization:
-  warmup: 3 # 3
-  epochs: 10 # 30 # 10
+  warmup: 5 # 3
+  epochs: 30 # 30 # 10
   ema:
   - 0.9995 # 0.998
   - 1.0
