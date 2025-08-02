@@ -31,7 +31,6 @@ import numpy as np
 import pandas as pd
 import pickle
 import torch
-import torch.multiprocessing as mp
 import torch.nn.functional as F
 import wandb
 from datasets import load_from_disk
@@ -334,12 +333,6 @@ def train(args: dict,
         dump = os.path.join(save_folder_path, 'params.yaml')
         with open(dump, 'w') as f:
             yaml.dump(args, f)
-    
-    # Start multiprocessing
-    try:
-        mp.set_start_method('spawn')
-    except Exception:
-        pass
 
     # Define log/checkpointing paths
     log_file = os.path.join(save_folder_path, f'{write_tag}_r{rank}.csv')
