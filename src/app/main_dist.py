@@ -3,7 +3,6 @@ import torch
 
 import logging
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from app.train import train
 from nichejepa.datasets.utils import prepare_dataset
 from nichejepa.utils.config import create_params_from_YAML_wandb_config
@@ -80,9 +79,6 @@ def setup_for_distributed(is_master):
 
 
 def main():
-    # Set multiprocessing start method early!
-    mp.set_start_method("spawn", force=True)
-
     # Retrieve distributed environment variables
     WORLD_RANK, LOCAL_RANK, WORLD_SIZE = get_distributed_info()
 
