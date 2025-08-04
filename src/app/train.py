@@ -311,7 +311,7 @@ def train(args: dict,
 
     # Set multiprocessing start method
     try:
-        mp.set_start_method("spawn", force=True)
+        mp.set_start_method("spawn")
     except Exception:
         logger.info(f'Multiprocessing not started.')
     
