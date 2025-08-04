@@ -15,7 +15,7 @@ import scanpy as sc
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
-from datasets import Dataset
+from datasets import concatenate_datasets, Dataset
 from functools import partial
 from tqdm import tqdm
 from pyensembl import EnsemblRelease
@@ -1163,6 +1163,7 @@ def perturb_dataset(dataset: Dataset,
 @torch.no_grad()
 def harmonize_tokenize_embed_pipeline(
         adata: ad.AnnData,
+        sample_key: str | None,
         model_folder_path: str,
         gene_perturb_df: pd.DataFrame | None = None,               
         nproc: int = 4,
@@ -1171,8 +1172,6 @@ def harmonize_tokenize_embed_pipeline(
         save_dataset_path: Path | str | None = None,
         num_shards: int = 32,
         emb_layer: int | None = None,
-        cell_gene_ids: list = [],
-        neighborhood_gene_ids: list = [],
         agg_excluded_tokens: list[int] | None = None,
         top_k: int | None = None,
         batch_size: int = 128,
@@ -1186,6 +1185,8 @@ def harmonize_tokenize_embed_pipeline(
     -----------
     adata:
         An unharmonized AnnData object to be tokenized.
+    sample_key:
+        Key in `adata.obs` where the sample information is stored.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
@@ -1209,11 +1210,6 @@ def harmonize_tokenize_embed_pipeline(
         Number of shards with which huggingface dataset is saved.
     emb_layer:
         Layer for which to retrieve the embedding.
-    cell_gene_ids:
-        List with gene IDs for which cell gene embeddings will be retrieved.
-    neighborhood_gene_ids:
-        List with gene IDs for which neighborhood gene embeddings will be
-        retrived.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
     top_k:
@@ -1230,39 +1226,61 @@ def harmonize_tokenize_embed_pipeline(
     adata:
         A harmonized AnnData object with embeddings stored in `adata.obsm`.
     """
-    print('====================================================================================================')
-    print('                                         HARMONIZE DATA                                             ')
-    print('====================================================================================================')    
-    adata = harmonize_adata(adata)
+    datasets = []
+    if sample_key:
+        samples = adata.obs[sample_key].unique().tolist()
 
-    print('====================================================================================================')
-    print('                                          TOKENIZE DATA                                             ')
-    print('====================================================================================================')  
-    dataset = tokenize_adata(
-        adata=adata,
-        model_folder_path=model_folder_path,             
-        nproc=nproc,
-        processing_mode=processing_mode)
+        for sample in samples:
+            adata_sample = adata[adata.obs[sample_key] == sample]
+            print(f"Start processing sample: {sample}...")
+            print(f"Harmonizing sample {sample}...")
+            adata_sample = harmonize_adata(adata_sample)
+            print(f"Harmonized sample {sample}.")
+
+            print(f"Tokenizing sample {sample}...")
+            dataset_sample = tokenize_adata(
+                adata=adata_sample,
+                model_folder_path=model_folder_path,             
+                nproc=nproc,
+                processing_mode=processing_mode)
+            datasets.append(dataset_sample)
+            print(f"Tokenized sample {sample}.")
+
+        print(f"Concatenating tokenized data...")
+        dataset = concatenate_datasets(datasets)
+        print(f"Concatenated tokenized data.")
+
+    else:
+        print("No `sample_key` specified. Start processing entire AnnData.")
+        print(f"Harmonizing AnnData...")
+        adata = harmonize_adata(adata)
+        print(f"Harmonized AnnData.")
+
+        print(f"Tokenizing AnnData.")
+        dataset = tokenize_adata(
+            adata=adata,
+            model_folder_path=model_folder_path,             
+            nproc=nproc,
+            processing_mode=processing_mode)        
 
     if save_dataset_path:
+        print(f"Saving tokenized data...")
         dataset.save_to_disk(
             save_dataset_path,
             num_shards=num_shards)
+        print(f"Saved tokenized data.")
 
-    print('====================================================================================================')
-    print('                                            EMBED DATA                                              ')
-    print('====================================================================================================')  
+    print(f"Embedding tokenized data...")
     output_embed = embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
-        cell_gene_ids=cell_gene_ids,
-        neighborhood_gene_ids=neighborhood_gene_ids,
         agg_excluded_tokens=agg_excluded_tokens,
         top_k=top_k,
         batch_size=batch_size,
         pin_memory=pin_memory,
         num_workers=num_workers)
+    print(f"Embedded tokenized data.")
 
     # Add embeddings to adata
     for key, values in output_embed.items():
