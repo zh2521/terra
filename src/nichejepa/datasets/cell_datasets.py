@@ -376,6 +376,8 @@ class CellGraphDataset(CellBaseDataset):
                 1, item_dict['tokens'].size(0) + 1, dtype=torch.long)
             item_dict['positions'] = item_dict['positions'] * (
                 item_dict['tokens'] != 0).long()
+            item_dict['positions'] = item_dict['positions'] * (
+                item_dict['gene_expr'] != 0).long()
 
         item_dict['segments'] = torch.where(
             item_dict['tokens'] != 0,
