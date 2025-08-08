@@ -50,6 +50,7 @@ def linear_classifier(
     batch_size: int = 128,
     lr: float = 0.001,
     patience: int = 10,
+    results_save_path: str | None = None,
     ):
     """
     Train a linear classifier with early stopping on validation loss.
@@ -161,7 +162,16 @@ def linear_classifier(
             all_targets.extend(batch_labels.cpu().numpy())
 
     print("\n--- Evaluation Report on Test Set ---")
-    print(classification_report(all_targets, all_preds, digits=4))
+    cls_report = classification_report(
+        all_targets, all_preds, digits=4)
+    print(cls_report)
+
+    # Save to a .txt file
+    if results_save_path:
+        with open(results_save_path, "w") as f:
+            f.write(cls_report)
+
+        print("\n--- Evaluation Report saved. ---")
 
     return all_preds, all_targets, all_logits, model
 
