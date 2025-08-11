@@ -40,8 +40,8 @@ source ../nichejepa_env/bin/activate
 export MASTER_ADDR=$(scontrol show hostname $SLURM_NODELIST | head -n 1)
 export MASTER_PORT=$((12000 + RANDOM % 1000)) 
 
-export EXPERIMENT_NAME="hst_corpus_80m"
-export RUN_NAME="gtbase_aws_16"
+export EXPERIMENT_NAME="hst_corpus_90m" # "hst_corpus_80m"
+export RUN_NAME="gtbase_aws_1"
 
 echo "[+] SLURM_JOB_GPUS: $SLURM_JOB_GPUS"
 echo "[+] CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
@@ -66,4 +66,4 @@ srun torchrun \
     --rdzv_backend c10d \
     /home/ubuntu/sb75/nichejepa/src/app/main_dist.py \
     --backend nccl \
-    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_80m/hst_corpus_80m_gtbase_aws.yaml
+    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_90m/hst_corpus_90m_gtbase_aws.yaml
