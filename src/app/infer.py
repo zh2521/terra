@@ -847,7 +847,8 @@ def embed_dataset(dataset: Dataset,
                   batch_size: int = 128,
                   pin_memory: bool = False,
                   num_workers: int = 12,
-                  include_spatial_cell_emb: bool = True,
+                   include_spatial_cell_emb: bool = True,
+                   return_token_embeddings: bool = False,
                   ) -> dict:
     """
     Parameters
@@ -872,6 +873,9 @@ def embed_dataset(dataset: Dataset,
     include_spatial_cell_emb:
         If `True`, also return a spatially contextualized cell embedding that
         attends to the neighborhood.
+    return_token_embeddings:
+        If `True`, also return per-token embeddings for each sequence position
+        (cell and neighborhood tokens; special tokens are excluded).
 
     Returns:
     -----------
@@ -1000,6 +1004,8 @@ def embed_dataset(dataset: Dataset,
     if include_spatial_cell_emb:
         all_spatial_cell_emb_list = []
     all_neighborhood_emb_list = []
+    if return_token_embeddings:
+        all_token_emb_list = []
 
     for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
         for key in udata.keys():
@@ -1025,6 +1031,9 @@ def embed_dataset(dataset: Dataset,
                 udata=udata,
                 masks_attention=masks_attention,
                 pad_neighborhood=False).cpu()
+            if return_token_embeddings:
+                # n_emb contains embeddings for all  tokens
+                all_token_emb_list.append(n_emb)
         
         # Create mask for index cell genes
         cell_mask = create_binary_selection_mask(
@@ -1076,7 +1085,10 @@ def embed_dataset(dataset: Dataset,
         output_embed["spatial_cell_emb"] = np.array(torch.cat(
             all_spatial_cell_emb_list,
             dim=0))        
-
+    if return_token_embeddings:
+        output_embed["token_emb"] = np.array(torch.cat(
+            all_token_emb_list,
+            dim=0))
     return output_embed
 
 
