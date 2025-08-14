@@ -169,6 +169,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                use_layer_norm: bool = True,
                api_version: Literal['v1', 'v2', 'v3'] = 'v3',
                sep_gene_tokens_neb: bool = False,
+               predict_gene: bool = True,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -208,6 +209,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         If `True` use flash_attention.
     use_layer_norm:
         If `True` use layer norm, else Dynamic Tanh.
+    sep_gene_tokens_neb:
+    predict_gene:
 
     Returns
     -----------
@@ -249,7 +252,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         num_heads=num_heads,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm,
-        api_version=api_version)
+        api_version=api_version,
+        predict_gene=predict_gene)
     if api_version == 'v3':
         predictor = PredictorMultiMaskWrapper(predictor)
 

@@ -1419,26 +1419,36 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
     """
     GeneTransformerCombinedPredictor class.
+
+    Parameters
+    -----------
+    predict_gene:
+        If `True`, predict gene given rank, otherwise predict rank given
+        gene.
     """
     def __init__(
         self,
+        predict_gene: bool=True,
         **base_predictor_kwargs
         ):
         
         super().__init__(**base_predictor_kwargs)
+        self.predict_gene = predict_gene
 
-        # Initialize positional embeddings
-        self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
-                                      self.predictor_embed_dim,
-                                      padding_idx=0)
+        if self.predict_gene:
+            # Initialize positional embeddings
+            self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
+                                        self.predictor_embed_dim,
+                                        padding_idx=0)
 
-        # Prevent gradient updates and initialize with sincos embedding
-        self.pos_embed.weight.requires_grad = False
-        pos_embed = get_1d_sincos_pos_embed(
-            embed_dim=self.predictor_embed_dim,
-            n_zero_pos=0,
-            n_sincos_pos=self.seq_len)
-        self.pos_embed.weight[1:].copy_(torch.from_numpy(pos_embed).float())
+            # Prevent gradient updates and initialize with sincos embedding
+            self.pos_embed.weight.requires_grad = False
+            pos_embed = get_1d_sincos_pos_embed(
+                embed_dim=self.predictor_embed_dim,
+                n_zero_pos=0,
+                n_sincos_pos=self.seq_len)
+            self.pos_embed.weight[1:].copy_(
+                torch.from_numpy(pos_embed).float())
 
     def forward(
         self,
@@ -1496,9 +1506,15 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         # MLP projection layer
         z = self.predictor_embed(z)
 
-        # Get positional and segment embeddings
-        pos_embed = self.pos_embed(udata['positions'])
+        if self.predict_gene:
+            # Get positional embeddings
+            pos_embed = self.pos_embed(udata['positions'])
+        else:
+            # Get gene embeddings
+            token_embed = self.token_embed_projection(
+                udata['token_embed'])
 
+        # Get segment embeddings
         if self.cell_pos_enc == 'segment':
             seg_embed = self.seg_embed(udata['segments'])
         elif self.cell_pos_enc == 'coord':
@@ -1511,10 +1527,13 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
             seg_embed = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
 
-        # Add positional embeddings to tokens from context masks (only
-        # keep context mask indices and sum positional and segment
+        # Add positional or gene embeddings to tokens from context masks (only
+        # keep context mask indices and sum positional or gene and segment
         # embeddings without token embeddings)
-        z += apply_masks(pos_embed, masks_enc)
+        if self.predict_gene:
+            z += apply_masks(pos_embed, masks_enc)
+        else:
+            z += apply_masks(token_embed, masks_enc)
         z += apply_masks(seg_embed, masks_enc)
         _, N_ctxt, D = z.shape # N_ctxt: CONTEXT_MASK_SIZE, D: EMBED_DIM
 
@@ -1522,18 +1541,24 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         # (only keep target mask indices and sum token and segment
         # embeddings without value embeddings; the latter are to be
         # predicted)
-        pos_embs = apply_masks(pos_embed, masks_pred)
+        if self.predict_gene:
+            pos_embs = apply_masks(pos_embed, masks_pred)
+        else:
+            token_embs = apply_masks(token_embed, masks_pred)
         seg_embs = apply_masks(seg_embed, masks_pred)
 
         # Repeat mask token for all batches, masks and "positions" from
         # predictor masks
         pred_tokens = self.mask_token.repeat(
-            pos_embs.size(0), # BATCH_SIZE * N_TARGET_MASKS
-            pos_embs.size(1), # TARGET_MASK_SIZE
+            seg_embs.size(0), # BATCH_SIZE * N_TARGET_MASKS
+            seg_embs.size(1), # TARGET_MASK_SIZE
             1)
 
-        # Add position and segment embeddings to mask tokens                  
-        pred_tokens += pos_embs + seg_embs 
+        # Add position and segment embeddings to mask tokens
+        if self.predict_gene:                  
+            pred_tokens += pos_embs + seg_embs
+        else:
+            pred_tokens += token_embs + seg_embs
 
         # Repeat context embeddings for all target masks
         z = z.repeat(len(masks_pred), 1, 1)

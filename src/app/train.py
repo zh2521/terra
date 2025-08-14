@@ -237,6 +237,10 @@ def train(args: dict,
         loss_fn_type = args['meta']['loss_fn_type']
     else:
         loss_fn_type = 'l1'
+    if 'predict_gene' in args['meta'].keys():
+        predict_gene = args['meta']['predict_gene']
+    else:
+        predict_gene = True
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -381,7 +385,8 @@ def train(args: dict,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm,
-        sep_gene_tokens_neb=sep_gene_tokens_neb)
+        sep_gene_tokens_neb=sep_gene_tokens_neb,
+        predict_gene=predict_gene)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
