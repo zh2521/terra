@@ -369,13 +369,13 @@ class CellGraphDataset(CellBaseDataset):
             item=item,
             segment=1, # index cell segment
             segment_seq_len=self.seq_len_cell)
-        if self.gt_type != 'rank':
-            item_dict['values'] = item_values
         if self.gt_type != 'counts':
             item_dict['positions'] = torch.arange(
                 1, item_dict['tokens'].size(0) + 1, dtype=torch.long)
             item_dict['positions'] = item_dict['positions'] * (
                 item_dict['tokens'] != 0).long()
+        if self.gt_type != 'rank':
+            item_dict['values'] = item_values
             item_dict['positions'] = item_dict['positions'] * (
                 item_dict['values'] != 0.0).long()
         item_dict['segments'] = torch.where(
@@ -420,10 +420,11 @@ class CellGraphDataset(CellBaseDataset):
                         segment_tokens != 0,
                         pos,
                         torch.tensor(0, dtype=torch.long))
-                    masked_pos = torch.where(
-                        segment_values != 0.0,
-                        masked_pos,
-                        torch.tensor(0, dtype=torch.long))
+                    if self.gt_type != 'rank':
+                        masked_pos = torch.where(
+                            segment_values != 0.0,
+                            masked_pos,
+                            torch.tensor(0, dtype=torch.long))
                     item_dict['positions'] = torch.cat(
                         [item_dict['positions'], masked_pos], dim=0)
                 if self.gt_type != 'rank':
