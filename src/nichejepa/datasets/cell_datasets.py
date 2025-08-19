@@ -376,8 +376,9 @@ class CellGraphDataset(CellBaseDataset):
                 item_dict['tokens'] != 0).long()
         if self.gt_type != 'rank':
             item_dict['values'] = item_values
-            item_dict['positions'] = item_dict['positions'] * (
-                item_dict['values'] != 0.0).long()
+            if self.gt_type == 'combined':
+                item_dict['positions'] = item_dict['positions'] * (
+                    item_dict['values'] != 0.0).long()
         item_dict['segments'] = torch.where(
             item_dict['tokens'] != 0,
             torch.ones_like(item_dict['tokens']),
@@ -420,7 +421,7 @@ class CellGraphDataset(CellBaseDataset):
                         segment_tokens != 0,
                         pos,
                         torch.tensor(0, dtype=torch.long))
-                    if self.gt_type != 'rank':
+                    if self.gt_type == 'combined':
                         masked_pos = torch.where(
                             segment_values != 0.0,
                             masked_pos,
