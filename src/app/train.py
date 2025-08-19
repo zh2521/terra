@@ -241,6 +241,10 @@ def train(args: dict,
         predict_gene = args['meta']['predict_gene']
     else:
         predict_gene = True
+    if 'pos_learnable' in args['meta'].keys():
+        pos_learnable = args['meta']['pos_learnable']
+    else:
+        pos_learnable = False
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -386,7 +390,8 @@ def train(args: dict,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
-        predict_gene=predict_gene)
+        predict_gene=predict_gene,
+        pos_learnable=pos_learnable)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator

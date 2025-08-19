@@ -1149,22 +1149,25 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
     GeneTransformerRankPredictor class.
     """
     def __init__(self,
-                 **base_encoder_kwargs
+                 pos_learnable: bool = False,
+                 **base_predictor_kwargs
                  ):
-        super().__init__(**base_encoder_kwargs)
+        super().__init__(**base_predictor_kwargs)
 
         # Initialize positional embeddings
         self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
                                       self.predictor_embed_dim,
                                       padding_idx=0)
 
-        # Prevent gradient updates and initialize with sincos embedding
-        self.pos_embed.weight.requires_grad = False
-        pos_embed = get_1d_sincos_pos_embed(
-            embed_dim=self.predictor_embed_dim,
-            n_zero_pos=0,
-            n_sincos_pos=self.seq_len)
-        self.pos_embed.weight[1:].copy_(torch.from_numpy(pos_embed).float())
+        if not pos_learnable:
+            # Prevent gradient updates and initialize with sincos embedding
+            self.pos_embed.weight.requires_grad = False
+            pos_embed = get_1d_sincos_pos_embed(
+                embed_dim=self.predictor_embed_dim,
+                n_zero_pos=0,
+                n_sincos_pos=self.seq_len)
+            self.pos_embed.weight[1:].copy_(
+                torch.from_numpy(pos_embed).float())
 
     def forward(self,
                 z: torch.Tensor,
@@ -1429,6 +1432,7 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
     def __init__(
         self,
         predict_gene: bool=True,
+        pos_learnable: bool = False,
         **base_predictor_kwargs
         ):
         
@@ -1440,15 +1444,16 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
             self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
                                         self.predictor_embed_dim,
                                         padding_idx=0)
-
-            # Prevent gradient updates and initialize with sincos embedding
-            self.pos_embed.weight.requires_grad = False
-            pos_embed = get_1d_sincos_pos_embed(
-                embed_dim=self.predictor_embed_dim,
-                n_zero_pos=0,
-                n_sincos_pos=self.seq_len)
-            self.pos_embed.weight[1:].copy_(
-                torch.from_numpy(pos_embed).float())
+            
+            if not pos_learnable:
+                # Prevent gradient updates and initialize with sincos embedding
+                self.pos_embed.weight.requires_grad = False
+                pos_embed = get_1d_sincos_pos_embed(
+                    embed_dim=self.predictor_embed_dim,
+                    n_zero_pos=0,
+                    n_sincos_pos=self.seq_len)
+                self.pos_embed.weight[1:].copy_(
+                    torch.from_numpy(pos_embed).float())
 
     def forward(
         self,
