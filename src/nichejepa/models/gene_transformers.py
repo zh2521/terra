@@ -1016,6 +1016,9 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         if self.norm is not None:
             x = self.norm(x)
 
+        # Add token embeddings for predictor
+        udata['token_embed'] = token_emb
+
         return x, udata
 
     @torch.no_grad()
