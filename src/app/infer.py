@@ -71,6 +71,7 @@ def infer(args: dict,
           return_gene_per_data: bool=False,
           return_gene_marker_score: bool=False,
           returen_distance: bool=False,
+          include_spatial_cell_emb: bool = False,
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -119,6 +120,8 @@ def infer(args: dict,
     returen_distance:
         If 'True' will compute and return distance between cosine sim of cell_neb 
         and cell_cell matrix.
+    include_spatial_cell_emb:
+        If 'True' also return spatial cell embedding.
 
     Returns
     -----------
@@ -337,6 +340,8 @@ def infer(args: dict,
     # Retrieve embeddings
     all_cell_ids = []
     all_cell_emb_list = []
+    if include_spatial_cell_emb:
+        all_spatial_cell_emb_list = []
     all_neighborhood_emb_list = []
     all_cell_gene_emb_dict = {}
     all_neighborhood_gene_emb_dict = {}
@@ -427,6 +432,8 @@ def infer(args: dict,
             # Average gene embeddings into cell and neighborhood embedding 
             if agg_type == 'avg':
                 cell_emb = compute_mean_unmasked_emb(c_emb, cell_mask)
+                if include_spatial_cell_emb:
+                    spatial_cell_emb = compute_mean_unmasked_emb(n_emb, cell_mask)
                 neighborhood_emb = compute_mean_unmasked_emb(n_emb, neighborhood_mask)
             elif agg_type == "weighted_avg":
                 cell_weights = compute_unmasked_rank_based_weights(
@@ -434,6 +441,12 @@ def infer(args: dict,
                 cell_emb = compute_mean_unmasked_emb(
                     c_emb * cell_weights.unsqueeze(-1),
                     cell_mask)
+                if include_spatial_cell_emb:
+                    spatial_cell_weights = compute_unmasked_rank_based_weights(
+                        tokens, cell_mask)
+                    spatial_cell_emb = compute_mean_unmasked_emb(
+                        n_emb * cell_weights.unsqueeze(-1),
+                        cell_mask)
                 neighborhood_weights = compute_unmasked_rank_based_weights(
                     tokens, neighborhood_mask)
                 neighborhood_emb = compute_mean_unmasked_emb(
@@ -443,9 +456,13 @@ def infer(args: dict,
             # Concat layer-specific embeddings across batches
             if itr == 0:
                 all_cell_emb_list.append([cell_emb])
+                if include_spatial_cell_emb:
+                    all_spatial_cell_emb_list.append([spatial_cell_emb])
                 all_neighborhood_emb_list.append([neighborhood_emb])
             else:
-                all_cell_emb_list[i].append(cell_emb) 
+                all_cell_emb_list[i].append(cell_emb)
+                if include_spatial_cell_emb:
+                    all_spatial_cell_emb_list[i].append(spatial_cell_emb) 
                 all_neighborhood_emb_list[i].append(neighborhood_emb)
 
             # Store cell and neighborhood gene embeddings of last layer
@@ -599,6 +616,10 @@ def infer(args: dict,
         adata.obsm[f"cell_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_cell_emb_list[i],
             dim=0))
+        if include_spatial_cell_emb:
+            adata.obsm[f"spatial_cell_emb_layer_{emb_layer}"] = np.array(torch.cat(
+                all_spatial_cell_emb_list[i],
+                dim=0))            
         adata.obsm[f"neighborhood_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_neighborhood_emb_list[i],
             dim=0))
