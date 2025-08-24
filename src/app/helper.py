@@ -211,7 +211,10 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
     use_layer_norm:
         If `True` use layer norm, else Dynamic Tanh.
     sep_gene_tokens_neb:
+        If `True`, use separate gene tokens for neighborhood.
     predict_gene:
+        If `True`, predict gene given rank, otherwise predict rank given
+        gene.
 
     Returns
     -----------

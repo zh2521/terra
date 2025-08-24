@@ -162,6 +162,14 @@ def infer(args: dict,
         mlp_ratio = args['meta']['mlp_ratio']
     else:
         mlp_ratio = 4.0
+    if 'predict_gene' in args['meta'].keys():
+        predict_gene = args['meta']['predict_gene']
+    else:
+        predict_gene = True
+    if 'pos_learnable' in args['meta'].keys():
+        pos_learnable = args['meta']['pos_learnable']
+    else:
+        pos_learnable = False
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
@@ -271,7 +279,9 @@ def infer(args: dict,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
         api_version=api_version,
-        sep_gene_tokens_neb=sep_gene_tokens_neb)
+        sep_gene_tokens_neb=sep_gene_tokens_neb,
+        predict_gene=predict_gene,
+        pos_learnable=pos_learnable)
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
@@ -963,7 +973,9 @@ def embed_dataset(dataset: Dataset,
         mlp_ratio=model_config['meta']['mlp_ratio'],
         use_flash_attention=model_config['meta']['use_flash_attention'],
         api_version=model_config['meta']['api_version'],
-        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'],
+        predict_gene=model_config['meta']['predict_gene'],
+        pos_learnable=model_config['meta']['pos_learnable'])
 
     if model_config['meta']['api_version'] != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb

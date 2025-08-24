@@ -886,8 +886,8 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
     n_value_bins:
         Number of value bins if `value_bins` count encoding is used.
     pos_learnable:
-        If 'True', positional embedding is learnable, otherwise initialized
-        with sincos.
+        If `True`, positional embeddings are learnable, otherwise use
+        sin cos positional embeddings.
     """
     def __init__(self,
                  n_special_values: int,
@@ -1161,6 +1161,12 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
     """
     GeneTransformerRankPredictor class.
+
+    Parameters
+    -----------
+    pos_learnable:
+        If `True`, positional embeddings are learnable, otherwise use
+        sin cos positional embeddings.
     """
     def __init__(self,
                  pos_learnable: bool = False,
@@ -1442,10 +1448,13 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
     predict_gene:
         If `True`, predict gene given rank, otherwise predict rank given
         gene.
+    pos_learnable:
+        If `True`, positional embeddings are learnable, otherwise use
+        sin cos positional embeddings.
     """
     def __init__(
         self,
-        predict_gene: bool=True,
+        predict_gene: bool = True,
         pos_learnable: bool = False,
         **base_predictor_kwargs
         ):
@@ -1456,11 +1465,12 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         if self.predict_gene:
             # Initialize positional embeddings
             self.pos_embed = nn.Embedding(self.seq_len + 1, # include <pad>
-                                        self.predictor_embed_dim,
-                                        padding_idx=0)
+                                          self.predictor_embed_dim,
+                                          padding_idx=0)
             
             if not pos_learnable:
-                # Prevent gradient updates and initialize with sincos embedding
+                # Prevent gradient updates and initialize with sincos
+                # embedding
                 self.pos_embed.weight.requires_grad = False
                 pos_embed = get_1d_sincos_pos_embed(
                     embed_dim=self.predictor_embed_dim,
