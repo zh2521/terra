@@ -1639,21 +1639,18 @@ def init_gt_predictor(
     """
     if predictor_type == 'rank':
         model = GeneTransformerRankPredictor(
-            mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **predictor_kwargs)
     elif predictor_type == 'counts':
         model = GeneTransformerCountPredictor(
             n_special_values=n_special_values,
-            mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **predictor_kwargs)
     elif predictor_type == 'combined':
         model = GeneTransformerCombinedPredictor(
             n_special_values=n_special_values,
-            mlp_ratio=4,
             qkv_bias=True,
             norm_layer=partial(nn.LayerNorm, eps=1e-6),
             **predictor_kwargs)      
