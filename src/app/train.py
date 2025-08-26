@@ -5,7 +5,6 @@ Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 """
 
-import gc
 import os
 
 """
@@ -576,8 +575,8 @@ def train(args: dict,
         time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
-            for key in udata.keys():
-                udata[key] = udata[key].to(device, non_blocking=True)
+            for key, val in udata.items():
+                udata[key] = val.to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -650,11 +649,6 @@ def train(args: dict,
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
                 save_checkpoint(epoch, itr // checkpoint_freq_iter)
-            del udata, masks_enc, masks_pred, masks_attention
-            del loss, _new_lr, _new_wd
-            del grad_stats, grad_stats_pred
-            torch.cuda.empty_cache()
-            gc.collect()
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
