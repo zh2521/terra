@@ -350,7 +350,7 @@ def init_opt(encoder: gt.GeneTransformerBaseEncoder,
 
     # Initialize optimizer with decoupled weight decay
     logger.info('Initializing optimizer: AdamW.')
-    optimizer = torch.optim.AdamW(param_groups)
+    optimizer = torch.optim.AdamW(param_groups, fused=True)
 
     # Initialize learning rate scheduler
     logger.info('Initializing learning rate scheduler: WarmupCosineSchedule.')

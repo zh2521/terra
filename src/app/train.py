@@ -77,7 +77,8 @@ def train_step(udata,
                epoch,
                itr,
                ipe,
-               clip_grad):
+               clip_grad,
+               compute_grad_stats):
     _new_lr = scheduler.step()
     _new_wd = wd_scheduler.step()
 
@@ -145,10 +146,14 @@ def train_step(udata,
             param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
 
     # Logging
-    grad_stats = grad_logger(encoder.named_parameters())
-    grad_stats.global_norm = float(_enc_norm)
-    grad_stats_pred = grad_logger(predictor.named_parameters())
-    grad_stats_pred.global_norm = float(_pred_norm)
+    if compute_grad_stats:
+        grad_stats = grad_logger(encoder.named_parameters())
+        grad_stats.global_norm = float(_enc_norm)
+        grad_stats_pred = grad_logger(predictor.named_parameters())
+        grad_stats_pred.global_norm = float(_pred_norm)
+    else:
+        grad_stats = None
+        grats_stats_pred = None
 
     return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
 
@@ -183,8 +188,12 @@ def train(args: dict,
     torch.manual_seed(_GLOBAL_SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(_GLOBAL_SEED)
-    torch.backends.cudnn.deterministic = True # set to True for reproducibility
-    torch.backends.cudnn.benchmark = False # set to False for reproducibility
+    torch.backends.cudnn.deterministic = False # set to True for reproducibility
+    torch.backends.cudnn.benchmark = True # set to False for reproducibility
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
 
     # Set device
     if not torch.cuda.is_available():
@@ -497,20 +506,29 @@ def train(args: dict,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
     
+    encoder = torch.compile(
+        encoder, mode="max-autotune", fullgraph=True)
+    predictor = torch.compile(
+        predictor, mode="max-autotune", fullgraph=True)
+    target_encoder = torch.compile(
+        target_encoder, mode="max-autotune", fullgraph=True)
+
     encoder = DistributedDataParallel(
         encoder,
         static_graph=True,
         device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
+        output_device=LOCAL_RANK,
+        static_graph=True,
+        gradient_as_bucket_view=True,
+        broadcast_buffers=False)
     predictor = DistributedDataParallel(
         predictor,
         static_graph=True,
         device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
-    target_encoder = DistributedDataParallel(
-        target_encoder,
-        device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
+        output_device=LOCAL_RANK,
+        static_graph=True,
+        gradient_as_bucket_view=True,
+        broadcast_buffers=False)
     for p in target_encoder.parameters():
         p.requires_grad = False
 
@@ -586,6 +604,11 @@ def train(args: dict,
             #maskA_meter.update(len(masks_enc[0][0]))
             #maskB_meter.update(len(masks_pred[0][0]))
 
+            if WORLD_RANK == 0 and (itr % log_freq == 0):
+                compute_grad_stats = True
+            else:
+                compute_grad_stats = False
+
             args = (
                 udata, masks_enc, masks_pred, masks_attention,
                 encoder, predictor, target_encoder,
@@ -593,7 +616,7 @@ def train(args: dict,
                 scheduler, wd_scheduler,
                 momentum_scheduler,
                 loss_fn_type, use_bfloat16,
-                warmup, epoch, itr, ipe, clip_grad
+                warmup, epoch, itr, ipe, clip_grad, compute_grad_stats
             )
 
             (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
@@ -637,7 +660,7 @@ def train(args: dict,
             #                grad_stats.max))
 
             #log_stats()
-            if WORLD_RANK == 0:
+            if WORLD_RANK == 0 and (itr % log_freq == 0):
                 wandb.log({
                     "loss": float(loss),
                     "lr": float(_new_lr),
