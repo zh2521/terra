@@ -394,19 +394,19 @@ def infer(args: dict,
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
+                udata=udata,
+                masks_attention=masks_attention,
+                need_cell_only_context=True,
+            )
+
             cell_emb_list = []
             neighborhood_emb_list = []
-            for emb_layer in emb_layers:
-                cell_emb_list.append(return_layer_emb_fn(
-                    layer=emb_layer,
-                    udata=udata,
-                    masks_attention=masks_attention,
-                    pad_neighborhood=True).cpu())
-                neighborhood_emb_list.append(return_layer_emb_fn(
-                    layer=emb_layer,
-                    udata=udata,
-                    masks_attention=masks_attention,
-                    pad_neighborhood=False).cpu())
+
+            for l in emb_layers:
+                cell_emb_list.append(cell_only_ctx[l].cpu())
+                neighborhood_emb_list.append(full_ctx[l].cpu())
         
             if feature_norm and (emb_layers[-1] == enc_depth):
                 # Normalize last layer like in training # TO DO should this consider inference padding?

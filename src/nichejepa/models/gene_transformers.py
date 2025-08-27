@@ -9,7 +9,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transforme
 import math
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Literal
+from typing import Dict, Literal, Mapping, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -179,6 +179,69 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    def _compute_layer_emb(
+            self,
+            x: torch.Tensor,
+            attn_base: torch.Tensor | None,
+            cell_only: bool) -> dict[int, torch.Tensor]:
+        """
+        Helper function to return embeddings for either full context or
+        cell only context.
+        """
+        attn = None
+        if attn_base is not None:
+            attn = attn_base.clone()
+            if attn.dim() == 3: # [B, L, L] -> [B, 1, L, L]
+                attn = attn.unsqueeze(1)
+            # Never attend to special tokens
+            if self.n_special_tokens > 0:
+                attn[..., :self.n_special_tokens] = 0
+            # Optionally block cross-attention from cell queries to
+            # neighborhood keys
+            if cell_only:
+                attn[..., :self.seq_len_cell, self.seq_len_cell:] = 0
+
+        # Mask token embeddings if masks are provided
+        if masks is not None:
+            x = apply_masks(x, masks)
+
+        # Run forward prop and store embeddings for each specified layer
+        out: dict[int, torch.Tensor] = {}
+        for i, blk in enumerate(self.blocks, start=1):
+            x = blk(x, masks=attn)
+            if i == len(self.blocks) and (self.norm is not None):
+                # Apply norm only for last layer as in training
+                x = self.norm(x)
+            if i in layers:
+                # Remove special tokens from output
+                out[i] = x[:, self.n_special_tokens:, :]
+            if i == max_layer:
+                break
+        return out
+
+    def _get_seg_emb(
+            self,
+            udata: dict):
+        """
+        Helper function to get segment embeddings.
+        """
+        if self.cell_pos_enc == 'segment':
+            seg_emb = self.seg_embed(udata['segments'])
+        elif self.cell_pos_enc == 'coord':
+            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                coord=udata['rel_x_coords']).to(device)
+            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                coord=udata['rel_y_coords']).to(device)
+            seg_emb = torch.cat(
+                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        else:
+            raise ValueError(
+                f"Unknown cell_pos_enc: {self.cell_pos_enc}.")
+
+        return seg_emb
+
     @torch.no_grad()
     def return_token_emb(self,
                          tokens: torch.Tensor,
@@ -235,10 +298,11 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         pass
 
     @abstractmethod
-    def return_layer_emb() -> list[torch.Tensor]:
+    def return_layer_emb() -> tuple[
+            dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
-        Encoder-specific logic for returning layer-specific embeddings
-        during inference.
+        Encoder-specific logic for returning embeddings from multiple
+        layers during inference.
         """
         pass
 
@@ -519,102 +583,88 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             return x, udata
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def return_layer_emb(
             self,
-            layer: int,
-            udata: dict[torch.Tensor],
+            layers: Sequence[int],
+            udata: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
-            pad_neighborhood: bool = False,
-            ) -> list[torch.Tensor]:
+            need_cell_only_context: bool = True,
+            ) -> tuple[
+                dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
-        Run encoder forward pass on a batch of input token sequences,
-        applying masks if provided, and return the embeddings of a
-        specific layer.
+        Run encoder forward pass on a batch of cell graph sequences,
+        applying masks if provided, and return the embeddings for
+        multiple layers.
 
         Parameters
         -----------
-        layer:
-            Index of the specific layer to be returned
+        layers:
+            1-based indices of returned layers (e.g., [4, 8, 12]).
         udata:
-            Dictionary containing sequence:
-            - positions: Tensor containing positions with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - segments: Tensor containing segment labels with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - tokens: Tensor containing input gene tokens with shape
-              (BATCH_SIZE, SEQ_LEN).
+            Dictionary containing:
+            - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
+              segment labels with shape (B, N).
+            - 'rel_x_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative x-coordinates with shape (B, N).
+            - 'rel_y_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative y-coordinates with shape (B, N).
+            - 'positions': Tensor containing positions with shape(B, N).
+            - 'tokens': Tensor containing input gene tokens with shape
+              (B, N).
         masks:
             List of N_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE,
-            MASK_SIZE).
+            sequence) of tokens to keep with shape (B, M).
         masks_attention:
             An attention tensor that controls how different tokens
             attend to each other within a sequence.
+        need_cell_only_context:
+            If `True`, also run a second pass where queries in
+            [0:seq_len_cell) cannot attend to keys in [seq_len_cell:).
 
         Returns
         -----------
-        x:
-            Embeddings of a specific layer with shape (BATCH_SIZE *
-            N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE is
-            minimum mask size in the batch. 
+        (full_ctx, cell_only_ctx)
+          full_ctx : {layer_idx: Tensor[B, N_no_special, D]}
+          cell_only_ctx : {layer_idx: Tensor[B, N_no_special, D]} or None
         """
+        if not layers:
+            raise ValueError(
+                "Layers must be a non-empty sequence of positive integers.")
+
+        layers: list[int] = sorted({int(l) for l in layers})
+        max_layer: int = max(layers)
+
         # Format masks
-        if masks is not None:
-                if not isinstance(masks, list):
-                    masks = [masks]
+        if masks is not None and not isinstance(masks, list):
+            masks = [masks]
 
-        # Get positional, segment and token embeddings
-        pos_emb = self.pos_embed(udata['positions'])
-        seg_emb = self.seg_embed(udata['segments'])
+        # Get embeddings for sequence of gene tokens, positions and segments
+        tokens = udata["tokens"]
+        device = tokens.device
+
         token_emb = self.token_embed(udata['tokens'])
+        pos_emb = self.pos_embed(udata['positions'])
+        seg_emb = self._get_seg_emb(udata)
 
-        # Add positional and segment embeddings to token embeddings
-        x = pos_emb + seg_emb + token_emb
-        #B, N, D = x.shape
+        # Add segment and positional embeddings to token embeddings
+        x = seg_emb + pos_emb + token_emb # [B, N, D]
 
-        # Pad special tokens
-        x[:, :self.n_special_tokens, :] = 0
-        masks_attention[:,
-                        :,
-                        :,
-                        :self.n_special_tokens] = 0
+        # Remove special token contents
+        if self.n_special_tokens:
+            x[:, : self.n_special_tokens, :] = 0
 
-        if pad_neighborhood:
-            x[:, (self.n_special_tokens+self.seq_len_cell):, :] = 0
+        full_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=False)
+        cell_only_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=True) if need_cell_only_context else None
 
-            masks_attention = masks_attention.expand(
-                masks_attention.shape[0],
-                1,
-                masks_attention.shape[-1],
-                masks_attention.shape[-1]).clone()
-
-            # Mask neighborhood gene tokens for index cell gene tokens
-            masks_attention[
-                :,
-                :,
-                self.n_special_tokens:(self.n_special_tokens+self.seq_len_cell),
-                (self.n_special_tokens+self.seq_len_cell):] = 0
-
-        # Mask token embeddings if masks are provided
-        if masks is not None:
-            x = apply_masks(x, masks)
-
-        # Run forward prop and store embeddings after each block
-        n_blocks = len(self.blocks)
-        if layer > 0:
-            for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=masks_attention)
-                if (i == (n_blocks - 1)) and (self.norm is not None):
-                    x = self.norm(x)
-                if i == (layer - 1):
-                    break
-
-        # Remove special tokens
-        x = x[:, self.n_special_tokens:, :]
-
-        return x
+        return full_ctx, cell_only_ctx
 
 
 class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
@@ -751,126 +801,108 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         return x, udata
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def return_layer_emb(
             self,
-            layer: int,
-            udata: dict[torch.Tensor],
+            layers: Sequence[int],
+            udata: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
-            pad_neighborhood: bool = False,
-            ) -> list[torch.Tensor]:
+            need_cell_only_context: bool = True,
+            ) -> tuple[
+                dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
         Run encoder forward pass on a batch of cell graph sequences,
-        applying masks if provided, and return the embeddings of a
-        specific layer.
+        applying masks if provided, and return the embeddings for
+        multiple layers.
 
         Parameters
         -----------
-        layer:
-            Index of the specific layer to be returned
+        layers:
+            1-based indices of returned layers (e.g., [4, 8, 12]).
         udata:
             Dictionary containing:
-            - tokens: Tensor containing input gene tokens with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - segments: Tensor containing segment labels with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - counts: Tensor containing the counts corresponding to gene
-              tokens with shape (BATCH_SIZE, SEQ_LEN).
+            - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
+              segment labels with shape (B, N).
+            - 'rel_x_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative x-coordinates with shape (B, N).
+            - 'rel_y_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative y-coordinates with shape (B, N).
+            - 'tokens': Tensor containing input gene tokens with shape
+              (B, N).
+            - 'values': Tensor containing the counts corresponding to gene
+              tokens with shape (B, N).
         masks:
             List of N_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE,
-            MASK_SIZE).
+            sequence) of tokens to keep with shape (B, M).
         masks_attention:
             An attention tensor that controls how different tokens
             attend to each other within a sequence.
+        need_cell_only_context:
+            If `True`, also run a second pass where queries in
+            [0:seq_len_cell) cannot attend to keys in [seq_len_cell:).
 
         Returns
         -----------
-        x:
-            Embeddings of a specific layer with shape (BATCH_SIZE *
-            N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE is
-            minimum mask size in the batch. 
+        (full_ctx, cell_only_ctx)
+          full_ctx : {layer_idx: Tensor[B, N_no_special, D]}
+          cell_only_ctx : {layer_idx: Tensor[B, N_no_special, D]} or None
         """
+        if not layers:
+            raise ValueError(
+                "Layers must be a non-empty sequence of positive integers.")
+
+        layers: list[int] = sorted({int(l) for l in layers})
+        max_layer: int = max(layers)
 
         # Format masks
-        if masks is not None:
-            if not isinstance(masks, list):
-                masks = [masks]
+        if masks is not None and not isinstance(masks, list):
+            masks = [masks]
 
         # Get embeddings for sequence of gene tokens and segments
-        token_emb = self.token_embed(udata['tokens'])
+        tokens = udata["tokens"]
+        device = tokens.device
 
-        if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_emb = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        token_emb = self.token_embed(tokens)
+        seg_emb = self._get_seg_emb(udata)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
+            # [B, N, BINS] x [BINS, D] -> [B, N, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(dim=-1))
-            value_emb = torch.matmul(
-                value_emb_weights, self.value_embed.weight)
-            zero_counts_mask = udata['values'] == 0.0 # assign padding to 0 counts
-            zero_value_embed = self.special_value_embed(
-                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-            value_emb[zero_counts_mask] = zero_value_embed
+                udata['values'].unsqueeze(-1))
+            value_emb = value_emb_weights @ self.value_embed.weight
+            # Assign padding to 0 counts
+            zero_counts_mask = (udata['values'] == 0)
+            if zero_counts_mask.any():
+                zero_value_embed = self.special_value_embed(
+                    torch.tensor(0, device=tokens.device)).to(
+                        value_emb.dtype)
+                value_emb[zero_counts_mask] = zero_value_embed.expand_as(
+                    value_emb[zero_counts_mask])
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))  
+            value_emb = self.value_embed(udata['values'].unsqueeze(-1))
+        else:
+            raise ValueError(
+                f"Unknown count_encoding: {self.count_encoding}.")
 
-        # Add gene token and segment embeddings to value embeddings
-        x = token_emb + seg_emb + value_emb
-        # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
+        # Add segment and gene token embeddings to value embeddings
+        x = seg_emb + token_emb + value_emb # [B, N, D]
 
-        # Pad special tokens
-        x[:, :self.n_special_tokens, :] = 0
-        masks_attention[:,
-                        :,
-                        :,
-                        :self.n_special_tokens] = 0
+        # Remove special token contents
+        if self.n_special_tokens:
+            x[:, : self.n_special_tokens, :] = 0
 
-        if pad_neighborhood:
-            x[:, self.seq_len_cell:] = 0
+        full_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=False)
+        cell_only_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=True) if need_cell_only_context else None
 
-            masks_attention = masks_attention.expand(
-                masks_attention.shape[0],
-                1,
-                masks_attention.shape[-1],
-                masks_attention.shape[-1]).clone()
-
-            # Mask neighborhood gene tokens for index cell gene tokens
-            masks_attention[
-                :,
-                :,
-                :self.seq_len_cell,
-                self.seq_len_cell:] = 0
-
-        # Mask token embeddings if masks are provided
-        if masks is not None:
-            x = apply_masks(x, masks)
-
-        # Run forward prop and store embeddings after each block
-        if layer > 0:
-            n_blocks = len(self.blocks)
-            for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=masks_attention)
-                if (i == (n_blocks - 1)) and (self.norm is not None):
-                    x = self.norm(x)
-                if i == (layer - 1):
-                    break
-
-        # Remove special tokens
-        x = x[:, self.n_special_tokens:, :]
-
-        return x
+        return full_ctx, cell_only_ctx
 
 
 class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
@@ -1032,130 +1064,110 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         return x, udata
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def return_layer_emb(
             self,
-            layer: int,
-            udata: dict[torch.Tensor],
+            layers: Sequence[int],
+            udata: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
-            pad_neighborhood: bool = False,
-            ) -> list[torch.Tensor]:
+            need_cell_only_context: bool = True,
+            ) -> tuple[
+                dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
         Run encoder forward pass on a batch of cell graph sequences,
-        applying masks if provided, and return the embeddings of a
-        specific layer.
+        applying masks if provided, and return the embeddings for
+        multiple layers.
 
         Parameters
         -----------
-        layer:
-            Index of the specific layer to be returned
+        layers:
+            1-based indices of returned layers (e.g., [4, 8, 12]).
         udata:
-            Dictionary containing sequence:
-            - positions: Tensor containing positions with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - segments: Tensor containing segment labels with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - tokens: Tensor containing input gene tokens with shape
-              (BATCH_SIZE, SEQ_LEN).
-            - counts: Tensor containing the counts corresponding to gene
-              tokens with shape (BATCH_SIZE, SEQ_LEN).
+            Dictionary containing:
+            - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
+              segment labels with shape (B, N).
+            - 'rel_x_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative x-coordinates with shape (B, N).
+            - 'rel_y_coords' (if cell_pos_enc == 'coord'): Tensor containing
+              relative y-coordinates with shape (B, N).
+            - 'positions': Tensor containing positions with shape(B, N).
+            - 'tokens': Tensor containing input gene tokens with shape
+              (B, N).
+            - 'values': Tensor containing the counts corresponding to gene
+              tokens with shape (B, N).
         masks:
             List of N_MASKS tensors containing indices (within the
-            sequence) of tokens to keep with shape (BATCH_SIZE,
-            MASK_SIZE).
+            sequence) of tokens to keep with shape (B, M).
         masks_attention:
             An attention tensor that controls how different tokens
             attend to each other within a sequence.
+        need_cell_only_context:
+            If `True`, also run a second pass where queries in
+            [0:seq_len_cell) cannot attend to keys in [seq_len_cell:).
 
         Returns
         -----------
-        x:
-            Embeddings of a specific layer with shape (BATCH_SIZE *
-            N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where MIN_MASK_SIZE is
-            minimum mask size in the batch. 
+        (full_ctx, cell_only_ctx)
+          full_ctx : {layer_idx: Tensor[B, N_no_special, D]}
+          cell_only_ctx : {layer_idx: Tensor[B, N_no_special, D]} or None
         """
+        if not layers:
+            raise ValueError(
+                "Layers must be a non-empty sequence of positive integers.")
+
+        layers: list[int] = sorted({int(l) for l in layers})
+        max_layer: int = max(layers)
 
         # Format masks
-        if masks is not None:
-            if not isinstance(masks, list):
-                masks = [masks]
+        if masks is not None and not isinstance(masks, list):
+            masks = [masks]
 
-        # Get embeddings for positions, segments and gene tokens
-        pos_emb = self.pos_embed(udata['positions'])
-
-        if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_emb = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        # Get embeddings for sequence of gene tokens, positions and segments
+        tokens = udata["tokens"]
+        device = tokens.device
 
         token_emb = self.token_embed(udata['tokens'])
+        pos_emb = self.pos_embed(udata['positions'])
+        seg_emb = self._get_seg_emb(udata)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
+            # [B, N, BINS] x [BINS, D] -> [B, N, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(dim=-1))
-            value_emb = torch.matmul(
-                value_emb_weights, self.value_embed.weight)
-            zero_counts_mask = udata['values'] == 0.0 # assign padding to 0 counts
-            zero_value_embed = self.special_value_embed(
-                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
-            value_emb[zero_counts_mask] = zero_value_embed
+                udata['values'].unsqueeze(-1))
+            value_emb = value_emb_weights @ self.value_embed.weight
+            # Assign padding to 0 counts
+            zero_counts_mask = (udata['values'] == 0)
+            if zero_counts_mask.any():
+                zero_value_embed = self.special_value_embed(
+                    torch.tensor(0, device=tokens.device)).to(
+                        value_emb.dtype)
+                value_emb[zero_counts_mask] = zero_value_embed.expand_as(
+                    value_emb[zero_counts_mask])
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))  
+            value_emb = self.value_embed(udata['values'].unsqueeze(-1))
+        else:
+            raise ValueError(
+                f"Unknown count_encoding: {self.count_encoding}.") 
 
-        # Add positional, segment, and gene embeddings to value embeddings
-        x = pos_emb + seg_emb + token_emb + value_emb
-        # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
+        # Add segment, positional, and gene embeddings to value embeddings
+        x = seg_emb + pos_emb + token_emb + value_emb # [B, N, D]
 
-        # Pad special tokens
-        x[:, :self.n_special_tokens, :] = 0
-        masks_attention[:,
-                        :,
-                        :,
-                        :self.n_special_tokens] = 0
+        # Remove special token contents
+        if self.n_special_tokens:
+            x[:, : self.n_special_tokens, :] = 0
 
-        if pad_neighborhood:
-            x[:, (self.n_special_tokens+self.seq_len_cell):, :] = 0
+        full_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=False)
+        cell_only_ctx: dict[int, torch.Tensor] = _compute_layer_emb(
+            x,
+            masks_attention,
+            cell_only=True) if need_cell_only_context else None
 
-            masks_attention = masks_attention.expand(
-                masks_attention.shape[0],
-                1,
-                masks_attention.shape[-1],
-                masks_attention.shape[-1]).clone()
-
-            # Mask neighborhood gene tokens for index cell gene tokens
-            masks_attention[
-                :,
-                :,
-                self.n_special_tokens:(self.n_special_tokens+self.seq_len_cell),
-                (self.n_special_tokens+self.seq_len_cell):] = 0
-
-        # Mask token embeddings if masks are provided
-        if masks is not None:
-            x = apply_masks(x, masks)
-
-        # Run forward prop and store embeddings after each block
-        if layer > 0:
-            n_blocks = len(self.blocks)
-            for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=masks_attention)
-                if (i == (n_blocks - 1)) and (self.norm is not None):
-                    x = self.norm(x)
-                if i == (layer - 1):
-                    break
-
-        # Remove special tokens
-        x = x[:, self.n_special_tokens:, :]
-
-        return x
+        return full_ctx, cell_only_ctx
 
 
 class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
