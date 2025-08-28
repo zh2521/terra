@@ -48,7 +48,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
@@ -63,7 +63,6 @@ def infer(args: dict,
                             'weighted_avg'] = 'avg',
           masked_tokens: list[int] | None = None,
           agg_excluded_tokens: list[int] | None = None,
-          feature_norm: bool = False,
           top_k: int | None = None,
           return_gene: bool=True,
           return_cosine_sim: bool=False,
@@ -102,8 +101,6 @@ def infer(args: dict,
         inference.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
-    feature_norm:
-        If `True`, apply feature norm in the last embedding layer.
     top_k:
         Include only top_k genes in aggregation.
     return_gene: 
@@ -297,7 +294,9 @@ def infer(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio=per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            sample_segments=False,
+            sample_gene_masks=False)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
@@ -407,13 +406,6 @@ def infer(args: dict,
             for l in emb_layers:
                 cell_emb_list.append(cell_only_ctx[l].cpu())
                 neighborhood_emb_list.append(full_ctx[l].cpu())
-        
-            if feature_norm and (emb_layers[-1] == enc_depth):
-                # Normalize last layer like in training # TO DO should this consider inference padding?
-                cell_emb_list[-1] = F.layer_norm(cell_emb_list[-1],
-                                                 (cell_emb_list[-1].size(-1),))
-                neighborhood_emb_list[-1] = F.layer_norm(neighborhood_emb_list[-1],
-                                                         (neighborhood_emb_list[-1].size(-1),))
 
         # Aggregate gene embeddings into cell and neighborhood embeddings
         cell_mask = create_binary_selection_mask(
@@ -869,7 +861,7 @@ def tokenize_adata(adata: ad.AnnData,
     return dataset
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def embed_dataset(dataset: Dataset,
                   model_folder_path: str,
                   emb_layer: int | None = None,
@@ -990,7 +982,9 @@ def embed_dataset(dataset: Dataset,
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
         n_special_tokens=n_special_tokens,
-        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
+        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
+        sample_segments=False,
+        sample_gene_masks=False)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
@@ -1054,16 +1048,17 @@ def embed_dataset(dataset: Dataset,
             dtype=torch.bfloat16,
             enabled=model_config['meta']['use_bfloat16']):
 
-            c_emb = return_layer_emb_fn(
-                layer=emb_layer,
+            emb_layers = [emb_layer]
+
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
                 udata=udata,
                 masks_attention=masks_attention,
-                pad_neighborhood=True).cpu()
-            n_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
-                masks_attention=masks_attention,
-                pad_neighborhood=False).cpu()
+                need_cell_only_context=True,
+            )
+
+            c_emb = cell_only_ctx[emb_layer].cpu()
+            n_emb = full_ctx[emb_layer].cpu()
             if return_token_embeddings:
                 # n_emb contains embeddings for all  tokens
                 all_token_emb_list.append(n_emb)
@@ -1231,7 +1226,7 @@ def perturb_dataset(
     )
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def harmonize_tokenize_embed_pipeline(
         adata: ad.AnnData,
         sample_key: str | None,
@@ -1360,7 +1355,7 @@ def harmonize_tokenize_embed_pipeline(
     return adata
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def gene_embed_dataset(dataset: Dataset,
                   model_folder_path: str,
                   emb_layer: int | None = None,
@@ -1497,7 +1492,9 @@ def gene_embed_dataset(dataset: Dataset,
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
         n_special_tokens=n_special_tokens,
-        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
+        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
+        sample_segments=False,
+        sample_gene_masks=False)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
@@ -1568,16 +1565,17 @@ def gene_embed_dataset(dataset: Dataset,
             dtype=torch.bfloat16,
             enabled=model_config['meta']['use_bfloat16']):
 
-            c_emb = return_layer_emb_fn(
-                layer=emb_layer,
+            emb_layers = [emb_layer]
+
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
                 udata=udata,
                 masks_attention=masks_attention,
-                pad_neighborhood=True).cpu()
-            n_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
-                masks_attention=masks_attention,
-                pad_neighborhood=False).cpu()
+                need_cell_only_context=True,
+            )
+
+            c_emb = cell_only_ctx[emb_layer].cpu()
+            n_emb = full_ctx[emb_layer].cpu()
         emb = c_emb
         if len(cell_gene_ids) != 0 or len(neighborhood_gene_ids) != 0 :
             if itr == 0 or itr == len(loader)-1:
@@ -1762,7 +1760,7 @@ def gene_embed_dataset(dataset: Dataset,
     if return_receptor_average:
         return receptor_average_dict
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_gene_embed(
     dataset: Dataset,
     model_folder_path: str,
@@ -1856,7 +1854,7 @@ def get_gene_embed(
     return output_gene_embed
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_average_gene_embed(
     dataset: Dataset,
     model_folder_path: str,
@@ -1981,7 +1979,7 @@ def get_average_gene_embed(
     
     return output_average_gene_embed
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_spatial_score(
     dataset: Dataset,
     model_folder_path: str,
@@ -2048,7 +2046,7 @@ def get_spatial_score(
         out_put_cosine_sim_score[f"cell_count_{compute_cosine_with}"] = cos_sim_dict[compute_cosine_with][2].numpy()
         out_put_cosine_sim_score[f"cos_sim_{compute_cosine_with}"] = out_put_cosine_sim_score[f"sum_cos_sim_{compute_cosine_with}"] / out_put_cosine_sim_score[f"pair_count_{compute_cosine_with}"]
     return out_put_cosine_sim_score
-@torch.no_grad()
+@torch.inference_mode()
 def get_emd_distance(
     dataset: Dataset,
     model_folder_path: str,
@@ -2107,7 +2105,7 @@ def get_emd_distance(
     
     return np.concatenate(emd_list, axis=0), np.concatenate(emd_matrix_list, axis=0)
 
-@torch.no_grad()
+@torch.inference_mode()
 def average_receptor_embedding(
     dataset: Dataset,
     model_folder_path: str,

@@ -35,7 +35,10 @@ class BlockMaskCollator:
         and max ratio can be provided, in which case a value between the
         min and max will be sampled for each batch.
     sample_segments:
-        If 'True', sample number of neighbors in each batch. 
+        If `True`, sample number of neighbors in each batch.
+    sample_gene_masks:
+        If `True`, sample a gene mask for each cell. Should be used
+        during training but not inference.
     """
     def __init__(self,
                  n_targets: int,
@@ -45,7 +48,8 @@ class BlockMaskCollator:
                  seq_len_neighborhood: int,
                  n_special_tokens: int,
                  per_block_mask_ratio: float = 0.5,
-                 sample_segments: bool = False):
+                 sample_segments: bool = False,
+                 sample_gene_masks: bool = True):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
         self.n_segments = n_segments
@@ -55,6 +59,7 @@ class BlockMaskCollator:
         self.n_special_tokens = n_special_tokens
         self.per_block_mask_ratio = per_block_mask_ratio
         self.sample_segments = sample_segments
+        self.sample_gene_masks = sample_gene_masks
 
     def _sample_gene_mask(
         self,
@@ -199,35 +204,39 @@ class BlockMaskCollator:
         masks_attention = (
             tokens != 0).unsqueeze(1).unsqueeze(1) # [B, 1, 1, N]
 
-        # Retrieve target/context masks per cell
-        tgt_list: list[list[torch.Tensor]] = []
-        ctx_list: list[list[torch.Tensor]] = []
-        keep_tgt = self.seq_len_genes
-        keep_ctx = self.seq_len_genes
+        if self.sample_gene_masks:
+            # Retrieve target/context masks per cell
+            tgt_list: list[list[torch.Tensor]] = []
+            ctx_list: list[list[torch.Tensor]] = []
+            keep_tgt = self.seq_len_genes
+            keep_ctx = self.seq_len_genes
 
-        for i in range(B):
-            tgt, ctx = self._sample_gene_mask(
-                tokens=tokens[i])
-            # Track min lengths (avoid nested default_collate later)
-            if len(tgt):
-                keep_tgt = min(keep_tgt, min(m.numel() for m in tgt))
-            if len(ctx):
-                keep_ctx = min(keep_ctx, min(m.numel() for m in ctx))
-            tgt_list.append(tgt)
-            ctx_list.append(ctx)
+            for i in range(B):
+                tgt, ctx = self._sample_gene_mask(
+                    tokens=tokens[i])
+                # Track min lengths (avoid nested default_collate later)
+                if len(tgt):
+                    keep_tgt = min(keep_tgt, min(m.numel() for m in tgt))
+                if len(ctx):
+                    keep_ctx = min(keep_ctx, min(m.numel() for m in ctx))
+                tgt_list.append(tgt)
+                ctx_list.append(ctx)
 
-        # Trim to min length and stack directly (faster than
-        # default_collate on nested lists)
-        tgt_trimmed = [
-            torch.stack([m[:keep_tgt].to(torch.long) for m in masks], dim=0
-                ) for masks in tgt_list]
-        collated_target_masks = torch.stack(
-            tgt_trimmed, dim=0) # [B, n_targets, keep_tgt]
-        ctx_trimmed = [
-            torch.stack([m[:keep_ctx].to(torch.long) for m in masks], dim=0
-                ) for masks in ctx_list]
-        collated_context_masks = torch.stack(
-            ctx_trimmed, dim=0) # [B, n_contexts, keep_ctx]
+            # Trim to min length and stack directly (faster than
+            # default_collate on nested lists)
+            tgt_trimmed = [
+                torch.stack([m[:keep_tgt].to(torch.long) for m in masks], dim=0
+                    ) for masks in tgt_list]
+            collated_target_masks = torch.stack(
+                tgt_trimmed, dim=0) # [B, n_targets, keep_tgt]
+            ctx_trimmed = [
+                torch.stack([m[:keep_ctx].to(torch.long) for m in masks], dim=0
+                    ) for masks in ctx_list]
+            collated_context_masks = torch.stack(
+                ctx_trimmed, dim=0) # [B, n_contexts, keep_ctx]
+        else:
+            collated_target_masks = None
+            collated_context_masks = None
 
         return collated, \
                collated_context_masks, \
