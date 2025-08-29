@@ -228,12 +228,17 @@ class BlockMaskCollator:
                 torch.stack([m[:keep_tgt].to(torch.long) for m in masks], dim=0
                     ) for masks in tgt_list]
             collated_target_masks = torch.stack(
-                tgt_trimmed, dim=0) # [B, n_targets, keep_tgt]
+                tgt_trimmed, dim=0) # [B, n_tgt, keep_tgt]
+            collated_target_masks = collated_target_masks.permute(
+                1, 0, 2).contiguous() # [n_tgt, B, keep_tgt]
+
             ctx_trimmed = [
                 torch.stack([m[:keep_ctx].to(torch.long) for m in masks], dim=0
                     ) for masks in ctx_list]
             collated_context_masks = torch.stack(
-                ctx_trimmed, dim=0) # [B, n_contexts, keep_ctx]
+                ctx_trimmed, dim=0) # [B, n_ctx, keep_ctx]
+            collated_context_masks = collated_context_masks.permute(
+                1, 0, 2).contiguous()  # [n_ctx, B, keep_ctx]
         else:
             collated_target_masks = None
             collated_context_masks = None

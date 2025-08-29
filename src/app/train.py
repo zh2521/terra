@@ -406,7 +406,8 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            sample_segments=sample_segments)
+            sample_segments=sample_segments,
+            sample_gene_masks=True)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
