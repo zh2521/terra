@@ -69,7 +69,7 @@ def infer(args: dict,
           compute_cosine_with_list:  list[str] = [],
           return_gene_per_data: bool=False,
           return_gene_marker_score: bool=False,
-          returen_distance: bool=False,
+          return_distance: bool=False,
           include_spatial_cell_emb: bool = False,
           ) -> ad.AnnData:
     """
@@ -114,7 +114,7 @@ def infer(args: dict,
         If 'True' will return gene_embedding for each gene per dataset.
     return_gene_marker_score:
         If 'True' will compute and return gene marker scores.
-    returen_distance:
+    return_distance:
         If 'True' will compute and return distance between cosine sim of cell_neb 
         and cell_cell matrix.
     include_spatial_cell_emb:
@@ -536,7 +536,7 @@ def infer(args: dict,
                                 all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
                     # Stack neighborhood gene occurrence tensors along gene dimension:
                     # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
-                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_gene_marker_score or returen_distance):
+                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_gene_marker_score or return_distance):
                         neb_occ_dict[compute_cosine_with] = (torch.stack(neb_occ_list, dim=1), torch.stack(neb_occ_mask_list, dim=1))
 
                 # Compute cosine similarity components using our function for multiple occurrences.
@@ -559,7 +559,7 @@ def infer(args: dict,
                                 pair_count + pair_count_temp,
                                 cell_count + cell_count_temp
                             )
-                if returen_distance:
+                if return_distance:
                     cos_sim_temp = []
                     for compute_cosine_with in compute_cosine_with_list:
                         sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
@@ -689,7 +689,7 @@ def infer(args: dict,
             adata.obsm['gene_marker_pair_count_neb'] = np.array(torch.cat(all_neb_gene_marker_stats['pair_count'], dim=0).cpu())
             adata.obsm['gene_marker_cell_count_neb'] = np.array(torch.cat(all_neb_gene_marker_stats['cell_count'], dim=0).cpu())
     # --- End: store gene marker score in obsm ---
-    if returen_distance:
+    if return_distance:
        adata.obsm['emd_dist'] = np.concatenate(emd_list, axis=0)
 
     return adata
@@ -1367,7 +1367,7 @@ def gene_embed_dataset(dataset: Dataset,
                   return_gene: bool=False,
                   return_gene_per_data: bool=False,
                   compute_cosine_with_list:  list[str] = [],
-                  returen_distance: bool=False,
+                  return_distance: bool=False,
                   return_cosine_sim: bool=False,
                   return_receptor_average: bool=False,
                   include_spatial_cell_emb: bool = True,
@@ -1400,7 +1400,7 @@ def gene_embed_dataset(dataset: Dataset,
     compute_cosine_with_list:
        A list that defines the items with which we want to compute cosine similarity.
        it could have value of 'cell' or/and 'neighborhood'.
-    returen_distance:
+    return_distance:
         If 'True' will compute and return distance between cosine sim of cell_neb 
         and cell_cell matrix.
     return_cosine_sim: 
@@ -1731,7 +1731,7 @@ def gene_embed_dataset(dataset: Dataset,
                                 all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
 
                     # For cosine/distance, keep stacked occurrence tensors
-                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or returen_distance):
+                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_distance):
                         neb_occ_dict[compute_cosine_with] = (gene_occ, occ_mask)
 
             # Compute cosine similarity components using our function for multiple occurrences.
@@ -1756,7 +1756,7 @@ def gene_embed_dataset(dataset: Dataset,
                                 pair_count + pair_count_temp.detach().cpu(),
                                 cell_count + cell_count_temp.detach().cpu()
                         )
-            if returen_distance:
+            if return_distance:
                 cos_sim_temp = []
                 for compute_cosine_with in compute_cosine_with_list:
                     sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
@@ -1783,7 +1783,7 @@ def gene_embed_dataset(dataset: Dataset,
             return all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict
     if return_cosine_sim:
         return cos_sim_dict
-    if returen_distance:
+    if return_distance:
         return emd_list, emd_matrix_list
     if return_receptor_average:
         return receptor_average_dict
@@ -2127,7 +2127,7 @@ def get_emd_distance(
         pin_memory=pin_memory,
         num_workers=num_workers,
         compute_cosine_with_list=["cell", "neighborhood"],
-        returen_distance=True,
+        return_distance=True,
         description='COMPUTE EMD DISTANCE BETWEEN GENE IN CELL AND NEIGHBORHOOD'
     )
     
