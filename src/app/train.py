@@ -502,14 +502,8 @@ def train(args: dict,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
     
-    encoder = torch.compile(
-        encoder,
-        mode="max-autotune",
-        fullgraph=True)
-    predictor = torch.compile(
-        predictor,
-        mode="max-autotune",
-        fullgraph=True)
+    encoder = torch.compile(encoder)
+    predictor = torch.compile(predictor)
 
     encoder = DistributedDataParallel(
         encoder,
