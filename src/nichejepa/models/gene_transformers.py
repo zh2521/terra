@@ -474,6 +474,30 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+    def _get_seg_emb(
+            self,
+            udata: dict,
+            device: str):
+        """
+        Helper function to get segment embeddings.
+        """
+        if self.cell_pos_enc == 'segment':
+            seg_emb = self.seg_embed(udata['segments'])
+        elif self.cell_pos_enc == 'coord':
+            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.predictor_embed_dim // 2,
+                coord=udata['rel_x_coords'])
+            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.predictor_embed_dim // 2,
+                coord=udata['rel_y_coords'])
+            seg_emb = torch.cat(
+                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        else:
+            raise ValueError(
+                f"Unknown cell_pos_enc: {self.cell_pos_enc}.")
+
+        return seg_emb
+
     @abstractmethod
     def forward(self) -> torch.Tensor:
         """
@@ -561,23 +585,12 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # Get positional, segment and token embeddings (excl.
             # special tokens)
             pos_emb = self.pos_embed(udata['positions'])
-
-            if self.cell_pos_enc == 'segment':
-                seg_emb = self.seg_embed(udata['segments'])
-            elif self.cell_pos_enc == 'coord':
-                rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                    embed_dim=self.embed_dim // 2,
-                    coord=udata['rel_x_coords'])
-                rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                    embed_dim=self.embed_dim // 2,
-                    coord=udata['rel_y_coords'])
-                seg_emb = torch.cat(
-                    [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+            seg_emb = self._get_seg_emb(udata, device)
 
             token_emb = self.token_embed(udata['tokens'])
             
             # Add positional and segment embeddings to token embeddings
-            x = pos_emb + seg_emb + token_emb
+            x = seg_emb + pos_emb + token_emb
             # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN,
             # D: EMBED_DIM
 
@@ -763,18 +776,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         # Get embeddings for sequence of gene tokens and segments
         token_emb = self.token_embed(udata['tokens'])
-
-        if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_emb = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        seg_emb = self._get_seg_emb(udata, device)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
@@ -796,7 +798,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))           
 
         # Add gene token and segment embeddings to value embeddings
-        x = token_emb + seg_emb + value_emb
+        x = seg_emb + token_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
         # Mask token embeddings if masks are provided
@@ -1029,19 +1031,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         # Get embeddings for positions, segments and gene tokens
         pos_emb = self.pos_embed(udata['positions'])
-
-        if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_emb = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
-
+        seg_emb = self._get_seg_emb(udata, device)
         token_emb = self.token_embed(udata['tokens'])
 
         # Get value embeddings
@@ -1064,7 +1054,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
             value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))       
 
         # Add positional, segment, and gene embeddings to value embeddings
-        x = pos_emb + seg_emb + token_emb + value_emb
+        x = seg_emb + pos_emb + token_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
         # Mask token embeddings if masks are provided
@@ -1273,19 +1263,11 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_embed(z)
 
             # Get positional and segment embeddings
-            pos_embed = self.pos_embed(udata['positions'])
+            positions = udata['positions']
+            device = positions.device
 
-            if self.cell_pos_enc == 'segment':
-                seg_embed = self.seg_embed(udata['segments'])
-            elif self.cell_pos_enc == 'coord':
-                rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                    embed_dim=self.predictor_embed_dim // 2,
-                    coord=udata['rel_x_coords'])
-                rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                    embed_dim=self.predictor_embed_dim // 2,
-                    coord=udata['rel_y_coords'])
-                seg_embed = torch.cat(
-                    [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+            pos_embed = self.pos_embed(positions)
+            seg_embed = self._get_seg_emb(udata, device)
 
             # Add positional embeddings to tokens from context masks
             # (only keep context mask indices and sum positional and
@@ -1403,19 +1385,11 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         z = self.predictor_embed(z)
 
         # Get gene and segment embeddings
-        token_embed = self.token_embed_projection(udata['token_embed'])
+        token_emb = udata['token_embed']
+        device = token_emb.device
 
-        if self.cell_pos_enc == 'segment':
-            seg_embed = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_embed = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        token_embed = self.token_embed_projection(token_emb)
+        seg_embed = self._get_seg_emb(udata, device)
 
         # Add positional embeddings to tokens from context masks (only
         # keep context mask indices and sum positional and segment
@@ -1564,24 +1538,19 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
 
         if self.predict_gene:
             # Get positional embeddings
-            pos_embed = self.pos_embed(udata['positions'])
+            positions = udata['positions']
+            device = positions.device
+
+            pos_embed = self.pos_embed(positions)
         else:
             # Get gene embeddings
-            token_embed = self.token_embed_projection(
-                udata['token_embed'])
+            token_emb = udata['token_embed']
+            device = token_emb.device
+            
+            token_embed = self.token_embed_projection(token_emb)
 
         # Get segment embeddings
-        if self.cell_pos_enc == 'segment':
-            seg_embed = self.seg_embed(udata['segments'])
-        elif self.cell_pos_enc == 'coord':
-            rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_x_coords'])
-            rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
-                embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_y_coords'])
-            seg_embed = torch.cat(
-                [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        seg_embed = self._get_seg_emb(udata, device)
 
         # Add positional or gene embeddings to tokens from context masks (only
         # keep context mask indices and sum positional or gene and segment
