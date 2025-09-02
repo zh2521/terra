@@ -584,7 +584,10 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             # Get positional, segment and token embeddings (excl.
             # special tokens)
-            pos_emb = self.pos_embed(udata['positions'])
+            positions = udata['positions']
+            device = positions.device
+
+            pos_emb = self.pos_embed(positions)
             seg_emb = self._get_seg_emb(udata, device)
 
             token_emb = self.token_embed(udata['tokens'])
@@ -660,7 +663,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         tokens = udata["tokens"]
         device = tokens.device
 
-        token_emb = self.token_embed(udata['tokens'])
+        token_emb = self.token_embed(tokens)
         pos_emb = self.pos_embed(udata['positions'])
         seg_emb = self._get_seg_emb(udata, device)
 
@@ -775,7 +778,10 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 masks = [masks]
 
         # Get embeddings for sequence of gene tokens and segments
-        token_emb = self.token_embed(udata['tokens'])
+        tokens = udata['tokens']
+        device = tokens.device
+
+        token_emb = self.token_embed(tokens)
         seg_emb = self._get_seg_emb(udata, device)
 
         # Get value embeddings
@@ -868,7 +874,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 "Layers must be a non-empty sequence of positive integers.")
 
         # Get embeddings for sequence of gene tokens and segments
-        tokens = udata["tokens"]
+        tokens = udata['tokens']
         device = tokens.device
 
         token_emb = self.token_embed(tokens)
@@ -1030,7 +1036,10 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 masks = [masks]
 
         # Get embeddings for positions, segments and gene tokens
-        pos_emb = self.pos_embed(udata['positions'])
+        positions = udata['positions']
+        device = positions.device
+
+        pos_emb = self.pos_embed(positions)
         seg_emb = self._get_seg_emb(udata, device)
         token_emb = self.token_embed(udata['tokens'])
 
@@ -1125,10 +1134,10 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 "Layers must be a non-empty sequence of positive integers.")
 
         # Get embeddings for sequence of gene tokens, positions and segments
-        tokens = udata["tokens"]
+        tokens = udata['tokens']
         device = tokens.device
 
-        token_emb = self.token_embed(udata['tokens'])
+        token_emb = self.token_embed(tokens)
         pos_emb = self.pos_embed(udata['positions'])
         seg_emb = self._get_seg_emb(udata, device)
 

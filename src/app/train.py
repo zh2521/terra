@@ -46,8 +46,8 @@ from nichejepa.masks.utils import apply_masks
 from nichejepa.models.utils import repeat_interleave_batch
 from nichejepa.utils.distributed import init_distributed
 from nichejepa.utils.logging import (AverageMeter,
-                            CSVLogger,
-                            grad_logger)
+                                     CSVLogger,
+                                     grad_logger)
 
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1" # Better error propagation
 
@@ -56,95 +56,6 @@ _GLOBAL_SEED = 0
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
-
-
-def train_step(udata,
-               masks_enc,
-               masks_pred,
-               masks_attention,
-               encoder,
-               predictor,
-               target_encoder,
-               optimizer,
-               scaler,
-               scheduler,
-               wd_scheduler,
-               momentum_scheduler,
-               loss_fn_type,
-               use_bfloat16,
-               warmup,
-               epoch,
-               itr,
-               ipe,
-               clip_grad,
-               compute_grad_stats):
-    _new_lr = scheduler.step()
-    _new_wd = wd_scheduler.step()
-
-    # Step 1: forward pass
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
-        # Forward pass of target encoder
-        with torch.no_grad():
-            h, _ = target_encoder(
-                udata=udata, masks_attention=masks_attention)
-            h = F.layer_norm(h, (h.size(-1),))
-            h = apply_masks(h, masks_pred, concat=False)
-
-        # Forward pass of context encoder
-        z, udata = encoder(udata=udata, masks=masks_enc, masks_attention=None)
-
-        # Forward pass of predictor
-        z = predictor(z=z, udata=udata, masks_enc=masks_enc,
-                      masks_pred=masks_pred, masks_attention=None)
-
-        # Compute loss
-        loss_exp = 1.0
-        loss = 0.
-        for zi, hi in zip(z, h):
-            if loss_fn_type == 'smooth_l1':
-                loss += F.smooth_l1_loss(zi, hi)
-            elif loss_fn_type == 'l1':
-                loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
-        loss /= len(masks_pred)
-
-    # Step 2: backward pass and step
-    _enc_norm, _pred_norm = 0., 0.
-    loss.backward()
-    if warmup >= 1: # iteration-based clipping didn't always work # TODO
-        if (epoch >= warmup) and (clip_grad is not None):
-            _enc_norm = torch.nn.utils.clip_grad_norm_(
-                encoder.parameters(), clip_grad)
-            _pred_norm = torch.nn.utils.clip_grad_norm_(
-                predictor.parameters(), clip_grad)
-    elif (itr > (warmup * ipe)) and (clip_grad is not None):
-        _enc_norm = torch.nn.utils.clip_grad_norm_(
-            encoder.parameters(), clip_grad)
-        _pred_norm = torch.nn.utils.clip_grad_norm_(
-            predictor.parameters(), clip_grad)
-    optimizer.step()
-    optimizer.zero_grad(set_to_none=True)
-
-    # Step 3: momentum update of target encoder
-    with torch.no_grad():
-        m = next(momentum_scheduler)
-        q_params = [p.detach() for p in encoder.parameters()]
-        k_params = [p for p in target_encoder.parameters()]
-        torch._foreach_mul_(k_params, m)
-        # tmp = (1-m) * q
-        tmp = torch._foreach_mul(q_params, (1.0 - m))
-        torch._foreach_add_(k_params, tmp)
-
-    # Logging
-    if compute_grad_stats:
-        grad_stats = grad_logger(encoder.named_parameters())
-        grad_stats.global_norm = float(_enc_norm)
-        grad_stats_pred = grad_logger(predictor.named_parameters())
-        grad_stats_pred.global_norm = float(_pred_norm)
-    else:
-        grad_stats = None
-        grad_stats_pred = None
-
-    return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
 
 
 def train(args: dict,
@@ -575,7 +486,6 @@ def train(args: dict,
         loss_meter = AverageMeter()
         #maskA_meter = AverageMeter()
         #maskB_meter = AverageMeter()
-        time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
             for key, val in udata.items():
@@ -594,21 +504,80 @@ def train(args: dict,
             else:
                 compute_grad_stats = False
 
-            args = (
-                udata, masks_enc, masks_pred, masks_attention,
-                encoder, predictor, target_encoder,
-                optimizer, scaler,
-                scheduler, wd_scheduler,
-                momentum_scheduler,
-                loss_fn_type, use_bfloat16,
-                warmup, epoch, itr, ipe, clip_grad, compute_grad_stats
-            )
+            _new_lr = scheduler.step()
+            _new_wd = wd_scheduler.step()
 
-            loss, _new_lr, _new_wd, grad_stats, grad_stats_pred = train_step(
-                *args)
+            # Step 1: forward pass
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
+                # Forward pass of target encoder
+                with torch.no_grad():
+                    h, _ = target_encoder(
+                        udata=udata, masks_attention=masks_attention)
+                    h = F.layer_norm(h, (h.size(-1),))
+                    h = apply_masks(h, masks_pred, concat=False)
 
-            loss_meter.update(loss)
-            time_meter.update(etime)
+                # Forward pass of context encoder
+                z, udata = encoder(
+                    udata=udata,
+                    masks=masks_enc,
+                    masks_attention=None)
+
+                # Forward pass of predictor
+                z = predictor(
+                    z=z,
+                    udata=udata,
+                    masks_enc=masks_enc,
+                    masks_pred=masks_pred,
+                    masks_attention=None)
+
+                # Compute loss
+                loss_exp = 1.0
+                loss = 0.
+                for zi, hi in zip(z, h):
+                    if loss_fn_type == 'smooth_l1':
+                        loss += F.smooth_l1_loss(zi, hi)
+                    elif loss_fn_type == 'l1':
+                        loss += torch.mean(
+                            torch.abs(zi - hi)**loss_exp) / loss_exp
+                loss /= len(masks_pred)
+
+            # Step 2: backward pass and step
+            _enc_norm, _pred_norm = 0., 0.
+            loss.backward()
+            if warmup >= 1: # iteration-based clipping didn't always work # TODO
+                if (epoch >= warmup) and (clip_grad is not None):
+                    _enc_norm = torch.nn.utils.clip_grad_norm_(
+                        encoder.parameters(), clip_grad)
+                    _pred_norm = torch.nn.utils.clip_grad_norm_(
+                        predictor.parameters(), clip_grad)
+            elif (itr > (warmup * ipe)) and (clip_grad is not None):
+                _enc_norm = torch.nn.utils.clip_grad_norm_(
+                    encoder.parameters(), clip_grad)
+                _pred_norm = torch.nn.utils.clip_grad_norm_(
+                    predictor.parameters(), clip_grad)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            # Step 3: momentum update of target encoder
+            with torch.no_grad():
+                m = next(momentum_scheduler)
+                q_params = [p.detach() for p in encoder.parameters()]
+                k_params = [p for p in target_encoder.parameters()]
+                torch._foreach_mul_(k_params, m)
+                tmp = torch._foreach_mul(q_params, (1.0 - m))
+                torch._foreach_add_(k_params, tmp)
+
+            # Logging
+            if compute_grad_stats:
+                grad_stats = grad_logger(encoder.named_parameters())
+                grad_stats.global_norm = float(_enc_norm)
+                grad_stats_pred = grad_logger(predictor.named_parameters())
+                grad_stats_pred.global_norm = float(_pred_norm)
+            else:
+                grad_stats = None
+                grad_stats_pred = None
+
+            loss_meter.update(float(loss))
 
             # Logging
             #def log_stats():
@@ -653,7 +622,7 @@ def train(args: dict,
                     "global_norm_enc": float(grad_stats.global_norm),
                     "global_norm_pred": float(grad_stats_pred.global_norm),
                 })
-            assert not np.isnan(loss), 'loss is nan'
+            assert not np.isnan(float(loss)), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
                 save_checkpoint(epoch, itr // checkpoint_freq_iter)
