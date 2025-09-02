@@ -47,7 +47,6 @@ from nichejepa.models.utils import repeat_interleave_batch
 from nichejepa.utils.distributed import init_distributed
 from nichejepa.utils.logging import (AverageMeter,
                             CSVLogger,
-                            gpu_timer,
                             grad_logger)
 
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1" # Better error propagation
@@ -82,21 +81,24 @@ def train_step(udata,
     _new_lr = scheduler.step()
     _new_wd = wd_scheduler.step()
 
-    def forward_target(udata, masks_attention, target_encoder, masks_pred):
+    # Step 1: forward pass
+    with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
+        # Forward pass of target encoder
         with torch.no_grad():
             h, _ = target_encoder(
                 udata=udata, masks_attention=masks_attention)
             h = F.layer_norm(h, (h.size(-1),))
             h = apply_masks(h, masks_pred, concat=False)
-            return h
 
-    def forward_context(udata, encoder, predictor, masks_enc, masks_pred):
+        # Forward pass of context encoder
         z, udata = encoder(udata=udata, masks=masks_enc, masks_attention=None)
+
+        # Forward pass of predictor
         z = predictor(z=z, udata=udata, masks_enc=masks_enc,
                       masks_pred=masks_pred, masks_attention=None)
-        return z
 
-    def loss_fn(z, h, masks_pred, loss_exp=1.0):
+        # Compute loss
+        loss_exp = 1.0
         loss = 0.
         for zi, hi in zip(z, h):
             if loss_fn_type == 'smooth_l1':
@@ -104,13 +106,6 @@ def train_step(udata,
             elif loss_fn_type == 'l1':
                 loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
         loss /= len(masks_pred)
-        return loss
-
-    # Step 1: forward pass
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
-        h = forward_target(udata, masks_attention, target_encoder, masks_pred)
-        z = forward_context(udata, encoder, predictor, masks_enc, masks_pred)
-        loss = loss_fn(z, h, masks_pred)
 
     # Step 2: backward pass and step
     _enc_norm, _pred_norm = 0., 0.
@@ -609,8 +604,8 @@ def train(args: dict,
                 warmup, epoch, itr, ipe, clip_grad, compute_grad_stats
             )
 
-            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
-                train_step, *args)
+            loss, _new_lr, _new_wd, grad_stats, grad_stats_pred = train_step(
+                *args)
 
             loss_meter.update(loss)
             time_meter.update(etime)
