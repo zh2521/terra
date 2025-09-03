@@ -410,8 +410,8 @@ def train(args: dict,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
     
-    encoder = torch.compile(encoder, mode='reduce-overhead')
-    predictor = torch.compile(predictor, mode='reduce-overhead')
+    #encoder = torch.compile(encoder)
+    #predictor = torch.compile(predictor)
 
     if use_profiler and WORLD_RANK == 0:
 
