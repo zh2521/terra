@@ -159,7 +159,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # Compute omega for segment embedding: 1 / 10000^{2i/dim}
         if self.cell_pos_enc == 'coord':
             self.coord_omega = torch.arange(
-                embed_dim // 2, dtype=torch.float32, device=device)
+                embed_dim // 2, dtype=torch.float32)
             self.coord_omega = 1.0 / (
                 10000 ** (self.coord_omega / (embed_dim / 2)))
 
@@ -462,7 +462,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # Compute omega for segment embedding: 1 / 10000^{2i/dim}
         if self.cell_pos_enc == 'coord':
             self.coord_omega = torch.arange(
-                embed_dim // 2, dtype=torch.float32, device=device)
+                embed_dim // 2, dtype=torch.float32)
             self.coord_omega = 1.0 / (
                 10000 ** (self.coord_omega / (embed_dim / 2)))
 
