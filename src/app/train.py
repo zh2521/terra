@@ -32,6 +32,7 @@ import pickle
 import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
+import torch.profiler
 import wandb
 from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
@@ -192,6 +193,7 @@ def train(args: dict,
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
     load_folder_path = args['state']['folder_path']
+    use_profiler = args['state'].get('use_profiler', False)
 
     if 'precomputed_epoch_n_nonzero_tokens' in args['data'].keys():
         with open(args['data']['precomputed_epoch_n_nonzero_tokens'], "rb") as f: 
@@ -408,8 +410,40 @@ def train(args: dict,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
     
-    encoder = torch.compile(encoder)
-    predictor = torch.compile(predictor)
+    encoder = torch.compile(encoder, mode='max-autotune')
+    predictor = torch.compile(predicto, mode='reduce-overhead')
+
+    if use_profiler and WORLD_RANK == 0:
+
+        def trace_handler(p):
+            cpu_output = p.key_averages(group_by_stack_n=5).table(
+                sort_by="cpu_time_total", row_limit=100)
+            logger.info(f"Profiler CPU output: {cpu_output}.")
+            gpu_output = p.key_averages(group_by_stack_n=5).table(
+                sort_by="cuda_time_total", row_limit=100)
+            logger.info(f"Profiler CPU output: {cpu_output}.")
+            logger.info(f"Profiler GPU output: {gpu_output}.")
+            p.export_chrome_trace(
+                os.path.join(
+                    save_folder_path,
+                    "profiler_logs/trace_" + str(p.step_num) + ".json"))
+
+        profiler = torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(
+                wait=10,
+                warmup=1,
+                active=3,
+                repeat=1),
+            on_trace_ready=trace_handler,
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=True,
+        )
+        profiler.start()
 
     encoder = DistributedDataParallel(
         encoder,
@@ -512,20 +546,21 @@ def train(args: dict,
                 # Forward pass of target encoder
                 with torch.no_grad():
                     h, _ = target_encoder(
-                        udata=udata, masks_attention=masks_attention)
+                        batch=udata, masks_attention=masks_attention)
                     h = F.layer_norm(h, (h.size(-1),))
                     h = apply_masks(h, masks_pred, concat=False)
 
                 # Forward pass of context encoder
-                z, udata = encoder(
-                    udata=udata,
+                z, token_emb = encoder(
+                    batch=udata,
                     masks=masks_enc,
                     masks_attention=None)
 
                 # Forward pass of predictor
                 z = predictor(
                     z=z,
-                    udata=udata,
+                    token_emb=token_emb,
+                    batch=udata,
                     masks_enc=masks_enc,
                     masks_pred=masks_pred,
                     masks_attention=None)
@@ -557,6 +592,9 @@ def train(args: dict,
                     predictor.parameters(), clip_grad)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+
+            if use_profiler and WORLD_RANK == 0:
+                profiler.step()
 
             # Step 3: momentum update of target encoder
             with torch.no_grad():
@@ -630,3 +668,7 @@ def train(args: dict,
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
         save_checkpoint(epoch)
+
+    if use_profiler and WORLD_RANK == 0 :
+        # Close profiler
+        profiler.stop()

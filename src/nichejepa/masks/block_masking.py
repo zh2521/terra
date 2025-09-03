@@ -6,6 +6,8 @@ https://github.com/facebookresearch/ijepa/blob/main/src/masks/multiblock.py
 (05.06.2024).
 """
 
+import time # TODO: remove
+
 import numpy as np
 import torch 
 
@@ -173,6 +175,8 @@ class BlockMaskCollator:
         masks_attention: BoolTensor [B, 1, 1, L]
             Attention masks collated by batch.
         """
+        #t0 = time.perf_counter()
+
         # Collate early for vectorized slicing
         collated = torch.utils.data.default_collate(batch)
 
@@ -242,6 +246,11 @@ class BlockMaskCollator:
         else:
             collated_target_masks = None
             collated_context_masks = None
+
+        #t1 = time.perf_counter()
+        #elapsed_ms = (t1 - t0) * 1000
+        #print(f"[Collate] Took {elapsed_ms:.3f} ms for batch size {B}")
+        #raise ValueError
 
         return collated, \
                collated_context_masks, \

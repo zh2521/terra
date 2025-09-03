@@ -27,12 +27,12 @@ class EncoderMultiMaskWrapper(nn.Module):
         self.backbone = backbone
 
     def forward(self,
-                udata: dict[torch.Tensor],
+                batch: dict[torch.Tensor],
                 masks: torch.Tensor | list | None = None,
                 masks_attention: torch.Tensor | None = None
                 ) -> tuple[list[torch.Tensor], dict[torch.Tensor]]:
         if masks is None:
-            return self.backbone(udata=udata,
+            return self.backbone(batch=batch,
                                  masks=None,
                                  masks_attention=masks_attention)
 
@@ -40,11 +40,11 @@ class EncoderMultiMaskWrapper(nn.Module):
             masks = [masks]
         outs = []
         for m in masks:
-            x, udata = self.backbone(udata=udata,
-                                     masks=m,
-                                     masks_attention=masks_attention)
+            x, token_emb = self.backbone(batch=batch,
+                                         masks=m,
+                                         masks_attention=masks_attention)
             outs.append(x)
-        return outs, udata
+        return outs, token_emb
 
 
 class PredictorMultiMaskWrapper(nn.Module):
@@ -65,7 +65,8 @@ class PredictorMultiMaskWrapper(nn.Module):
 
     def forward(self,
                 z: torch.Tensor | list,
-                udata: dict[torch.Tensor],
+                token_emb: torch.Tensor,
+                batch: dict[torch.Tensor],
                 masks_enc: torch.Tensor | list,
                 masks_pred: torch.Tensor | list,
                 masks_attention: torch.Tensor
@@ -81,7 +82,8 @@ class PredictorMultiMaskWrapper(nn.Module):
         for mp in masks_pred:
             outs += [
                 self.backbone(z=z[0],
-                              udata=udata,
+                              token_emb=token_emb,
+                              batch=batch,
                               masks_enc=masks_enc[0],
                               masks_pred=mp,
                               masks_attention=masks_attention)]

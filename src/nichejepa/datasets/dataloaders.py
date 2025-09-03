@@ -1,5 +1,6 @@
 import gc
 import math
+import time
 from collections.abc import Iterator
 from logging import getLogger
 
@@ -129,6 +130,8 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         first, so that an OOM error would happens earlier rather than
         later.
         """
+        #t0 = time.perf_counter()
+
         if mega_batch_mult is None:
             # Default for mega_batch_mult: 1000 or the number to get 4
             # mega batches, whichever is smaller.
@@ -164,6 +167,10 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         indices = [item for sublist in megabatches for item in sublist]
         del megabatches
         gc.collect()
+
+        #t1 = time.perf_counter()
+        #elapsed_ms = (t1 - t0) * 1000
+        #print(f"[Length Sampling] Took {elapsed_ms:.3f}ms.")
 
         return indices
 

@@ -156,6 +156,13 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.apply(self._init_weights)
         self._rescale_blocks()
 
+        # Compute omega for segment embedding: 1 / 10000^{2i/dim}
+        if self.cell_pos_enc == 'coord':
+            self.coord_omega = torch.arange(
+                embed_dim // 2, dtype=torch.float32, device=device)
+            self.coord_omega = 1.0 / (
+                10000 ** (self.coord_omega / (embed_dim / 2)))
+
     def _rescale_blocks(self):
         """
         Helper function to scale initialized layer weights.
@@ -230,20 +237,21 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
 
     def _get_seg_emb(
             self,
-            udata: dict,
-            device: str):
+            batch: dict):
         """
         Helper function to get segment embeddings.
         """
         if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
+            seg_emb = self.seg_embed(batch['segments'])
         elif self.cell_pos_enc == 'coord':
             rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.embed_dim // 2,
-                coord=udata['rel_x_coords']).to(device)
+                coord_omega=self.coord_omega,
+                coord=batch['rel_x_coords'])
             rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.embed_dim // 2,
-                coord=udata['rel_y_coords']).to(device)
+                coord_omega=self.coord_omega,
+                coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
         else:
@@ -451,6 +459,13 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.apply(self._init_weights)
         self._rescale_blocks()
 
+        # Compute omega for segment embedding: 1 / 10000^{2i/dim}
+        if self.cell_pos_enc == 'coord':
+            self.coord_omega = torch.arange(
+                embed_dim // 2, dtype=torch.float32, device=device)
+            self.coord_omega = 1.0 / (
+                10000 ** (self.coord_omega / (embed_dim / 2)))
+
     def _rescale_blocks(self):
         """
         Helper function to scale initialized layer weights.
@@ -476,20 +491,21 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
 
     def _get_seg_emb(
             self,
-            udata: dict,
-            device: str):
+            batch: dict):
         """
         Helper function to get segment embeddings.
         """
         if self.cell_pos_enc == 'segment':
-            seg_emb = self.seg_embed(udata['segments'])
+            seg_emb = self.seg_embed(batch['segments'])
         elif self.cell_pos_enc == 'coord':
             rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_x_coords'])
+                coord_omega=self.coord_omega,
+                coord=batch['rel_x_coords'])
             rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
-                coord=udata['rel_y_coords'])
+                coord_omega=self.coord_omega,
+                coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
         else:
@@ -540,7 +556,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
                 torch.from_numpy(pos_embed).float())
 
     def forward(self,
-                udata: dict[torch.Tensor],
+                batch: dict[torch.Tensor],
                 masks: list[torch.Tensor] | torch.Tensor | None = None,
                 masks_attention: torch.Tensor | None = None 
                 ) -> tuple[torch.Tensor, dict]:
@@ -551,7 +567,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             Parameters
             -----------
-            udata:
+            batch:
                 Dictionary containing sequence:
                 - positions: Tensor containing positions with shape
                 (BATCH_SIZE, SEQ_LEN).
@@ -573,7 +589,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
                 Embeddings of input tokens included in the masks with
                 shape (BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM),
                 where MIN_MASK_SIZE is minimum mask size in the batch.
-            udata:
+            batch:
                 Updated sequence dictionary. Here, no updates are done but for
                 API consistency this is kept.  
             """
@@ -584,13 +600,10 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             # Get positional, segment and token embeddings (excl.
             # special tokens)
-            positions = udata['positions']
-            device = positions.device
+            pos_emb = self.pos_embed(batch['positions'])
+            seg_emb = self._get_seg_emb(batch)
 
-            pos_emb = self.pos_embed(positions)
-            seg_emb = self._get_seg_emb(udata, device)
-
-            token_emb = self.token_embed(udata['tokens'])
+            token_emb = self.token_embed(batch['tokens'])
             
             # Add positional and segment embeddings to token embeddings
             x = seg_emb + pos_emb + token_emb
@@ -607,13 +620,13 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             if self.norm is not None:
                 x = self.norm(x)
 
-            return x, udata
+            return x, token_emb
 
     @torch.inference_mode()
     def return_layer_emb(
             self,
             layers: Sequence[int],
-            udata: Mapping[str, torch.Tensor],
+            batch: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
@@ -628,7 +641,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         -----------
         layers:
             1-based indices of returned layers (e.g., [4, 8, 12]).
-        udata:
+        batch:
             Dictionary containing:
             - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
               segment labels with shape (B, N).
@@ -660,12 +673,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
                 "Layers must be a non-empty sequence of positive integers.")
 
         # Get embeddings for sequence of gene tokens, positions and segments
-        tokens = udata["tokens"]
-        device = tokens.device
-
-        token_emb = self.token_embed(tokens)
-        pos_emb = self.pos_embed(udata['positions'])
-        seg_emb = self._get_seg_emb(udata, device)
+        token_emb = self.token_embed(batch["tokens"])
+        pos_emb = self.pos_embed(batch['positions'])
+        seg_emb = self._get_seg_emb(batch)
 
         # Add segment and positional embeddings to token embeddings
         x = seg_emb + pos_emb + token_emb # [B, L, D]
@@ -735,7 +745,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 act_layer=nn.GELU)
 
     def forward(self,
-                udata: dict[torch.Tensor],
+                batch: dict[torch.Tensor],
                 masks: list[torch.Tensor] | torch.Tensor | None = None,
                 masks_attention: torch.Tensor | None = None
                 ) -> tuple[torch.Tensor, dict]:
@@ -746,7 +756,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         Parameters
         -----------
-        udata:
+        batch:
             Dictionary containing:
             - tokens: Tensor containing input gene tokens with shape
               (BATCH_SIZE, SEQ_LEN).
@@ -768,7 +778,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             Embeddings of input tokens included in the masks with shape
             (BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where
             MIN_MASK_SIZE is minimum mask size in the batch.
-        udata:
+        batch:
             Updated sequence dictionary with added token embeddings. 
         """
         
@@ -778,30 +788,24 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 masks = [masks]
 
         # Get embeddings for sequence of gene tokens and segments
-        tokens = udata['tokens']
-        device = tokens.device
-
-        token_emb = self.token_embed(tokens)
-        seg_emb = self._get_seg_emb(udata, device)
+        token_emb = self.token_embed(batch['tokens'])
+        seg_emb = self._get_seg_emb(batch)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
             # [B, L, BINS] x [BINS, D] -> [B, L, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(-1))
+                batch['values'].unsqueeze(-1))
             value_emb = value_emb_weights @ self.value_embed.weight
             # Assign padding to 0 counts
-            zero_counts_mask = (udata['values'] == 0)
+            zero_counts_mask = (batch['values'] == 0)
             if zero_counts_mask.any():
-                zero_value_embed = self.special_value_embed(
-                    torch.tensor(0, device=tokens.device)).to(
-                        value_emb.dtype)
                 value_emb = torch.where(
                     zero_counts_mask.unsqueeze(-1),
-                    zero_value_embed.expand_as(value_emb),
+                    self.special_value_embed.weight[0].expand_as(value_emb),
                     value_emb)
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))           
+            value_emb = self.value_embed(batch['values'].unsqueeze(dim=-1))           
 
         # Add gene token and segment embeddings to value embeddings
         x = seg_emb + token_emb + value_emb
@@ -817,16 +821,13 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         if self.norm is not None:
             x = self.norm(x)
 
-        # Add token embeddings for predictor
-        udata['token_embed'] = token_emb
-
-        return x, udata
+        return x, token_emb
 
     @torch.inference_mode()
     def return_layer_emb(
             self,
             layers: Sequence[int],
-            udata: Mapping[str, torch.Tensor],
+            batch: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
@@ -841,7 +842,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         -----------
         layers:
             1-based indices of returned layers (e.g., [4, 8, 12]).
-        udata:
+        batch:
             Dictionary containing:
             - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
               segment labels with shape (B, N).
@@ -874,30 +875,24 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                 "Layers must be a non-empty sequence of positive integers.")
 
         # Get embeddings for sequence of gene tokens and segments
-        tokens = udata['tokens']
-        device = tokens.device
-
-        token_emb = self.token_embed(tokens)
-        seg_emb = self._get_seg_emb(udata, device)
+        token_emb = self.token_embed(batch['tokens'])
+        seg_emb = self._get_seg_emb(batch)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
             # [B, L, BINS] x [BINS, D] -> [B, L, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(-1))
+                batch['values'].unsqueeze(-1))
             value_emb = value_emb_weights @ self.value_embed.weight
             # Assign padding to 0 counts
-            zero_counts_mask = (udata['values'] == 0)
+            zero_counts_mask = (batch['values'] == 0)
             if zero_counts_mask.any():
-                zero_value_embed = self.special_value_embed(
-                    torch.tensor(0, device=tokens.device)).to(
-                        value_emb.dtype)
                 value_emb = torch.where(
                     zero_counts_mask.unsqueeze(-1),
-                    zero_value_embed.expand_as(value_emb),
+                    self.special_value_embed.weight[0].expand_as(value_emb),
                     value_emb)
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(-1))
+            value_emb = self.value_embed(batch['values'].unsqueeze(-1))
         else:
             raise ValueError(
                 f"Unknown count_encoding: {self.count_encoding}.")
@@ -990,7 +985,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 act_layer=nn.GELU)
 
     def forward(self,
-                udata: dict[torch.Tensor],
+                batch: dict[torch.Tensor],
                 masks: list[torch.Tensor] | torch.Tensor | None = None,
                 masks_attention: torch.Tensor | None = None
                 ) -> tuple[torch.Tensor, dict]:
@@ -1001,7 +996,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         Parameters
         -----------
-        udata:
+        batch:
             Dictionary containing sequence:
             - positions: Tensor containing positions with shape
               (BATCH_SIZE, SEQ_LEN).
@@ -1025,7 +1020,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
             Embeddings of input tokens included in the masks with shape
             (BATCH_SIZE * N_MASKS, MIN_MASK_SIZE, EMBED_DIM), where
             MIN_MASK_SIZE is minimum mask size in the batch.
-        udata:
+        batch:
             Updated sequence dictionary. Here, no updates are done but for
             API consistency this is kept.  
         """
@@ -1036,31 +1031,25 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 masks = [masks]
 
         # Get embeddings for positions, segments and gene tokens
-        positions = udata['positions']
-        device = positions.device
-
-        pos_emb = self.pos_embed(positions)
-        seg_emb = self._get_seg_emb(udata, device)
-        token_emb = self.token_embed(udata['tokens'])
+        pos_emb = self.pos_embed(batch['positions'])
+        seg_emb = self._get_seg_emb(batch)
+        token_emb = self.token_embed(batch['tokens'])
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
             # [B, L, BINS] x [BINS, D] -> [B, L, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(-1))
+                batch['values'].unsqueeze(-1))
             value_emb = value_emb_weights @ self.value_embed.weight
             # Assign padding to 0 counts
-            zero_counts_mask = (udata['values'] == 0)
+            zero_counts_mask = (batch['values'] == 0)
             if zero_counts_mask.any():
-                zero_value_embed = self.special_value_embed(
-                    torch.tensor(0, device=tokens.device)).to(
-                        value_emb.dtype)
                 value_emb = torch.where(
                     zero_counts_mask.unsqueeze(-1),
-                    zero_value_embed.expand_as(value_emb),
+                    self.special_value_embed.weight[0].expand_as(value_emb),
                     value_emb)
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(dim=-1))       
+            value_emb = self.value_embed(batch['values'].unsqueeze(dim=-1))       
 
         # Add positional, segment, and gene embeddings to value embeddings
         x = seg_emb + pos_emb + token_emb + value_emb
@@ -1076,16 +1065,13 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         if self.norm is not None:
             x = self.norm(x)
 
-        # Add token embeddings for predictor
-        udata['token_embed'] = token_emb
-
-        return x, udata
+        return x, token_emb
 
     @torch.inference_mode()
     def return_layer_emb(
             self,
             layers: Sequence[int],
-            udata: Mapping[str, torch.Tensor],
+            batch: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
@@ -1100,7 +1086,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         -----------
         layers:
             1-based indices of returned layers (e.g., [4, 8, 12]).
-        udata:
+        batch:
             Dictionary containing:
             - 'segments' (if cell_pos_enc == 'segment'): Tensor containing
               segment labels with shape (B, N).
@@ -1134,29 +1120,25 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 "Layers must be a non-empty sequence of positive integers.")
 
         # Get embeddings for sequence of gene tokens, positions and segments
-        tokens = udata['tokens']
-        device = tokens.device
-
-        token_emb = self.token_embed(tokens)
-        pos_emb = self.pos_embed(udata['positions'])
-        seg_emb = self._get_seg_emb(udata, device)
+        token_emb = self.token_embed(batch['tokens'])
+        pos_emb = self.pos_embed(batch['positions'])
+        seg_emb = self._get_seg_emb(batch)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
             # [B, L, BINS] x [BINS, D] -> [B, L, D]
             value_emb_weights = self.value_emb_weights_projection(
-                udata['values'].unsqueeze(-1))
+                batch['values'].unsqueeze(-1))
             value_emb = value_emb_weights @ self.value_embed.weight
             # Assign padding to 0 counts
-            zero_counts_mask = (udata['values'] == 0)
+            zero_counts_mask = (batch['values'] == 0)
             if zero_counts_mask.any():
-                zero_value_embed = self.special_value_embed(
-                    torch.tensor(0, device=tokens.device)).to(
-                        value_emb.dtype)
-                value_emb[zero_counts_mask] = zero_value_embed.expand_as(
-                    value_emb[zero_counts_mask])
+                value_emb = torch.where(
+                    zero_counts_mask.unsqueeze(-1),
+                    self.special_value_embed.weight[0].expand_as(value_emb),
+                    value_emb)
         elif self.count_encoding == 'mlp':
-            value_emb = self.value_embed(udata['values'].unsqueeze(-1))
+            value_emb = self.value_embed(batch['values'].unsqueeze(-1))
         else:
             raise ValueError(
                 f"Unknown count_encoding: {self.count_encoding}.") 
@@ -1217,7 +1199,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
 
     def forward(self,
                 z: torch.Tensor,
-                udata: dict[torch.Tensor],
+                token_emb: torch.Tensor,
+                batch: dict[torch.Tensor],
                 masks_enc: list[torch.Tensor] | torch.Tensor,
                 masks_pred: list[torch.Tensor] | torch.Tensor,
                 masks_attention: torch.Tensor | None = None,
@@ -1231,7 +1214,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
                 Embeddings from the encoder with shape (
                 BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE,
                 EMBED_DIM).
-            udata:
+            token_emb:
+            batch:
                 Dictionary containing sequence:
                 - positions: Tensor containing positions with shape
                   (BATCH_SIZE, SEQ_LEN).
@@ -1272,11 +1256,8 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             z = self.predictor_embed(z)
 
             # Get positional and segment embeddings
-            positions = udata['positions']
-            device = positions.device
-
-            pos_embed = self.pos_embed(positions)
-            seg_embed = self._get_seg_emb(udata, device)
+            pos_embed = self.pos_embed(batch['positions'])
+            seg_embed = self._get_seg_emb(batch)
 
             # Add positional embeddings to tokens from context masks
             # (only keep context mask indices and sum positional and
@@ -1341,7 +1322,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
     def forward(
         self,
         z: torch.Tensor,
-        udata: dict[torch.Tensor],
+        token_emb: torch.Tensor,
+        batch: dict[torch.Tensor],
         masks_enc: list[torch.Tensor] | torch.Tensor,
         masks_pred: list[torch.Tensor] | torch.Tensor,
         masks_attention: torch.Tensor | None = None,
@@ -1354,7 +1336,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         z:
             Embeddings from the encoder with shape (
             BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
-        udata:
+        token_emb:
+        batch:
             Dictionary containing sequence:
             - token_embed: Token embeddings from the encoder.
             - segments: Tensor containing segment labels with shape
@@ -1394,11 +1377,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         z = self.predictor_embed(z)
 
         # Get gene and segment embeddings
-        token_emb = udata['token_embed']
-        device = token_emb.device
-
         token_embed = self.token_embed_projection(token_emb)
-        seg_embed = self._get_seg_emb(udata, device)
+        seg_embed = self._get_seg_emb(batch)
 
         # Add positional embeddings to tokens from context masks (only
         # keep context mask indices and sum positional and segment
@@ -1492,7 +1472,8 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
     def forward(
         self,
         z: torch.Tensor,
-        udata: dict[torch.Tensor],
+        token_emb: torch.Tensor,
+        batch: dict[torch.Tensor],
         masks_enc: list[torch.Tensor] | torch.Tensor,
         masks_pred: list[torch.Tensor] | torch.Tensor,
         masks_attention: torch.Tensor | None = None,
@@ -1505,7 +1486,8 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         z:
             Embeddings from the encoder with shape (
             BATCH_SIZE*N_CONTEXT_MASKS, CONTEXT_MASK_SIZE, EMBED_DIM).
-        udata:
+        token_emb:
+        batch:
             Dictionary containing sequence:
             - positions: Tensor containing positions with shape
               (BATCH_SIZE, SEQ_LEN).
@@ -1547,19 +1529,13 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
 
         if self.predict_gene:
             # Get positional embeddings
-            positions = udata['positions']
-            device = positions.device
-
-            pos_embed = self.pos_embed(positions)
+            pos_embed = self.pos_embed(batch['positions'])
         else:
             # Get gene embeddings
-            token_emb = udata['token_embed']
-            device = token_emb.device
-            
             token_embed = self.token_embed_projection(token_emb)
 
         # Get segment embeddings
-        seg_embed = self._get_seg_emb(udata, device)
+        seg_embed = self._get_seg_emb(batch)
 
         # Add positional or gene embeddings to tokens from context masks (only
         # keep context mask indices and sum positional or gene and segment
