@@ -395,7 +395,7 @@ def infer(args: dict,
 
             full_ctx, cell_only_ctx = return_layer_emb_fn(
                 layers=emb_layers,
-                udata=udata,
+                batch=udata,
                 masks_attention=masks_attention,
                 need_cell_only_context=True,
             )
@@ -1052,7 +1052,7 @@ def embed_dataset(dataset: Dataset,
 
             full_ctx, cell_only_ctx = return_layer_emb_fn(
                 layers=emb_layers,
-                udata=udata,
+                batch=udata,
                 masks_attention=masks_attention,
                 need_cell_only_context=True,
             )
@@ -1569,7 +1569,7 @@ def gene_embed_dataset(dataset: Dataset,
 
             full_ctx, cell_only_ctx = return_layer_emb_fn(
                 layers=emb_layers,
-                udata=udata,
+                batch=udata,
                 masks_attention=masks_attention,
                 need_cell_only_context=True,
             )

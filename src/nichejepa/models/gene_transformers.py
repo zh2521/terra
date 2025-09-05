@@ -159,9 +159,9 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # Compute omega for segment embedding: 1 / 10000^{2i/dim}
         if self.cell_pos_enc == 'coord':
             self.coord_omega = torch.arange(
-                embed_dim // 2, dtype=torch.float32)
+                embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
-                10000 ** (self.coord_omega / (embed_dim / 2)))
+                10000 ** (self.coord_omega / (embed_dim / 4)))
 
     def _rescale_blocks(self):
         """
@@ -246,11 +246,11 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         elif self.cell_pos_enc == 'coord':
             rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.embed_dim // 2,
-                coord_omega=self.coord_omega,
+                omega=self.coord_omega,
                 coord=batch['rel_x_coords'])
             rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.embed_dim // 2,
-                coord_omega=self.coord_omega,
+                omega=self.coord_omega,
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
@@ -462,9 +462,9 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # Compute omega for segment embedding: 1 / 10000^{2i/dim}
         if self.cell_pos_enc == 'coord':
             self.coord_omega = torch.arange(
-                embed_dim // 2, dtype=torch.float32)
+                predictor_embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
-                10000 ** (self.coord_omega / (embed_dim / 2)))
+                10000 ** (self.coord_omega / (predictor_embed_dim / 4)))
 
     def _rescale_blocks(self):
         """
@@ -500,11 +500,11 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         elif self.cell_pos_enc == 'coord':
             rel_x_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
-                coord_omega=self.coord_omega,
+                omega=self.coord_omega,
                 coord=batch['rel_x_coords'])
             rel_y_coord_emb = get_1d_sincos_pos_embed_from_coord(
                 embed_dim=self.predictor_embed_dim // 2,
-                coord_omega=self.coord_omega,
+                omega=self.coord_omega,
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)

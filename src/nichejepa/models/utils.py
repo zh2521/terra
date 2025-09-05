@@ -172,6 +172,8 @@ def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
     # Replace -inf with zero for computation (safe dummy value)
     coord[mask] = 0.0
 
+    omega = omega.to(coord.device) # TODO
+
     # outer product: (seq_len, embed_dim // 2)
     out = torch.einsum('bl,d->bld', coord, omega)  # (B, seq_len, emb_dim/2)
 
