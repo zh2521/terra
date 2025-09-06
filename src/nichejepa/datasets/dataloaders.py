@@ -36,6 +36,8 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         Adapted from Theodoris, C. V. et al. Transfer learning enables
         predictions in network biology. Nature 618, 616–624 (2023);
         https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py
+        and
+        https://huggingface.co/transformers/v4.4.2/_modules/transformers/trainer_pt_utils.html
         (28.09.2024).
 
         Parameters
@@ -100,18 +102,15 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
 
         if not self.drop_last:
             # Add extra samples to make it evenly divisible
-            indices += indices[: (self.total_size - len(indices))]
+            indices += indices[:(self.total_size - len(indices))]
         else:
-            # Remove tail of data to make it evenly divisible.
-            indices = indices[: self.total_size]
+            # Remove tail of data to make it evenly divisible
+            indices = indices[:self.total_size]
         assert len(indices) == self.total_size
 
         # Subsample
         indices = indices[self.rank:self.total_size:self.num_replicas]
         assert len(indices) == self.num_samples
-
-        del g
-        gc.collect()
 
         return iter(indices)
 
@@ -127,16 +126,16 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         sorted by length in each mega-batch. The result is the
         concatenation of all mega-batches, with the batch of
         `batch_size` containing the element of maximum length placed
-        first, so that an OOM error would happens earlier rather than
+        first, so that an OOM error would happen earlier rather than
         later.
         """
         #t0 = time.perf_counter()
 
         if mega_batch_mult is None:
-            # Default for mega_batch_mult: 1000 or the number to get 4
+            # Default for mega_batch_mult: 50 or the number to get 4
             # mega batches, whichever is smaller.
             mega_batch_mult = min(
-                len(self.lengths) // (self.batch_size * 4), 1000)
+                len(self.lengths) // (self.batch_size * 4), 50)
             # Just in case, for tiny datasets
             if mega_batch_mult == 0:
                 mega_batch_mult = 1
@@ -163,10 +162,8 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         megabatches[0][0], megabatches[max_idx][0] = (
             megabatches[max_idx][0],
             megabatches[0][0])
-
+        
         indices = [item for sublist in megabatches for item in sublist]
-        del megabatches
-        gc.collect()
 
         #t1 = time.perf_counter()
         #elapsed_ms = (t1 - t0) * 1000

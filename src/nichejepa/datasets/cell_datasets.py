@@ -446,7 +446,7 @@ class CellGraphDataset(CellBaseDataset):
                         torch.tensor(float('-inf'), dtype=torch.float))
                     masked_rel_y_coords = torch.where(
                         segment_tokens != 0,
-                        segment_rel_x_coords,
+                        segment_rel_y_coords,
                         torch.tensor(float('-inf'), dtype=torch.float))                   
                     item_dict['rel_x_coords'] = torch.cat(
                     [item_dict['rel_x_coords'], masked_rel_x_coords], dim=0)
