@@ -660,21 +660,11 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         # Add coordinate tokens of index cells
         adata_dict['rel_x_coord'] = [
-            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 0].tolist()]
+            [0] * self.seq_len_cell for coord in adata.obsm[
+                'spatial'][:, 0].tolist()]
         adata_dict['rel_y_coord'] = [
-            [0] * self.seq_len_cell for coord in adata.obsm['spatial'][:, 1].tolist()]
-
-        # Add coordinate tokens of neighbor cells
-        for i in range(len(adata)):
-            neighbor_indices = adata_neigh.obsp[
-                'spatial_connectivities'][i].indices
-            for j in neighbor_indices:
-                adata_dict['rel_x_coord'][i].extend([(
-                    adata.obsm['spatial'][j, 0] - adata.obsm['spatial'][i, 0]
-                    ).tolist()] * self.seq_len_cell)
-                adata_dict['rel_y_coord'][i].extend([(
-                    adata.obsm['spatial'][j, 1] - adata.obsm['spatial'][i, 1]
-                    ).tolist()] * self.seq_len_cell)
+            [0] * self.seq_len_cell for coord in adata.obsm[
+                'spatial'][:, 1].tolist()]
 
         # Prepare gene tokens for cell and neighborhood for this batch
         adata_dict['gene_tokens_cell'] = []
@@ -788,8 +778,8 @@ class CellGraphTokenizer(CellBaseTokenizer):
             assert len(neighbors_i) == len(cell_distances), (
                 'Number of neighbors does not equal number of distances.')
 
-            # Loop through distance-sorted neighbor cells and add gene and
-            # segment tokens and counts
+            # Loop through distance-sorted neighbor cells and add gene,
+            # segment tokens, counts, and relative coords
             for j, k in enumerate(neighbors_i[sorted_indices]):
                 adata_dict['gene_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['gene_tokens_neighborhood'][i],
@@ -801,6 +791,15 @@ class CellGraphTokenizer(CellBaseTokenizer):
                     (adata_dict['seg_tokens_neighborhood'][i],
                      [j + self.max_special_tokens + 1] * len(
                         adata_dict['gene_tokens_cell_neigh'][k])))
+
+                adata_dict['rel_x_coord'][i].extend([
+                    (adata.obsm['spatial'][k, 0] -
+                     adata.obsm['spatial'][i, 0]
+                     ).tolist()] * self.seq_len_cell)
+                adata_dict['rel_y_coord'][i].extend([
+                    (adata.obsm['spatial'][k, 1] -
+                     adata.obsm['spatial'][i, 1]
+                    ).tolist()] * self.seq_len_cell)
 
                 #adata_dict['cell_total_counts'][i].append(adata.X[k].sum())
                 if self.add_neigh_cell_ids:
