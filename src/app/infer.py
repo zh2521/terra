@@ -323,7 +323,7 @@ def infer(args: dict,
         include_cell_id=True,
         sep_gene_tokens_neb=sep_gene_tokens_neb)
 
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
@@ -1002,7 +1002,7 @@ def embed_dataset(dataset: Dataset,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
@@ -1512,7 +1512,7 @@ def gene_embed_dataset(dataset: Dataset,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
