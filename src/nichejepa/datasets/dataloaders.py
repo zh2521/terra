@@ -226,4 +226,4 @@ def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
                                 **dataloader_kwargs)
         logger.info('Dataloader created.')
         
-        return dataloader
+        return dataloader, None

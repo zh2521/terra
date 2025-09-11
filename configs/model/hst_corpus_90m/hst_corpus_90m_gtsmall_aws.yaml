@@ -30,6 +30,7 @@ data:
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
+  use_sampler: True
 meta:
   api_version: 'v3'
   add_cls: False
@@ -62,7 +63,7 @@ mask:
   sample_segments: True
 optimization:
   warmup: 1 #5 # 5, 3
-  epochs: 4 #20 # 30, 10
+  epochs: 5 #20 # 30, 10
   ema:
   - 0.9995 # 0.998, 0.9995
   - 1.0

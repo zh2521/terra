@@ -122,6 +122,11 @@ def train(args: dict,
     else:
         sep_gene_tokens_neb = False
 
+    if 'use_sampler' in args['data'].keys():
+        use_sampler = args['data']['use_sampler']
+    else:
+        use_sampler = False
+
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
     count_encoding = args['meta']['count_encoding']
@@ -368,7 +373,7 @@ def train(args: dict,
             train_loader, train_sampler = init_dataloader_and_sampler(
                 cell_dataset=cell_d,
                 batch_size=batch_size,
-                distributed=True,
+                distributed=use_sampler,
                 world_size=world_size,
                 rank=rank,
                 collate_fn=mask_collator,
@@ -383,7 +388,7 @@ def train(args: dict,
         train_loader, train_sampler = init_dataloader_and_sampler(
             cell_dataset=train_cell_dataset,
             batch_size=batch_size,
-            distributed=True,
+            distributed=use_sampler,
             world_size=world_size,
             rank=rank,
             collate_fn=mask_collator,
@@ -515,7 +520,8 @@ def train(args: dict,
             train_sampler = train_samplers[epoch] 
 
         # Update distributed dataloader epoch
-        train_sampler.set_epoch(epoch)
+        if use_sampler:
+            train_sampler.set_epoch(epoch)
 
         loss_meter = AverageMeter()
         #maskA_meter = AverageMeter()
