@@ -214,7 +214,7 @@ def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
             seed=_GLOBAL_SEED)
     else:
         dist_sampler = DistributedSampler(
-            cell_dataset=cell_dataset,
+            dataset=cell_dataset,
             num_replicas=world_size,
             rank=rank,
             shuffle=False,
