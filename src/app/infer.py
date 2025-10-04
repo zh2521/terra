@@ -211,7 +211,7 @@ def infer(args: dict,
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
 
-    if args['data']['precomputed_n_nonzero_tokens']:
+    if args['data'].get('precomputed_n_nonzero_tokens'):
         with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
             n_nonzero_tokens = pickle.load(f)
     else:

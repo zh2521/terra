@@ -69,11 +69,11 @@ def prepare_dataset(args: dict, train_mode: bool = False):
         ds = ds.remove_columns(existing)
 
     # Early outs with precomputed splits
-    if 'precomputed_epoch_splits' in args['data']:
+    if args['data'].get('precomputed_epoch_splits'):
         with open(args['data']['precomputed_epoch_splits'], 'rb') as f:
             epoch_indices = pickle.load(f)
         splits = [ds.select(idx) for idx in epoch_indices]
-        # Now drop cell_id if training
+        # Drop cell_id if training
         if train_mode and 'cell_id' in splits[0].column_names:
             splits = [s.remove_columns(['cell_id']) for s in splits]
         # Set minimal torch format on each split
@@ -81,18 +81,32 @@ def prepare_dataset(args: dict, train_mode: bool = False):
             cols = [c for c in splits[i].column_names if c != 'cell_id' or not train_mode]
             splits[i].set_format(type="torch", columns=cols, output_all_columns=False)
         return splits, None, None
-
     if args['data'].get('precomputed_split'):
         with open(args['data']['precomputed_split'], 'rb') as f:
             indices = pickle.load(f)
         ds = ds.select(indices)
+        # Drop cell_id if training
         if train_mode and 'cell_id' in ds.column_names:
             ds = ds.remove_columns(['cell_id'])
+        # Set minimal torch format
         cols = [c for c in ds.column_names if c != 'cell_id' or not train_mode]
         ds.set_format(type="torch", columns=cols, output_all_columns=False)
         return ds, None, None
 
-    # 2) Vectorized batch_id extraction
+    # Early outs without test and validation sets
+    test_set = set(args['data'].get('test_batch_ids', []) or [])
+    val_set  = set(args['data'].get('val_batch_ids', [])  or [])
+
+    if len(test_set) == 0 and len(val_set) == 0:
+        # Drop cell_id if training
+        if train_mode and 'cell_id' in ds.column_names:
+            ds = ds.remove_columns(['cell_id'])
+        # Set minimal torch format
+        cols = [c for c in ds.column_names if c != 'cell_id' or not train_mode]
+        ds.set_format(type="torch", columns=cols, output_all_columns=False)
+        return ds, None, None
+
+    # Vectorized batch_id extraction
     cell_ids = np.asarray(ds['cell_id'], dtype='U')  # zero-copy from Arrow buffers
     p1 = np.char.partition(cell_ids, '_')
     first = p1[:, 0]
@@ -101,10 +115,7 @@ def prepare_dataset(args: dict, train_mode: bool = False):
     second = p2[:, 0]
     batch_ids = np.char.add(np.char.add(first, '_'), second)  # "<part0>_<part1>"
 
-    test_set = set(args['data'].get('test_batch_ids', []) or [])
-    val_set  = set(args['data'].get('val_batch_ids', [])  or [])
-
-    # 3) Masks -> indices (single pass)
+    # Masks -> indices (single pass)
     test_mask = np.isin(batch_ids, np.fromiter(test_set, dtype=batch_ids.dtype)) if test_set else np.zeros(len(batch_ids), dtype=bool)
     val_mask  = np.isin(batch_ids, np.fromiter(val_set,  dtype=batch_ids.dtype)) if val_set  else np.zeros(len(batch_ids), dtype=bool)
     train_mask = ~(test_mask | val_mask)
@@ -117,13 +128,13 @@ def prepare_dataset(args: dict, train_mode: bool = False):
     val_ds   = ds.select(val_idx)
     test_ds  = ds.select(test_idx)
 
-    # 4) Now drop cell_id for training if requested
+    # Now drop cell_id for training if requested
     if train_mode and 'cell_id' in train_ds.column_names:
         train_ds = train_ds.remove_columns(['cell_id'])
         if 'cell_id' in val_ds.column_names:  val_ds  = val_ds.remove_columns(['cell_id'])
         if 'cell_id' in test_ds.column_names: test_ds = test_ds.remove_columns(['cell_id'])
 
-    # 5) Minimal torch formatting per split
+    # Minimal torch formatting per split
     def set_minimal_format(d):
         cols = [c for c in d.column_names if c != 'cell_id' or not train_mode]
         d.set_format(type="torch", columns=cols, output_all_columns=False)
