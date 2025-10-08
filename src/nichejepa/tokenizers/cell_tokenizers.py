@@ -211,8 +211,6 @@ class CellBaseTokenizer(ABC):
         # Get maximum number of cls and special tokens based on token
         # dict
         self.max_cls_tokens = sum(1 for key in self.token_dict if "cls" in key)
-        self.max_special_tokens = self.max_cls_tokens + sum(
-            1 for key in self.token_dict if "spt" in key)
             
         # Get vocabulary and gene Ensembl IDs (protein-coding and miRNA genes)
         self.vocab = list(self.token_dict.keys())
@@ -789,8 +787,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                      adata_dict['gene_expr_cell_neigh'][k]))
                 adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
                     (adata_dict['seg_tokens_neighborhood'][i],
-                     [j + self.max_special_tokens + 1] * len(
-                        adata_dict['gene_tokens_cell_neigh'][k])))
+                     [j + 1] * len(adata_dict['gene_tokens_cell_neigh'][k])))
 
                 adata_dict['rel_x_coord'][i].extend([
                     (adata.obsm['spatial'][k, 0] -
@@ -885,7 +882,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
-            for segment in range(self.max_special_tokens + 1, self.max_special_tokens + n_gene_segments):
+            for segment in range(2, n_gene_segments + 1): # neigh segments
                 gene_tokens_neighborhood_segment = [
                     gene for gene, seg in zip(
                         example['gene_tokens_neighborhood'],
@@ -935,7 +932,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         example['gene_expr'] = np.concatenate(
             (gene_expr_cell, gene_expr_neighborhood)).astype(float)
         example['seg_tokens'] = np.concatenate(
-            (np.array([self.max_special_tokens if gene_token != 0 else 0
+            (np.array([1 if gene_token != 0 else 0
                        for gene_token in gene_tokens_cell]),
              seg_tokens_neighborhood)).astype(int)
 
@@ -1441,9 +1438,9 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Define segments (leave space for special token segments)
         example['seg_tokens'] = np.concatenate(
-            (np.array([self.max_special_tokens if gene_token != 0 else 0 for 
+            (np.array([1 if gene_token != 0 else 0 for 
                        gene_token in gene_tokens_cell]),
-             np.array([self.max_special_tokens + 1 if gene_token != 0 else 0
+             np.array([2 if gene_token != 0 else 0
                        for gene_token in gene_tokens_neighborhood])
                        )).astype(int)
         
