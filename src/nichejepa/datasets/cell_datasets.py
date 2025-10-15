@@ -74,7 +74,7 @@ class CellBaseDataset(Dataset):
         if n_nonzero_tokens_list:
             self.n_nz_tokens = n_nonzero_tokens_list
         else:
-            self.n_nz_tokens = self.dataset['n_nonzero_tokens']
+            self.n_nz_tokens = list(self.dataset['n_nonzero_tokens'])
         self.include_cell_id = include_cell_id
         self.sep_gene_tokens_neb = sep_gene_tokens_neb
 
