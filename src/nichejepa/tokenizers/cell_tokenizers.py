@@ -811,12 +811,12 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Add special tokens (positional tokens and value tokens)
         batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
 
-        adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
-        adata_dict['gene_panel_token'] = [
-            self.token_dict['spt_gene_panel']] * n_cells
-        adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
-        adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
-        adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
+        #adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
+        #adata_dict['gene_panel_token'] = [
+        #    self.token_dict['spt_gene_panel']] * n_cells
+        #adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
+        #adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
+        #adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
 
         #adata_dict['batch_value_token'] = [
         #    self.token_dict[f'spv_{batch_id_key}']] * n_cells
@@ -1355,12 +1355,12 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         # Add special tokens (positional tokens and value tokens)
         batch_id_key = f"{adata.uns['dataset_id']}_{adata.uns['batch']}"
 
-        adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
-        adata_dict['gene_panel_token'] = [
-            self.token_dict['spt_gene_panel']] * n_cells
-        adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
-        adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
-        adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
+        #adata_dict['batch_token'] = [self.token_dict['spt_batch']] * n_cells
+        #adata_dict['gene_panel_token'] = [
+        #    self.token_dict['spt_gene_panel']] * n_cells
+        #adata_dict['assay_token'] = [self.token_dict['spt_assay']] * n_cells
+        #adata_dict['species_token'] = [self.token_dict['spt_species']] * n_cells
+        #adata_dict['tissue_token'] = [self.token_dict['spt_tissue']] * n_cells
 
         #adata_dict['batch_value_token'] = [
         #    self.token_dict[f'spv_{batch_id_key}']] * n_cells
