@@ -30,7 +30,6 @@ import numpy as np
 import pandas as pd
 import pickle
 import torch
-import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.profiler
 import wandb
@@ -231,12 +230,6 @@ def train(args: dict,
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
-
-    # Set multiprocessing start method
-    try:
-        mp.set_start_method("spawn")
-    except Exception:
-        logger.info(f'Multiprocessing not started.')
     
     # Initialize torch distributed backend
     world_size, rank = init_distributed()

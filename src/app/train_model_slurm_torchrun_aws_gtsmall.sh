@@ -3,8 +3,8 @@
 #SBATCH --nodes=4                                              # requests 4 nodes (each will typically run one process)
 #SBATCH --ntasks-per-node=1                                    # runs one task (process) per node and aligns with DDP across nodes
 #SBATCH --gpus-per-node=8                                      # requests 8 GPU on each node
-#SBATCH --cpus-per-task=48                                     # allocates 48 CPU cores per task
-#SBATCH --mem=1024G                                            # allocates 1024 GB of RAM memory per node
+#SBATCH --cpus-per-task=96                                     # allocates 96 CPU cores per task
+#SBATCH --mem=1942G                                            # allocates 1942 GB of RAM memory per node
 #SBATCH --partition=p4de-24xlarge                              # specifies the partition (queue) to submit the job to (use `sinfo` to see avaialble)
 #SBATCH --time=480:00:00                                       # sets the max wall time (runtime) for the job (HH:MM:SS)
 #SBATCH --output=logs/aws/%j.out                               # stdout file (%j is replaced with the job ID)
