@@ -372,7 +372,7 @@ class CellGraphDataset(CellBaseDataset):
 
         # Add segment to item (TODO: if statement to support old API)
         if 'seg_tokens' not in item.keys():
-            seg_tokens = torch.arange(self.n_segments)
+            seg_tokens = torch.arange(1, self.n_segments + 1)
             seg_tokens = torch.repeat_interleave(
                 seg_tokens, self.seq_len_cell)
             # Mask out positions where gene_tokens == 0
