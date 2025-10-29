@@ -778,11 +778,14 @@ def harmonize_adata(adata: ad.AnnData,
 
 
 def tokenize_adata(adata: ad.AnnData,
-                   model_folder_path: str,             
+                   model_folder_path: str,
+                   cache_directory_path: str,             
                    nproc: int = 4,
                    processing_mode: Literal['sequential',
                                             'parallel'] = 'parallel',
-                   add_neigh_cell_ids: bool = True,
+                   add_neigh_cell_ids: bool = False,
+                   use_generator: bool = True,
+                   keep_in_memory: bool = False,
                    ) -> Dataset:
     """
     Harmonize and tokenize an AnnData object based on the parameters in the
@@ -795,7 +798,9 @@ def tokenize_adata(adata: ad.AnnData,
         AnnData object to be tokenized.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
-        normalization factors.     
+        normalization factors.
+    cache_directory_path:
+        Path where the cache is stored during dataset creation.     
     n_proc:
         Number of processes used.
     processing_mode:
@@ -803,6 +808,10 @@ def tokenize_adata(adata: ad.AnnData,
     add_neigh_cell_ids:
         Whether neighbor cell IDs should be stored in tokenized data (used for
         perturbations).
+    use_generator:
+        Whether to use generator for dataset creation.
+    keep_in_memory:
+        Whether to keep dataset in memory.
 
     Returns
     -----------
@@ -847,9 +856,9 @@ def tokenize_adata(adata: ad.AnnData,
     dataset_dict = tk._tokenize_adata(adata=adata)
     dataset = tk._create_dataset(
         dataset_dict=dataset_dict,
-        use_generator=False,
-        cache_directory_path=None,
-        keep_in_memory=False)
+        use_generator=use_generator,
+        cache_directory_path=cache_directory_path,
+        keep_in_memory=keep_in_memory)
 
     columns = list(dataset.features.keys())
     columns.remove("cell_id")
