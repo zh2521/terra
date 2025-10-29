@@ -68,28 +68,6 @@ class CSVLogger(object):
                 print(tv[0] % tv[1], end=end, file=f)
 
 
-def gpu_timer(closure, *args, log_timings=True):
-    """
-    Helper to time gpu-time to execute closure().
-    """
-    log_timings = log_timings and torch.cuda.is_available()
-    elapsed_time = -1.
-
-    if log_timings:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
-
-    result = closure(*args)
-
-    if log_timings:
-        end.record()
-        torch.cuda.synchronize()
-        elapsed_time = start.elapsed_time(end)
-
-    return result, elapsed_time
-
-
 def grad_logger(named_params: list[tuple[str, torch.Tensor]],
                 ) -> AverageMeter:
     """

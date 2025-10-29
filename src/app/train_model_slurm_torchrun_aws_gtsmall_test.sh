@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=nemo-pretraining      # sets the name of the job shown in the job queue (via `squeue`)
-#SBATCH --nodes=4                        # requests 4 nodes (each will typically run one process)
+#SBATCH --nodes=1                        # requests 4 nodes (each will typically run one process)
 #SBATCH --ntasks-per-node=1              # runs one task (process) per node and aligns with DDP across nodes
 #SBATCH --gpus-per-node=8                # requests 8 GPU on each node
 #SBATCH --cpus-per-task=48               # allocates 48 CPU cores per task
@@ -41,7 +41,7 @@ export MASTER_ADDR=$(scontrol show hostname $SLURM_NODELIST | head -n 1)
 export MASTER_PORT=$((12000 + RANDOM % 1000)) 
 
 export EXPERIMENT_NAME="hst_corpus_90m" # "hst_corpus_80m"
-export RUN_NAME="gttiny_fullcorpus_aws_50"
+export RUN_NAME="gtsmall_fullcorpus_aws_35"
 
 echo "[+] SLURM_JOB_GPUS: $SLURM_JOB_GPUS"
 echo "[+] CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
@@ -66,4 +66,4 @@ srun torchrun \
     --rdzv_backend c10d \
     /home/ubuntu/sb75/nichejepa/src/app/main_dist.py \
     --backend nccl \
-    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_90m/hst_corpus_90m_gttiny_aws.yaml
+    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_90m/hst_corpus_90m_gtsmall_aws.yaml

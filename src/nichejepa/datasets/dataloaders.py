@@ -1,5 +1,6 @@
 import gc
 import math
+import time
 from collections.abc import Iterator
 from logging import getLogger
 
@@ -35,6 +36,8 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         Adapted from Theodoris, C. V. et al. Transfer learning enables
         predictions in network biology. Nature 618, 616–624 (2023);
         https://huggingface.co/ctheodoris/Geneformer/blob/main/geneformer/pretrainer.py
+        and
+        https://huggingface.co/transformers/v4.4.2/_modules/transformers/trainer_pt_utils.html
         (28.09.2024).
 
         Parameters
@@ -99,18 +102,15 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
 
         if not self.drop_last:
             # Add extra samples to make it evenly divisible
-            indices += indices[: (self.total_size - len(indices))]
+            indices += indices[:(self.total_size - len(indices))]
         else:
-            # Remove tail of data to make it evenly divisible.
-            indices = indices[: self.total_size]
+            # Remove tail of data to make it evenly divisible
+            indices = indices[:self.total_size]
         assert len(indices) == self.total_size
 
         # Subsample
         indices = indices[self.rank:self.total_size:self.num_replicas]
         assert len(indices) == self.num_samples
-
-        del g
-        gc.collect()
 
         return iter(indices)
 
@@ -126,9 +126,11 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         sorted by length in each mega-batch. The result is the
         concatenation of all mega-batches, with the batch of
         `batch_size` containing the element of maximum length placed
-        first, so that an OOM error would happens earlier rather than
+        first, so that an OOM error would happen earlier rather than
         later.
         """
+        #t0 = time.perf_counter()
+
         if mega_batch_mult is None:
             # Default for mega_batch_mult: 1000 or the number to get 4
             # mega batches, whichever is smaller.
@@ -160,10 +162,12 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
         megabatches[0][0], megabatches[max_idx][0] = (
             megabatches[max_idx][0],
             megabatches[0][0])
-
+        
         indices = [item for sublist in megabatches for item in sublist]
-        del megabatches
-        gc.collect()
+
+        #t1 = time.perf_counter()
+        #elapsed_ms = (t1 - t0) * 1000
+        #print(f"[Length Sampling] Took {elapsed_ms:.3f}ms.")
 
         return indices
 
@@ -208,18 +212,19 @@ def init_dataloader_and_sampler(cell_dataset: CellBaseDataset,
             num_replicas=world_size,
             rank=rank,
             seed=_GLOBAL_SEED)
-
-        dataloader = DataLoader(cell_dataset,
-                                batch_size=batch_size,
-                                sampler=dist_sampler,
-                                **dataloader_kwargs)
-        logger.info('Dataloader and -sampler created.')
-
-        return dataloader, dist_sampler
     else:
-        dataloader = DataLoader(cell_dataset,
-                                batch_size=batch_size,
-                                **dataloader_kwargs)
-        logger.info('Dataloader created.')
+        dist_sampler = DistributedSampler(
+            dataset=cell_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+            seed=_GLOBAL_SEED,
+        )
         
-        return dataloader
+    dataloader = DataLoader(cell_dataset,
+                            batch_size=batch_size,
+                            sampler=dist_sampler,
+                            **dataloader_kwargs)
+    logger.info('Dataloader and -sampler created.')
+
+    return dataloader, dist_sampler

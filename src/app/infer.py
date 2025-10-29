@@ -48,7 +48,7 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
@@ -63,14 +63,13 @@ def infer(args: dict,
                             'weighted_avg'] = 'avg',
           masked_tokens: list[int] | None = None,
           agg_excluded_tokens: list[int] | None = None,
-          feature_norm: bool = False,
           top_k: int | None = None,
           return_gene: bool=True,
           return_cosine_sim: bool=False,
           compute_cosine_with_list:  list[str] = [],
           return_gene_per_data: bool=False,
           return_gene_marker_score: bool=False,
-          returen_distance: bool=False,
+          return_distance: bool=False,
           include_spatial_cell_emb: bool = False,
           ) -> ad.AnnData:
     """
@@ -102,8 +101,6 @@ def infer(args: dict,
         inference.
     agg_excluded_tokens:
         List of tokens to be excluded from the aggregation.
-    feature_norm:
-        If `True`, apply feature norm in the last embedding layer.
     top_k:
         Include only top_k genes in aggregation.
     return_gene: 
@@ -117,7 +114,7 @@ def infer(args: dict,
         If 'True' will return gene_embedding for each gene per dataset.
     return_gene_marker_score:
         If 'True' will compute and return gene marker scores.
-    returen_distance:
+    return_distance:
         If 'True' will compute and return distance between cosine sim of cell_neb 
         and cell_cell matrix.
     include_spatial_cell_emb:
@@ -214,7 +211,7 @@ def infer(args: dict,
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
 
-    if args['data']['precomputed_n_nonzero_tokens']:
+    if args['data'].get('precomputed_n_nonzero_tokens'):
         with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
             n_nonzero_tokens = pickle.load(f)
     else:
@@ -297,7 +294,9 @@ def infer(args: dict,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
-            per_block_mask_ratio=per_block_mask_ratio)
+            per_block_mask_ratio=per_block_mask_ratio,
+            sample_segments=False,
+            sample_gene_masks=False)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
@@ -324,7 +323,7 @@ def infer(args: dict,
         include_cell_id=True,
         sep_gene_tokens_neb=sep_gene_tokens_neb)
 
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
@@ -394,26 +393,19 @@ def infer(args: dict,
         with torch.cuda.amp.autocast(dtype=torch.bfloat16,
                                      enabled=args['meta']['use_bfloat16']):
 
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
+                batch=udata,
+                masks_attention=masks_attention,
+                need_cell_only_context=True,
+            )
+
             cell_emb_list = []
             neighborhood_emb_list = []
-            for emb_layer in emb_layers:
-                cell_emb_list.append(return_layer_emb_fn(
-                    layer=emb_layer,
-                    udata=udata,
-                    masks_attention=masks_attention,
-                    pad_neighborhood=True).cpu())
-                neighborhood_emb_list.append(return_layer_emb_fn(
-                    layer=emb_layer,
-                    udata=udata,
-                    masks_attention=masks_attention,
-                    pad_neighborhood=False).cpu())
-        
-            if feature_norm and (emb_layers[-1] == enc_depth):
-                # Normalize last layer like in training # TO DO should this consider inference padding?
-                cell_emb_list[-1] = F.layer_norm(cell_emb_list[-1],
-                                                 (cell_emb_list[-1].size(-1),))
-                neighborhood_emb_list[-1] = F.layer_norm(neighborhood_emb_list[-1],
-                                                         (neighborhood_emb_list[-1].size(-1),))
+
+            for l in emb_layers:
+                cell_emb_list.append(cell_only_ctx[l].cpu())
+                neighborhood_emb_list.append(full_ctx[l].cpu())
 
         # Aggregate gene embeddings into cell and neighborhood embeddings
         cell_mask = create_binary_selection_mask(
@@ -544,7 +536,7 @@ def infer(args: dict,
                                 all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
                     # Stack neighborhood gene occurrence tensors along gene dimension:
                     # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
-                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_gene_marker_score or returen_distance):
+                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_gene_marker_score or return_distance):
                         neb_occ_dict[compute_cosine_with] = (torch.stack(neb_occ_list, dim=1), torch.stack(neb_occ_mask_list, dim=1))
 
                 # Compute cosine similarity components using our function for multiple occurrences.
@@ -567,7 +559,7 @@ def infer(args: dict,
                                 pair_count + pair_count_temp,
                                 cell_count + cell_count_temp
                             )
-                if returen_distance:
+                if return_distance:
                     cos_sim_temp = []
                     for compute_cosine_with in compute_cosine_with_list:
                         sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
@@ -697,7 +689,7 @@ def infer(args: dict,
             adata.obsm['gene_marker_pair_count_neb'] = np.array(torch.cat(all_neb_gene_marker_stats['pair_count'], dim=0).cpu())
             adata.obsm['gene_marker_cell_count_neb'] = np.array(torch.cat(all_neb_gene_marker_stats['cell_count'], dim=0).cpu())
     # --- End: store gene marker score in obsm ---
-    if returen_distance:
+    if return_distance:
        adata.obsm['emd_dist'] = np.concatenate(emd_list, axis=0)
 
     return adata
@@ -786,11 +778,14 @@ def harmonize_adata(adata: ad.AnnData,
 
 
 def tokenize_adata(adata: ad.AnnData,
-                   model_folder_path: str,             
+                   model_folder_path: str,
+                   cache_directory_path: str,             
                    nproc: int = 4,
                    processing_mode: Literal['sequential',
                                             'parallel'] = 'parallel',
-                   add_neigh_cell_ids: bool = True,
+                   add_neigh_cell_ids: bool = False,
+                   use_generator: bool = True,
+                   keep_in_memory: bool = False,
                    ) -> Dataset:
     """
     Harmonize and tokenize an AnnData object based on the parameters in the
@@ -803,7 +798,9 @@ def tokenize_adata(adata: ad.AnnData,
         AnnData object to be tokenized.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
-        normalization factors.     
+        normalization factors.
+    cache_directory_path:
+        Path where the cache is stored during dataset creation.     
     n_proc:
         Number of processes used.
     processing_mode:
@@ -811,6 +808,10 @@ def tokenize_adata(adata: ad.AnnData,
     add_neigh_cell_ids:
         Whether neighbor cell IDs should be stored in tokenized data (used for
         perturbations).
+    use_generator:
+        Whether to use generator for dataset creation.
+    keep_in_memory:
+        Whether to keep dataset in memory.
 
     Returns
     -----------
@@ -855,9 +856,9 @@ def tokenize_adata(adata: ad.AnnData,
     dataset_dict = tk._tokenize_adata(adata=adata)
     dataset = tk._create_dataset(
         dataset_dict=dataset_dict,
-        use_generator=False,
-        cache_directory_path=None,
-        keep_in_memory=False)
+        use_generator=use_generator,
+        cache_directory_path=cache_directory_path,
+        keep_in_memory=keep_in_memory)
 
     columns = list(dataset.features.keys())
     columns.remove("cell_id")
@@ -869,7 +870,7 @@ def tokenize_adata(adata: ad.AnnData,
     return dataset
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def embed_dataset(dataset: Dataset,
                   model_folder_path: str,
                   emb_layer: int | None = None,
@@ -990,7 +991,9 @@ def embed_dataset(dataset: Dataset,
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
         n_special_tokens=n_special_tokens,
-        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
+        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
+        sample_segments=False,
+        sample_gene_masks=False)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
@@ -1008,7 +1011,7 @@ def embed_dataset(dataset: Dataset,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
@@ -1054,16 +1057,17 @@ def embed_dataset(dataset: Dataset,
             dtype=torch.bfloat16,
             enabled=model_config['meta']['use_bfloat16']):
 
-            c_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
+            emb_layers = [emb_layer]
+
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
+                batch=udata,
                 masks_attention=masks_attention,
-                pad_neighborhood=True).cpu()
-            n_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
-                masks_attention=masks_attention,
-                pad_neighborhood=False).cpu()
+                need_cell_only_context=True,
+            )
+
+            c_emb = cell_only_ctx[emb_layer].cpu()
+            n_emb = full_ctx[emb_layer].cpu()
             if return_token_embeddings:
                 # n_emb contains embeddings for all  tokens
                 all_token_emb_list.append(n_emb)
@@ -1231,7 +1235,7 @@ def perturb_dataset(
     )
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def harmonize_tokenize_embed_pipeline(
         adata: ad.AnnData,
         sample_key: str | None,
@@ -1360,7 +1364,7 @@ def harmonize_tokenize_embed_pipeline(
     return adata
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def gene_embed_dataset(dataset: Dataset,
                   model_folder_path: str,
                   emb_layer: int | None = None,
@@ -1372,7 +1376,7 @@ def gene_embed_dataset(dataset: Dataset,
                   return_gene: bool=False,
                   return_gene_per_data: bool=False,
                   compute_cosine_with_list:  list[str] = [],
-                  returen_distance: bool=False,
+                  return_distance: bool=False,
                   return_cosine_sim: bool=False,
                   return_receptor_average: bool=False,
                   include_spatial_cell_emb: bool = True,
@@ -1405,7 +1409,7 @@ def gene_embed_dataset(dataset: Dataset,
     compute_cosine_with_list:
        A list that defines the items with which we want to compute cosine similarity.
        it could have value of 'cell' or/and 'neighborhood'.
-    returen_distance:
+    return_distance:
         If 'True' will compute and return distance between cosine sim of cell_neb 
         and cell_cell matrix.
     return_cosine_sim: 
@@ -1497,7 +1501,9 @@ def gene_embed_dataset(dataset: Dataset,
         seq_len_cell=model_config['data']['seq_len_cell'],
         seq_len_neighborhood=model_config['data']['seq_len_neighborhood'],
         n_special_tokens=n_special_tokens,
-        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'])
+        per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
+        sample_segments=False,
+        sample_gene_masks=False)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
@@ -1515,7 +1521,7 @@ def gene_embed_dataset(dataset: Dataset,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
 
     # Initialize dataloader
-    loader = init_dataloader_and_sampler(
+    loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
         batch_size=batch_size,
         distributed=False,
@@ -1568,157 +1574,186 @@ def gene_embed_dataset(dataset: Dataset,
             dtype=torch.bfloat16,
             enabled=model_config['meta']['use_bfloat16']):
 
-            c_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
-                masks_attention=masks_attention,
-                pad_neighborhood=True).cpu()
-            n_emb = return_layer_emb_fn(
-                layer=emb_layer,
-                udata=udata,
-                masks_attention=masks_attention,
-                pad_neighborhood=False).cpu()
-        emb = c_emb
-        if len(cell_gene_ids) != 0 or len(neighborhood_gene_ids) != 0 :
-            if itr == 0 or itr == len(loader)-1:
-                cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
-                cell_presence = torch.zeros((emb.shape[0], len(cell_gene_ids)), device=emb.device)
-                if include_spatial_cell_emb:
-                    spatial_cell_embs = torch.zeros((emb.shape[0], len(cell_gene_ids), emb.shape[-1]), device=emb.device)
-            else:
-                cell_embs.zero_()
-                cell_presence.zero_()
-                if include_spatial_cell_emb:
-                    spatial_cell_embs.zero_()
-            rows = torch.arange(emb.shape[0], device=emb.device)
-            for j, gene_id in enumerate(cell_gene_ids):
-                gene_presence_local, gene_indices = retrieve_gene_emb(
-                        ns_tokens=ns_tokens,
-                        seq_len_cell=seq_len_cell,
-                        gene_type="cell",
-                        gene_id=gene_id,
-                        aggregate_multiple=False
-                )
-                cell_embs[rows[gene_presence_local], j, :] = emb[rows[gene_presence_local], gene_indices[gene_presence_local], :]
-                if include_spatial_cell_emb:
-                    spatial_cell_embs[rows[gene_presence_local], j, :] = n_emb[rows[gene_presence_local], gene_indices[gene_presence_local], :]
-                cell_presence[:, j] = gene_presence_local.float()
-                if return_gene:
-                    if itr == 0:
-                        all_cell_gene_emb_dict[gene_id] = [cell_embs[:, j, :].clone()]
-                        if include_spatial_cell_emb:
-                            all_spatial_cell_gene_emb_dict[gene_id] = [spatial_cell_embs[:, j, :].clone()]
-                    else:
-                        all_cell_gene_emb_dict[gene_id].append(cell_embs[:, j, :].clone())
-                        if include_spatial_cell_emb:
-                            all_spatial_cell_gene_emb_dict[gene_id].append(spatial_cell_embs[:, j, :].clone())
-                if return_gene_per_data:
-                    gene_sum, gene_count = compute_sum_and_nonzero_count(cell_embs[:, j, :])
-                    if itr == 0:
-                        all_cell_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
-                        if include_spatial_cell_emb:
-                            spatial_gene_sum, spatial_gene_count = compute_sum_and_nonzero_count(spatial_cell_embs[:, j, :])
-                            all_spatial_cell_gene_emb_per_data_dict[gene_id] = (spatial_gene_sum, spatial_gene_count)
-                    else:
-                        all_cell_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
-                        all_cell_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
-                        if include_spatial_cell_emb:
-                            spatial_gene_sum, spatial_gene_count = compute_sum_and_nonzero_count(spatial_cell_embs[:, j, :])
-                            all_spatial_cell_gene_emb_per_data_dict[gene_id][0].add_(spatial_gene_sum)
-                            all_spatial_cell_gene_emb_per_data_dict[gene_id][1].add_(spatial_gene_count)
+            emb_layers = [emb_layer]
 
-            # Compute receptor averages for cell-neighborhood gene pairs
-            if return_receptor_average:
-                for cell_idx, cell_gene_id in enumerate(cell_gene_ids):
-                    for neigh_gene_id in neighborhood_gene_ids:
-                        # Get neighborhood gene presence
-                        neigh_gene_presence, neigh_gene_indices = retrieve_gene_emb(
-                            ns_tokens=ns_tokens,
-                            seq_len_cell=seq_len_cell,
-                            gene_type="neighborhood",
-                            gene_id=neigh_gene_id,
-                            aggregate_multiple=False
-                        )
-                        
-                        # Case 1: Find cells where both genes are present
-                        both_present = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence > 0)
-                        
-                        if torch.any(both_present):
-                            # Get cell gene embeddings where both are present
-                            valid_cell_embs = cell_embs[both_present, cell_idx, :]
-                            
-                            # Initialize or update receptor average dict for 'present' case
+            full_ctx, cell_only_ctx = return_layer_emb_fn(
+                layers=emb_layers,
+                batch=udata,
+                masks_attention=masks_attention,
+                need_cell_only_context=True,
+            )
+
+            # Keep embeddings on device for vectorized ops; move to CPU only when storing
+            c_emb = cell_only_ctx[emb_layer]  # (N, total_seq_len, D) cell-only context embeddings
+            n_emb = full_ctx[emb_layer]       # (N, total_seq_len, D) full context embeddings (attends neighborhood)
+        emb = c_emb
+        if len(cell_gene_ids) != 0 or len(neighborhood_gene_ids) != 0:
+            N, L, D = emb.shape  # batch size, sequence length, embedding dim
+            Gc = len(cell_gene_ids)  # number of requested cell genes
+            Gn = len(neighborhood_gene_ids)  # number of requested neighborhood genes
+
+            # Vectorized extraction for cell genes (first occurrence in cell segment)
+            if Gc > 0:
+                ns_cell = ns_tokens[:, :seq_len_cell]  # (N, Lc) token IDs in the cell segment
+                cell_gene_ids_tensor = torch.as_tensor(cell_gene_ids, device=ns_tokens.device, dtype=ns_tokens.dtype)  # (Gc,)
+                # Build equality mask across all cell genes and positions: True where token equals gene ID
+                eq_cell = (ns_cell.unsqueeze(1) == cell_gene_ids_tensor.view(1, -1, 1))  # (N, Gc, Lc)
+                # Presence for each gene in each sequence (1 if present)
+                cell_presence = eq_cell.any(dim=2).float()  # (N, Gc)
+                # Compute first occurrence index by assigning unmatched positions a large sentinel and taking min
+                pos_cell = torch.arange(seq_len_cell, device=ns_tokens.device).view(1, 1, -1)  # (1,1,Lc)
+                masked_pos = torch.where(eq_cell, pos_cell, torch.full_like(pos_cell, seq_len_cell))  # (N,Gc,Lc)
+                first_idx = masked_pos.min(dim=2).values  # (N, Gc), equals sentinel if absent
+                # Gather embeddings at first occurrence from both contexts; clamp handles absent sentinel safely
+                gather_idx = first_idx.clamp(max=L - 1)  # (N, Gc)
+                cell_embs = torch.gather(emb, 1, gather_idx.unsqueeze(-1).expand(-1, -1, D))  # (N, Gc, D)
+                cell_embs = cell_embs * cell_presence.unsqueeze(-1)  # zero-out entries where gene absent
+                if include_spatial_cell_emb:
+                    spatial_cell_embs = torch.gather(n_emb, 1, gather_idx.unsqueeze(-1).expand(-1, -1, D))  # (N,Gc,D)
+                    spatial_cell_embs = spatial_cell_embs * cell_presence.unsqueeze(-1)  # zero-out when absent
+
+                # Return per-gene embeddings
+                if return_gene:
+                    for j, gene_id in enumerate(cell_gene_ids):  # store per-gene batch embeddings for later concatenation
+                        if itr == 0:
+                            all_cell_gene_emb_dict[gene_id] = [cell_embs[:, j, :].detach().cpu()]
+                            if include_spatial_cell_emb:
+                                all_spatial_cell_gene_emb_dict[gene_id] = [spatial_cell_embs[:, j, :].detach().cpu()]
+                        else:
+                            all_cell_gene_emb_dict[gene_id].append(cell_embs[:, j, :].detach().cpu())
+                            if include_spatial_cell_emb:
+                                all_spatial_cell_gene_emb_dict[gene_id].append(spatial_cell_embs[:, j, :].detach().cpu())
+
+                # Accumulate per-data averages (sum and count)
+                if return_gene_per_data:
+                    sum_per_gene = cell_embs.sum(dim=0)  # (Gc, D) sum over batch for each gene
+                    count_per_gene = cell_presence.sum(dim=0)  # (Gc,) number of cells where gene present
+                    for j, gene_id in enumerate(cell_gene_ids):
+                        gene_sum = sum_per_gene[j]
+                        gene_count = count_per_gene[j]
+                        if itr == 0:
+                            all_cell_gene_emb_per_data_dict[gene_id] = (gene_sum.detach().cpu(), gene_count.detach().cpu())
+                            if include_spatial_cell_emb:
+                                spatial_sum_per_gene = spatial_cell_embs.sum(dim=0)  # (Gc, D)
+                                spatial_count_per_gene = count_per_gene           # (Gc,)
+                                all_spatial_cell_gene_emb_per_data_dict[gene_id] = (
+                                    spatial_sum_per_gene[j].detach().cpu(), spatial_count_per_gene[j].detach().cpu()
+                                )
+                        else:
+                            all_cell_gene_emb_per_data_dict[gene_id][0].add_(gene_sum.detach().cpu())
+                            all_cell_gene_emb_per_data_dict[gene_id][1].add_(gene_count.detach().cpu())
+                            if include_spatial_cell_emb:
+                                spatial_sum_per_gene = spatial_cell_embs.sum(dim=0)
+                                spatial_count_per_gene = count_per_gene
+                                all_spatial_cell_gene_emb_per_data_dict[gene_id][0].add_(spatial_sum_per_gene[j].detach().cpu())
+                                all_spatial_cell_gene_emb_per_data_dict[gene_id][1].add_(spatial_count_per_gene[j].detach().cpu())
+
+            # Compute receptor averages for cell-neighborhood gene pairs (vectorized)
+            if return_receptor_average and Gc > 0 and Gn > 0:
+                ns_neb = ns_tokens[:, seq_len_cell:]  # (N, L_neb) neighborhood segment tokens
+                neigh_gene_ids_tensor = torch.as_tensor(neighborhood_gene_ids, device=ns_tokens.device, dtype=ns_tokens.dtype)  # (Gn,)
+                # Equality mask across neighborhood genes
+                eq_neb = (ns_neb.unsqueeze(1) == neigh_gene_ids_tensor.view(1, -1, 1))  # (N, Gn, L_neb)
+                neigh_presence = eq_neb.any(dim=2).float()  # (N, Gn) presence per sequence/gene
+
+                # Build masks: both present vs cell present and neighborhood absent
+                both_mask = (cell_presence.unsqueeze(2) * neigh_presence.unsqueeze(1))  # (N, Gc, Gn)
+                absent_mask = (cell_presence.unsqueeze(2) * (1.0 - neigh_presence.unsqueeze(1)))  # (N, Gc, Gn)
+
+                # Accumulate sums and counts for each (cell_gene, neighborhood_gene)
+                present_sum = (cell_embs.unsqueeze(2) * both_mask.unsqueeze(-1)).sum(dim=0)  # (Gc, Gn, D)
+                present_count = both_mask.sum(dim=0)  # (Gc, Gn)
+                absent_sum = (cell_embs.unsqueeze(2) * absent_mask.unsqueeze(-1)).sum(dim=0)  # (Gc, Gn, D)
+                absent_count = absent_mask.sum(dim=0)  # (Gc, Gn)
+
+                # Update dictionary with sum and count per pair, keeping CPU tensors
+                for ci, cell_gene_id in enumerate(cell_gene_ids):
+                    for ni, neigh_gene_id in enumerate(neighborhood_gene_ids):
+                        if present_count[ci, ni] > 0:
                             key_present = (cell_gene_id, neigh_gene_id, 'present')
                             if key_present not in receptor_average_dict:
-                                receptor_average_dict[key_present] = [torch.zeros_like(valid_cell_embs[0]), 0]
-                            
-                            # Accumulate sum and count for 'present' case
-                            receptor_average_dict[key_present][0] += torch.sum(valid_cell_embs, dim=0)
-                            receptor_average_dict[key_present][1] += valid_cell_embs.shape[0]
-
-                        # Case 2: Find cells where cell gene is present but neighborhood gene is absent
-                        cell_present_neigh_absent = (cell_presence[:, cell_idx] > 0) & (neigh_gene_presence == 0)
-                        
-                        if torch.any(cell_present_neigh_absent):
-                            # Get cell gene embeddings where cell is present but neighborhood is absent
-                            valid_cell_embs_absent = cell_embs[cell_present_neigh_absent, cell_idx, :]
-                            
-                            # Initialize or update receptor average dict for 'absent' case
+                                receptor_average_dict[key_present] = [present_sum[ci, ni].detach().cpu().clone(), int(present_count[ci, ni].item())]
+                            else:
+                                receptor_average_dict[key_present][0] += present_sum[ci, ni].detach().cpu()
+                                receptor_average_dict[key_present][1] += int(present_count[ci, ni].item())
+                        if absent_count[ci, ni] > 0:
                             key_absent = (cell_gene_id, neigh_gene_id, 'absent')
                             if key_absent not in receptor_average_dict:
-                                receptor_average_dict[key_absent] = [torch.zeros_like(valid_cell_embs_absent[0]), 0]
-                            
-                            # Accumulate sum and count for 'absent' case
-                            receptor_average_dict[key_absent][0] += torch.sum(valid_cell_embs_absent, dim=0)
-                            receptor_average_dict[key_absent][1] += valid_cell_embs_absent.shape[0]
+                                receptor_average_dict[key_absent] = [absent_sum[ci, ni].detach().cpu().clone(), int(absent_count[ci, ni].item())]
+                            else:
+                                receptor_average_dict[key_absent][0] += absent_sum[ci, ni].detach().cpu()
+                                receptor_average_dict[key_absent][1] += int(absent_count[ci, ni].item())
 
-            # Process neighborhood genes (multiple occurrences: compute cosine per occurrence)
+            # Process neighborhood genes (multiple occurrences) in a vectorized way
             neb_occ_dict = {}
-            for compute_cosine_with in compute_cosine_with_list:
-                if compute_cosine_with=='neighborhood':
-                    emb = n_emb
-                neb_occ_list = []
-                neb_occ_mask_list = []
-                for j, gene_id in enumerate(neighborhood_gene_ids):
-                    gene_occ, occ_mask, gene_presence_local = retrieve_gene_emb(
-                        ns_tokens=ns_tokens,
-                        seq_len_cell=seq_len_cell,
-                        gene_type=compute_cosine_with,
-                        gene_id=gene_id,
-                        emb=emb,
-                        aggregate_multiple=True,
-                        max_occ=MAX_OCC
-                    )
-                    neb_occ_list.append(gene_occ)       # gene_occ: (N, max_occ, D)
-                    neb_occ_mask_list.append(occ_mask)    # occ_mask: (N, max_occ)
-                    if return_gene and compute_cosine_with=='neighborhood':
-                        if itr == 0:
-                            #all_neighborhood_gene_emb_dict[gene_id] = [gene_occ * occ_mask.unsqueeze(-1)]
-                            all_neighborhood_gene_emb_dict[gene_id] = [compute_mean_unmasked_emb(gene_occ,occ_mask)]
+            if Gn > 0:
+                neigh_gene_ids_tensor = torch.as_tensor(neighborhood_gene_ids, device=ns_tokens.device, dtype=ns_tokens.dtype)
+                for compute_cosine_with in compute_cosine_with_list:
+                    emb_ctx = n_emb if compute_cosine_with == 'neighborhood' else c_emb  # select embedding context
+                    if compute_cosine_with == 'neighborhood':
+                        seg = ns_tokens[:, seq_len_cell:]  # (N, L_neb) neighborhood tokens
+                        base_offset = seq_len_cell        # offset indices into full sequence positions
+                    else:
+                        seg = ns_tokens[:, :seq_len_cell]  # (N, L_cell) cell tokens
+                        base_offset = 0                     # no offset in cell segment
+                    Lseg = seg.shape[1]
+                    # Equality mask across all genes: True where token equals the gene id
+                    eq_all = (seg.unsqueeze(1) == neigh_gene_ids_tensor.view(1, -1, 1))  # (N, Gn, Lseg)
+                    occ_counts = eq_all.sum(dim=2)  # (N, Gn) number of occurrences per gene per sample
+                    pos = torch.arange(Lseg, device=seg.device).view(1, 1, -1)  # (1,1,Lseg) absolute positions
+                    # Replace non-matches with sentinel Lseg and sort to bring valid positions first
+                    indices_all = torch.where(eq_all, pos, torch.full_like(pos, Lseg))  # (N,Gn,Lseg)
+                    sorted_pos, _ = indices_all.sort(dim=2)  # (N,Gn,Lseg) ascending order
+                    K = MAX_OCC  # always return up to MAX_OCC occurrences to match previous API
+                    occ_indices = sorted_pos[:, :, :K] + base_offset  # (N, Gn, K) positions into full sequence
+                    # Clamp indices to valid range; invalid positions are masked out later
+                    occ_indices = occ_indices.clamp_max(L - 1)
+                    range_k = torch.arange(K, device=seg.device).view(1, 1, -1)  # (1,1,K)
+                    occ_mask = (range_k < occ_counts.unsqueeze(-1)).float()  # (N, Gn, K) 1 for valid, 0 for padded
+                    # Gather embeddings along sequence dimension with expanded gene axis
+                    emb_ctx_exp = emb_ctx.unsqueeze(1).expand(-1, Gn, -1, -1)  # (N, Gn, L, D)
+                    gene_occ = torch.gather(emb_ctx_exp, 2, occ_indices.unsqueeze(-1).expand(-1, -1, -1, D))  # (N, Gn, K, D)
 
-                        else:
-                                #all_neighborhood_gene_emb_dict[gene_id].append(gene_occ * occ_mask.unsqueeze(-1))
-                            all_neighborhood_gene_emb_dict[gene_id].append(compute_mean_unmasked_emb(gene_occ,occ_mask))
-                    if return_gene_per_data and compute_cosine_with=='neighborhood':
-                        gene_sum, gene_count = compute_sum_and_nonzero_count(compute_mean_unmasked_emb(gene_occ,occ_mask))
-                        if itr == 0:
-                            all_neighborhood_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
-                        else:
-                            all_neighborhood_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
-                            all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
-                    # Stack neighborhood gene occurrence tensors along gene dimension:
-                    # Resulting shape: (N, num_neb_genes, max_occ, D) and mask: (N, num_neb_genes, max_occ)
-                if len(neighborhood_gene_ids) != 0 and (return_cosine_sim  or returen_distance):
-                    neb_occ_dict[compute_cosine_with] = (torch.stack(neb_occ_list, dim=1), torch.stack(neb_occ_mask_list, dim=1))
+                    # Optionally store per-gene mean embeddings for 'neighborhood'
+                    if return_gene and compute_cosine_with == 'neighborhood':
+                        sum_occ = (gene_occ * occ_mask.unsqueeze(-1)).sum(dim=2)         # (N, Gn, D) sum over occurrences
+                        cnt_occ = occ_mask.sum(dim=2).unsqueeze(-1)                       # (N, Gn, 1) count per sample/gene
+                        mean_emb = sum_occ / (cnt_occ + 1e-9)                              # (N, Gn, D) mean over valid occs
+                        for j, gene_id in enumerate(neighborhood_gene_ids):
+                            if itr == 0:
+                                all_neighborhood_gene_emb_dict[gene_id] = [mean_emb[:, j, :].detach().cpu()]
+                            else:
+                                all_neighborhood_gene_emb_dict[gene_id].append(mean_emb[:, j, :].detach().cpu())
+
+                    if return_gene_per_data and compute_cosine_with == 'neighborhood':
+                        # Compute per-sample mean embedding for each gene first
+                        sum_occ = (gene_occ * occ_mask.unsqueeze(-1)).sum(dim=2)         # (N, Gn, D)
+                        cnt_occ = occ_mask.sum(dim=2).unsqueeze(-1)                      # (N, Gn, 1)
+                        mean_emb = sum_occ / (cnt_occ + 1e-9)                             # (N, Gn, D)
+                        # For each gene, accumulate sum of non-zero rows and count of non-zero rows across batch
+                        for j, gene_id in enumerate(neighborhood_gene_ids):
+                            gene_sum, gene_count = compute_sum_and_nonzero_count(mean_emb[:, j, :].detach().cpu())
+                            if itr == 0:
+                                all_neighborhood_gene_emb_per_data_dict[gene_id] = (gene_sum, gene_count)
+                            else:
+                                all_neighborhood_gene_emb_per_data_dict[gene_id][0].add_(gene_sum)
+                                all_neighborhood_gene_emb_per_data_dict[gene_id][1].add_(gene_count)
+
+                    # For cosine/distance, keep stacked occurrence tensors
+                    if len(neighborhood_gene_ids) != 0 and (return_cosine_sim or return_distance):
+                        neb_occ_dict[compute_cosine_with] = (gene_occ, occ_mask)
 
             # Compute cosine similarity components using our function for multiple occurrences.
             if return_cosine_sim:
                 for compute_cosine_with in compute_cosine_with_list: 
                     if itr == 0:
-                        cos_sim_dict[compute_cosine_with] = compute_count_mean_cosine_sim(cell_embs,
-                                                                                          cell_presence, 
-                                                                                          neb_occ_dict[compute_cosine_with][0], 
-                                                                                          neb_occ_dict[compute_cosine_with][1])
+                        s, p, c = compute_count_mean_cosine_sim(cell_embs,
+                                                                 cell_presence, 
+                                                                 neb_occ_dict[compute_cosine_with][0], 
+                                                                 neb_occ_dict[compute_cosine_with][1])
+                        cos_sim_dict[compute_cosine_with] = (
+                            s.detach().cpu(), p.detach().cpu(), c.detach().cpu()  # move to CPU for numpy compatibility
+                        )
                     else:
                         sum_cos_sim_temp, pair_count_temp, cell_count_temp = compute_count_mean_cosine_sim(cell_embs,
                                                                                                            cell_presence,                                
@@ -1726,11 +1761,11 @@ def gene_embed_dataset(dataset: Dataset,
                                                                                                            neb_occ_dict[compute_cosine_with][1])
                         sum_cos_sim, pair_count, cell_count = cos_sim_dict[compute_cosine_with]
                         cos_sim_dict[compute_cosine_with] = (
-                                sum_cos_sim + sum_cos_sim_temp,
-                                pair_count + pair_count_temp,
-                                cell_count + cell_count_temp
+                                sum_cos_sim + sum_cos_sim_temp.detach().cpu(),   # accumulate on CPU
+                                pair_count + pair_count_temp.detach().cpu(),
+                                cell_count + cell_count_temp.detach().cpu()
                         )
-            if returen_distance:
+            if return_distance:
                 cos_sim_temp = []
                 for compute_cosine_with in compute_cosine_with_list:
                     sum_cos_sim, pair_count, _ = compute_count_mean_cosine_sim(
@@ -1740,7 +1775,7 @@ def gene_embed_dataset(dataset: Dataset,
                     neb_occ_dict[compute_cosine_with][1],
                     return_per_cell=True
                     )
-                    cos_sim_temp.append(sum_cos_sim/pair_count)
+                    cos_sim_temp.append((sum_cos_sim.detach().cpu())/(pair_count.detach().cpu()))  # per-sample matrices on CPU
                 _, emd_out, emd_matrix = batch_rowwise_distances(cos_sim_temp[0], cos_sim_temp[1])
                 emd_list.append(emd_out)
                 emd_matrix_list.append(emd_matrix)
@@ -1757,12 +1792,12 @@ def gene_embed_dataset(dataset: Dataset,
             return all_cell_gene_emb_per_data_dict, all_neighborhood_gene_emb_per_data_dict
     if return_cosine_sim:
         return cos_sim_dict
-    if returen_distance:
+    if return_distance:
         return emd_list, emd_matrix_list
     if return_receptor_average:
         return receptor_average_dict
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_gene_embed(
     dataset: Dataset,
     model_folder_path: str,
@@ -1856,7 +1891,7 @@ def get_gene_embed(
     return output_gene_embed
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_average_gene_embed(
     dataset: Dataset,
     model_folder_path: str,
@@ -1981,7 +2016,7 @@ def get_average_gene_embed(
     
     return output_average_gene_embed
 
-@torch.no_grad()
+@torch.inference_mode()
 def get_spatial_score(
     dataset: Dataset,
     model_folder_path: str,
@@ -2048,7 +2083,7 @@ def get_spatial_score(
         out_put_cosine_sim_score[f"cell_count_{compute_cosine_with}"] = cos_sim_dict[compute_cosine_with][2].numpy()
         out_put_cosine_sim_score[f"cos_sim_{compute_cosine_with}"] = out_put_cosine_sim_score[f"sum_cos_sim_{compute_cosine_with}"] / out_put_cosine_sim_score[f"pair_count_{compute_cosine_with}"]
     return out_put_cosine_sim_score
-@torch.no_grad()
+@torch.inference_mode()
 def get_emd_distance(
     dataset: Dataset,
     model_folder_path: str,
@@ -2101,13 +2136,13 @@ def get_emd_distance(
         pin_memory=pin_memory,
         num_workers=num_workers,
         compute_cosine_with_list=["cell", "neighborhood"],
-        returen_distance=True,
+        return_distance=True,
         description='COMPUTE EMD DISTANCE BETWEEN GENE IN CELL AND NEIGHBORHOOD'
     )
     
     return np.concatenate(emd_list, axis=0), np.concatenate(emd_matrix_list, axis=0)
 
-@torch.no_grad()
+@torch.inference_mode()
 def average_receptor_embedding(
     dataset: Dataset,
     model_folder_path: str,

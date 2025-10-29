@@ -30,8 +30,8 @@ import numpy as np
 import pandas as pd
 import pickle
 import torch
-import torch.multiprocessing as mp
 import torch.nn.functional as F
+import torch.profiler
 import wandb
 from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
@@ -46,9 +46,8 @@ from nichejepa.masks.utils import apply_masks
 from nichejepa.models.utils import repeat_interleave_batch
 from nichejepa.utils.distributed import init_distributed
 from nichejepa.utils.logging import (AverageMeter,
-                            CSVLogger,
-                            gpu_timer,
-                            grad_logger)
+                                     CSVLogger,
+                                     grad_logger)
 
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1" # Better error propagation
 
@@ -57,100 +56,6 @@ _GLOBAL_SEED = 0
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger()
-
-
-def train_step(udata,
-               masks_enc,
-               masks_pred,
-               masks_attention,
-               encoder,
-               predictor,
-               target_encoder,
-               optimizer,
-               scaler,
-               scheduler,
-               wd_scheduler,
-               momentum_scheduler,
-               loss_fn_type,
-               use_bfloat16,
-               warmup,
-               epoch,
-               itr,
-               ipe,
-               clip_grad):
-    _new_lr = scheduler.step()
-    _new_wd = wd_scheduler.step()
-
-    def forward_target(udata, masks_attention, target_encoder, masks_pred):
-        with torch.no_grad():
-            h, _ = target_encoder(
-                udata=udata, masks_attention=masks_attention)
-            h = F.layer_norm(h, (h.size(-1),))
-            h = apply_masks(h, masks_pred, concat=False)
-            return h
-
-    def forward_context(udata, encoder, predictor, masks_enc, masks_pred):
-        z, udata = encoder(udata=udata, masks=masks_enc, masks_attention=None)
-        z = predictor(z=z, udata=udata, masks_enc=masks_enc,
-                      masks_pred=masks_pred, masks_attention=None)
-        return z
-
-    def loss_fn(z, h, masks_pred, loss_exp=1.0):
-        loss = 0.
-        for zi, hi in zip(z, h):
-            if loss_fn_type == 'smooth_l1':
-                loss += F.smooth_l1_loss(zi, hi)
-            elif loss_fn_type == 'l1':
-                loss += torch.mean(torch.abs(zi - hi)**loss_exp) / loss_exp
-        loss /= len(masks_pred)
-        return loss
-
-    # Step 1: forward pass
-    with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
-        h = forward_target(udata, masks_attention, target_encoder, masks_pred)
-        z = forward_context(udata, encoder, predictor, masks_enc, masks_pred)
-        loss = loss_fn(z, h, masks_pred)
-
-    # Step 2: backward pass and step
-    _enc_norm, _pred_norm = 0., 0.
-    if use_bfloat16:
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-    else:
-        loss.backward()
-    if warmup >= 1: # iteration-based clipping didn't always work # TODO
-        if (epoch >= warmup) and (clip_grad is not None):
-            _enc_norm = torch.nn.utils.clip_grad_norm_(
-                encoder.parameters(), clip_grad)
-            _pred_norm = torch.nn.utils.clip_grad_norm_(
-                predictor.parameters(), clip_grad)
-    elif (itr > (warmup * ipe)) and (clip_grad is not None):
-        _enc_norm = torch.nn.utils.clip_grad_norm_(
-            encoder.parameters(), clip_grad)
-        _pred_norm = torch.nn.utils.clip_grad_norm_(
-            predictor.parameters(), clip_grad)
-    if use_bfloat16:
-        scaler.step(optimizer)
-        scaler.update()
-    else:
-        optimizer.step()
-
-    optimizer.zero_grad()
-
-    # Step 3: momentum update of target encoder
-    with torch.no_grad():
-        m = next(momentum_scheduler)
-        for param_q, param_k in zip(encoder.parameters(),
-                                    target_encoder.parameters()):
-            param_k.data.mul_(m).add_((1.-m) * param_q.detach().data)
-
-    # Logging
-    grad_stats = grad_logger(encoder.named_parameters())
-    grad_stats.global_norm = float(_enc_norm)
-    grad_stats_pred = grad_logger(predictor.named_parameters())
-    grad_stats_pred.global_norm = float(_pred_norm)
-
-    return (float(loss), _new_lr, _new_wd, grad_stats, grad_stats_pred)
 
 
 def train(args: dict,
@@ -183,8 +88,12 @@ def train(args: dict,
     torch.manual_seed(_GLOBAL_SEED)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(_GLOBAL_SEED)
-    torch.backends.cudnn.deterministic = True # set to True for reproducibility
-    torch.backends.cudnn.benchmark = False # set to False for reproducibility
+    torch.backends.cudnn.deterministic = False # set to True for reproducibility
+    torch.backends.cudnn.benchmark = True # set to False for reproducibility
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision("high")
 
     # Set device
     if not torch.cuda.is_available():
@@ -211,6 +120,11 @@ def train(args: dict,
         sep_gene_tokens_neb = args['data']['sep_gene_tokens_neb']
     else:
         sep_gene_tokens_neb = False
+
+    if 'use_sampler' in args['data'].keys():
+        use_sampler = args['data']['use_sampler']
+    else:
+        use_sampler = False
 
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
@@ -283,6 +197,7 @@ def train(args: dict,
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
     load_folder_path = args['state']['folder_path']
+    use_profiler = args['state'].get('use_profiler', False)
 
     if 'precomputed_epoch_n_nonzero_tokens' in args['data'].keys():
         with open(args['data']['precomputed_epoch_n_nonzero_tokens'], "rb") as f: 
@@ -315,12 +230,6 @@ def train(args: dict,
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
-
-    # Set multiprocessing start method
-    try:
-        mp.set_start_method("spawn")
-    except Exception:
-        logger.info(f'Multiprocessing not started.')
     
     # Initialize torch distributed backend
     world_size, rank = init_distributed()
@@ -403,7 +312,8 @@ def train(args: dict,
             seq_len_neighborhood=seq_len_neighborhood,
             n_special_tokens=n_special_tokens,
             per_block_mask_ratio=per_block_mask_ratio,
-            sample_segments=sample_segments)
+            sample_segments=sample_segments,
+            sample_gene_masks=True)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
@@ -456,13 +366,13 @@ def train(args: dict,
             train_loader, train_sampler = init_dataloader_and_sampler(
                 cell_dataset=cell_d,
                 batch_size=batch_size,
-                distributed=True,
+                distributed=use_sampler,
                 world_size=world_size,
                 rank=rank,
                 collate_fn=mask_collator,
                 pin_memory=pin_memory,
                 num_workers=num_workers,
-                drop_last=False,
+                drop_last=True,
                 persistent_workers=False)
             train_loaders.append(train_loader)
             train_samplers.append(train_sampler)
@@ -471,13 +381,14 @@ def train(args: dict,
         train_loader, train_sampler = init_dataloader_and_sampler(
             cell_dataset=train_cell_dataset,
             batch_size=batch_size,
-            distributed=True,
+            distributed=use_sampler,
             world_size=world_size,
             rank=rank,
             collate_fn=mask_collator,
             pin_memory=pin_memory,
             num_workers=num_workers,
-            drop_last=False,
+            drop_last=True,
+            prefetch_factor=4,
             persistent_workers=False)
 
     ipe = len(train_loader)
@@ -497,20 +408,55 @@ def train(args: dict,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
     
+    #encoder = torch.compile(encoder)
+    #predictor = torch.compile(predictor)
+
+    if use_profiler and WORLD_RANK == 0:
+
+        def trace_handler(p):
+            cpu_output = p.key_averages(group_by_stack_n=5).table(
+                sort_by="cpu_time_total", row_limit=100)
+            logger.info(f"Profiler CPU output: {cpu_output}.")
+            gpu_output = p.key_averages(group_by_stack_n=5).table(
+                sort_by="cuda_time_total", row_limit=100)
+            logger.info(f"Profiler CPU output: {cpu_output}.")
+            logger.info(f"Profiler GPU output: {gpu_output}.")
+            p.export_chrome_trace(
+                os.path.join(
+                    save_folder_path,
+                    "profiler_logs/trace_" + str(p.step_num) + ".json"))
+
+        profiler = torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(
+                wait=10,
+                warmup=1,
+                active=3,
+                repeat=1),
+            on_trace_ready=trace_handler,
+            record_shapes=False,
+            profile_memory=False,
+            with_stack=True,
+        )
+        profiler.start()
+
     encoder = DistributedDataParallel(
         encoder,
         static_graph=True,
         device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
+        output_device=LOCAL_RANK,
+        gradient_as_bucket_view=True,
+        broadcast_buffers=False)
     predictor = DistributedDataParallel(
         predictor,
         static_graph=True,
         device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
-    target_encoder = DistributedDataParallel(
-        target_encoder,
-        device_ids=[LOCAL_RANK],
-        output_device=LOCAL_RANK)
+        output_device=LOCAL_RANK,
+        gradient_as_bucket_view=True,
+        broadcast_buffers=False)
     for p in target_encoder.parameters():
         p.requires_grad = False
 
@@ -572,7 +518,6 @@ def train(args: dict,
         loss_meter = AverageMeter()
         #maskA_meter = AverageMeter()
         #maskB_meter = AverageMeter()
-        time_meter = AverageMeter()
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
             for key, val in udata.items():
@@ -586,21 +531,89 @@ def train(args: dict,
             #maskA_meter.update(len(masks_enc[0][0]))
             #maskB_meter.update(len(masks_pred[0][0]))
 
-            args = (
-                udata, masks_enc, masks_pred, masks_attention,
-                encoder, predictor, target_encoder,
-                optimizer, scaler,
-                scheduler, wd_scheduler,
-                momentum_scheduler,
-                loss_fn_type, use_bfloat16,
-                warmup, epoch, itr, ipe, clip_grad
-            )
+            if WORLD_RANK == 0 and (itr % log_freq == 0):
+                compute_grad_stats = True
+            else:
+                compute_grad_stats = False
 
-            (loss, _new_lr, _new_wd, grad_stats, grad_stats_pred), etime = gpu_timer(
-                train_step, *args)
+            _new_lr = scheduler.step()
+            _new_wd = wd_scheduler.step()
 
-            loss_meter.update(loss)
-            time_meter.update(etime)
+            # Step 1: forward pass
+            with torch.cuda.amp.autocast(dtype=torch.bfloat16, enabled=use_bfloat16):
+                # Forward pass of target encoder
+                with torch.no_grad():
+                    h, _ = target_encoder(
+                        batch=udata, masks_attention=masks_attention)
+                    h = F.layer_norm(h, (h.size(-1),))
+                    h = apply_masks(h, masks_pred, concat=False)
+
+                # Forward pass of context encoder
+                z, token_emb = encoder(
+                    batch=udata,
+                    masks=masks_enc,
+                    masks_attention=None)
+
+                # Forward pass of predictor
+                z = predictor(
+                    z=z,
+                    token_emb=token_emb,
+                    batch=udata,
+                    masks_enc=masks_enc,
+                    masks_pred=masks_pred,
+                    masks_attention=None)
+
+                # Compute loss
+                loss_exp = 1.0
+                loss = 0.
+                for zi, hi in zip(z, h):
+                    if loss_fn_type == 'smooth_l1':
+                        loss += F.smooth_l1_loss(zi, hi)
+                    elif loss_fn_type == 'l1':
+                        loss += torch.mean(
+                            torch.abs(zi - hi)**loss_exp) / loss_exp
+                loss /= len(masks_pred)
+
+            # Step 2: backward pass and step
+            _enc_norm, _pred_norm = 0., 0.
+            loss.backward()
+            if warmup >= 1: # iteration-based clipping didn't always work # TODO
+                if (epoch >= warmup) and (clip_grad is not None):
+                    _enc_norm = torch.nn.utils.clip_grad_norm_(
+                        encoder.parameters(), clip_grad)
+                    _pred_norm = torch.nn.utils.clip_grad_norm_(
+                        predictor.parameters(), clip_grad)
+            elif (itr > (warmup * ipe)) and (clip_grad is not None):
+                _enc_norm = torch.nn.utils.clip_grad_norm_(
+                    encoder.parameters(), clip_grad)
+                _pred_norm = torch.nn.utils.clip_grad_norm_(
+                    predictor.parameters(), clip_grad)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            if use_profiler and WORLD_RANK == 0:
+                profiler.step()
+
+            # Step 3: momentum update of target encoder
+            with torch.no_grad():
+                m = next(momentum_scheduler)
+                q_params = [p.detach() for p in encoder.parameters()]
+                k_params = [p for p in target_encoder.parameters()]
+                torch._foreach_mul_(k_params, m)
+                tmp = torch._foreach_mul(q_params, (1.0 - m))
+                torch._foreach_add_(k_params, tmp)
+
+            # Logging
+            if compute_grad_stats:
+                grad_stats = grad_logger(encoder.named_parameters())
+                grad_stats.global_norm = float(_enc_norm)
+                grad_stats_pred = grad_logger(predictor.named_parameters())
+                grad_stats_pred.global_norm = float(_pred_norm)
+            else:
+                grad_stats = None
+                grad_stats_pred = None
+
+            loss_meter.update(float(loss))
 
             # Logging
             #def log_stats():
@@ -637,7 +650,7 @@ def train(args: dict,
             #                grad_stats.max))
 
             #log_stats()
-            if WORLD_RANK == 0:
+            if WORLD_RANK == 0 and (itr % log_freq == 0):
                 wandb.log({
                     "loss": float(loss),
                     "lr": float(_new_lr),
@@ -645,7 +658,7 @@ def train(args: dict,
                     "global_norm_enc": float(grad_stats.global_norm),
                     "global_norm_pred": float(grad_stats_pred.global_norm),
                 })
-            assert not np.isnan(loss), 'loss is nan'
+            assert not np.isnan(float(loss)), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
                 save_checkpoint(epoch, itr // checkpoint_freq_iter)
@@ -653,3 +666,7 @@ def train(args: dict,
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
         save_checkpoint(epoch)
+
+    if use_profiler and WORLD_RANK == 0 :
+        # Close profiler
+        profiler.stop()

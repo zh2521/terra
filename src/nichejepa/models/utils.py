@@ -145,6 +145,7 @@ def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
 
 
 def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
+                                       omega: torch.Tensor,
                                        coord: torch.Tensor,
                                        ) -> torch.Tensor:
     """
@@ -156,6 +157,7 @@ def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
     embed_dim:
         Output dimension of the positional embedding (for each
         position). Has to be divisible by 2.
+    omega:
     coord:
         A tensor containing the relative coordinates to be embedded.
         
@@ -166,15 +168,11 @@ def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
     """
     assert embed_dim % 2 == 0
 
-    device = coord.device
-
     mask = torch.isneginf(coord)
     # Replace -inf with zero for computation (safe dummy value)
     coord[mask] = 0.0
 
-    # compute omega: 1 / 10000^{2i/dim}
-    omega = torch.arange(embed_dim // 2, dtype=torch.float32, device=device)
-    omega = 1.0 / (10000 ** (omega / (embed_dim / 2)))
+    omega = omega.to(coord.device) # TODO
 
     # outer product: (seq_len, embed_dim // 2)
     out = torch.einsum('bl,d->bld', coord, omega)  # (B, seq_len, emb_dim/2)
