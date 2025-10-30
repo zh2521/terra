@@ -879,8 +879,8 @@ def embed_dataset(dataset: Dataset,
                   batch_size: int = 128,
                   pin_memory: bool = False,
                   num_workers: int = 12,
-                   include_spatial_cell_emb: bool = True,
-                   return_token_embeddings: bool = False,
+                  include_spatial_cell_emb: bool = True,
+                  return_token_embeddings: bool = False,
                   ) -> dict:
     """
     Parameters
@@ -1069,7 +1069,7 @@ def embed_dataset(dataset: Dataset,
             c_emb = cell_only_ctx[emb_layer].cpu()
             n_emb = full_ctx[emb_layer].cpu()
             if return_token_embeddings:
-                # n_emb contains embeddings for all  tokens
+                # n_emb contains embeddings for all tokens
                 all_token_emb_list.append(n_emb)
         
         # Create mask for index cell genes
