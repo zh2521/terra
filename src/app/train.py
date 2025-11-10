@@ -498,7 +498,7 @@ def train(args: dict,
             save_dict['iter_number'] = iter_number
         if rank == 0:
             torch.save(save_dict, latest_path)
-            if (epoch) % checkpoint_freq == 0:
+            if (epoch + 1) % checkpoint_freq == 0:
                 if iter_number is None:
                     torch.save(save_dict, save_path.format(epoch=f'{epoch}'))
                 else:
