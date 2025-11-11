@@ -60,8 +60,8 @@ mask:
   per_block_mask_ratio: 0.8
   sample_segments: True
 optimization:
-  warmup: 4
-  epochs: 20
+  warmup: 2
+  epochs: 10
   ema:
   - 0.9995 # 0.998, 0.9995
   - 1.0
