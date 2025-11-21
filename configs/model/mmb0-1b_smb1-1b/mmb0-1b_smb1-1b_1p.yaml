@@ -18,7 +18,7 @@ data:
   tokenizer_type: 'cell_graph'
   random_state: 0
   sample_subset: False
-  split: 0.2
+  split: 0
   stratify: False
   seq_len_cell: 256
   seq_len_neighborhood: 2560
@@ -37,9 +37,9 @@ meta:
   n_value_bins: 100
   cell_pos_enc: 'segment'
   enc_depth: 3 # 3
-  enc_emb_dim: 768
+  enc_emb_dim: 192
   pred_depth: 1 # 1
-  pred_emb_dim: 384 # 768
+  pred_emb_dim: 96 # 768
   num_heads: 3
   mlp_ratio: 4
   special_tokens: [] # ['batch'] # ['batch', 'assay'] # ['batch']
