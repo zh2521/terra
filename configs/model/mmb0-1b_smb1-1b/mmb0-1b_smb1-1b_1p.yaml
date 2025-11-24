@@ -25,7 +25,7 @@ data:
   n_segments: 11
   sampling_strategy: null
   batch_size: 64
-  num_workers: 0 
+  num_workers: 24 
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
