@@ -118,6 +118,9 @@ def prepare_dataset(args: dict,
             index for index, value in enumerate(test_batch_mask) if not value]
         test_indices = [
             index for index, value in enumerate(test_batch_mask) if value]
+    else:
+        train_indices = indices
+        test_indices = indices
 
     if split_dataset:
         train_dataset = dataset.select(train_indices)

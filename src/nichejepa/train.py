@@ -63,6 +63,8 @@ def train(args: dict,
           test_dataset: datasets.Dataset,
           resume_preempt: bool=False,
           save_folder_path: Optional[str]=None,
+          LOCAL_RANK=0,
+          WORLD_RANK=0,
           ):
     """
     Train model.

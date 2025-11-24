@@ -70,6 +70,7 @@ class CellBaseDataset(Dataset):
         self.seq_len = (seq_len_cell +
                         seq_len_neighborhood +
                         self.n_special_tokens)
+        self.n_segments = (seq_len_cell + seq_len_neighborhood) / seq_len_cell
         self.special_tokens = special_tokens
         self.sampling_strategy = sampling_strategy
 
@@ -312,6 +313,14 @@ class CellGraphDataset(CellBaseDataset):
         # Retrieve Huggingface item once
         item = self.dataset[item]
 
+        item["cls_tokens"] = list(np.arange(2, 102))
+
+        seg_tokens = np.arange(105, self.n_segments + 105)
+        seg_tokens = np.repeat(seg_tokens, self.seq_len_cell)
+        mask = np.array([e != 0 for e in item["gene_tokens"]])
+        seg_tokens = seg_tokens * mask
+        item['seg_tokens'] = seg_tokens.tolist()
+
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, gene_expr_cell = self._get_gene_tokens_and_counts_for_segment(
             item=item,
@@ -358,7 +367,7 @@ class CellGraphDataset(CellBaseDataset):
             item=item)
 
         tokens = torch.tensor(tokens)
-        segments = torch.tensor(segments)
+        segments = torch.tensor(segments).long()
         positions = torch.tensor(positions)
         gene_expr = torch.tensor(gene_expr)
 

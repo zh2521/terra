@@ -24,22 +24,24 @@ data:
   seq_len_neighborhood: 2560
   n_segments: 11
   sampling_strategy: null
-  batch_size: 512
+  batch_size: 64
   num_workers: 0 
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
+  n_special_values: 0
+  vocab_size: 23407
 meta:
   api_version: 'v3'
   add_cls: False
-  gt_type: 'combined' # 'rank', 'counts', 'combined'
+  gt_type: 'counts' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
-  cell_pos_enc: 'coord'
+  cell_pos_enc: 'segment'
   enc_depth: 3 # 3
   enc_emb_dim: 192
   pred_depth: 1 # 1
-  pred_emb_dim: 96 # 768
+  pred_emb_dim: 192 # 768
   num_heads: 3
   mlp_ratio: 4
   special_tokens: [] # ['batch'] # ['batch', 'assay'] # ['batch']
@@ -59,6 +61,8 @@ mask:
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
+  controlled_attention_pattern: null
+  restrict_special_attention: False
 optimization:
   warmup: 3
   epochs: 300

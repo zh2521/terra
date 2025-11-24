@@ -5,7 +5,7 @@ import logging
 
 import torch.multiprocessing as mp
 import torch.distributed as dist
-from app.train import train
+from nichejepa.train import train
 from nichejepa.datasets.utils import prepare_dataset
 from nichejepa.utils.config import create_params_from_YAML_wandb_config
 import wandb
@@ -159,7 +159,7 @@ def main():
     dist.barrier()
     setup_for_distributed(LOCAL_RANK == 0)
 
-    train_dataset, val_dataset, test_dataset = prepare_dataset(params, train_mode=True)
+    train_dataset, test_dataset = prepare_dataset(params)
     train(params,
           train_dataset,
           test_dataset,
