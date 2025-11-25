@@ -1,27 +1,31 @@
 import pickle
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
+import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
 from skmisc.loess import loess
 
 
 def normalize_by_analytic_pearson_residuals(x: sp.csr_matrix,
-                                            theta: float=100,
+                                            theta: float = 100,
                                             ) -> sp.csr_matrix:
     """
-    Normalize gene expression counts per gene (within the dataset) and cell
-    using analytic pearson residuals.
+    Normalize gene expression counts per gene (within the batch) and
+    cell using analytic pearson residuals.
 
-    Implements normalization as described in "Lause, J., Berens, P. & Kobak, D.
-    Analytic Pearson residuals for normalization of single-cell RNA-seq UMI
-    data. Genome Biol. 22, 258 (2021)". Residuals are based on a negative
-    binomial offset model with overdispersion shared across genes. Residuals are
-    clipped to 'sqrt(n_obs)'. Negative residuals for a cell and gene indicate
-    that fewer counts are observed than expected, compared to the gene’s average
-    expression and cell read depth. Positive residuals indicate more counts than
-    expected. By default, overdispersion `theta=100` is used.
+    Implements normalization as described in "Lause, J., Berens, P. & 
+    Kobak, D. Analytic Pearson residuals for normalization of
+    single-cell RNA-seq UMI data. Genome Biol. 22, 258 (2021)".
+    Residuals are based on a negative binomial offset model with
+    overdispersion shared across genes. Residuals are clipped to
+    'sqrt(n_obs)'. Negative residuals for a cell and gene indicate that
+    fewer counts are observed than expected, compared to the gene’s
+    average expression and cell read depth. Positive residuals indicate
+    more counts than expected. By default, overdispersion `theta=100` is
+    used.
 
     The implementation is based on
     https://github.com/scverse/scanpy/blob/4642cf8e2e51b257371792cb4fcb9611c0a81123/scanpy/experimental/pp/_normalization.py#L36.
@@ -29,9 +33,9 @@ def normalize_by_analytic_pearson_residuals(x: sp.csr_matrix,
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature, containing raw counts as features (i.e. not scaled
-        or normalized).
+        A sparse matrix where each row represents an observation and
+        each column represents a feature, containing raw counts as
+        features (i.e. not scaled or normalized).
     theta:
         The overdispersion parameter, defaults to `100`.
 
@@ -40,7 +44,6 @@ def normalize_by_analytic_pearson_residuals(x: sp.csr_matrix,
     y:
         A sparse matrix containing the normalized features.
     """
-
     if theta <= 0:
         raise ValueError('Pearson residuals require theta > 0')
 
@@ -67,8 +70,8 @@ def normalize_by_cell_area(x: sp.csr_matrix,
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
+        A sparse matrix where each row represents an observation and
+        each column represents a feature.
     cell_areas:
         Numpy array with the cell areas.
 
@@ -77,7 +80,6 @@ def normalize_by_cell_area(x: sp.csr_matrix,
     y:
         A sparse matrix containing the normalized features.
     """
-
     if x.shape[0] != len(cell_areas):
         raise ValueError('Length of `cell_areas` does not match the number of'
                          'observations in `x`.')
@@ -87,66 +89,61 @@ def normalize_by_cell_area(x: sp.csr_matrix,
     return y
 
 
-def normalize_by_mean(x: sp.csr_matrix,
-                      gene_means_file: Path | str,
-                      probed_genes: np.ndarray,
-                      ) -> sp.csr_matrix:
+def normalize_by_gene_corrected_read_depth(
+    x: sp.csr_matrix,
+    basis_target_read_depth: float = 153.4768,
+    target_read_depth_per_gene: float = 0.0487,
+    ) -> sp.csr_matrix:
     """
-    Normalize gene expression counts per gene (across datasets in the corpus) by
-    mean expression.
-
-    This function should be applied following normalization per cell by read
-    depth or cell area.
+    Normalize gene expression counts per cell by read depth adjusted for
+    number of probed genes. Default values are linear regression fit on
+    corpus.
 
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
-    gene_means_file:
-        Path to pickle file containing dictionary of mean gene expression
-        values.
-    probed_genes:
-        Array with ensembl ids of probed genes.
+        A sparse matrix where each row represents an observation and
+        each column represents a feature.
+    basis_target_read_depth:
+        Read depth independent of number of probed genes.
+    target_read_depth_per_gene:
+        Additional read depth increment per probed gene.
 
     Returns
     ----------
     y:
         A sparse matrix containing the normalized features.
     """
-
-    # Load dictionary of gene means
-    with open(gene_means_file, 'rb') as f:
-        gene_means_dict = pickle.load(f)
-
-    # Retrieve gene means for probed genes
-    gene_means = np.array(
-        [gene_means_dict[gene_id] for gene_id in probed_genes])
-
-    y = x / gene_means
+    y = x / x.sum(axis=1).reshape(-1, 1) * (basis_target_read_depth +
+        x.shape[1] * target_read_depth_per_gene)
 
     return y
 
 
-def normalize_by_nonzero_mean(x: sp.csr_matrix,
-                              gene_nzmeans_file: Path | str,
-                              probed_genes: np.ndarray,
-                              ) -> sp.csr_matrix:
+def normalize_by_factor(x: sp.csr_matrix,
+                        norm_factor_file_path: Path | str,
+                        probed_genes: np.ndarray,
+                        norm_factor: Literal=[
+                            'mean',
+                            'nonzero_mean',
+                            'read_depth_mean',
+                            'read_depth_nonzero_mean',
+                            'gene_corrected_read_depth_mean',
+                            'gene_corrected_read_depth_nonzero_mean'],
+                      ) -> sp.csr_matrix:
     """
-    Normalize gene expression counts per gene (across datasets in the corpus) by
-    non-zero mean expression.
-
-    This function should be applied following normalization per cell by read
-    depth or cell area.
+    Normalize gene expression counts per gene (across batches in the
+    corpus) by a normalization factor.
 
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
-    gene_nzmeans_file:
-        Path to pickle file containing dictionary of non-zero mean gene
-        expression values.
+        A sparse matrix where each row represents an observation and
+        each column represents a feature.
+    norm_factor:
+        Factor which is used for normalization.
+    norm_factor_file_path:
+        Path to csv file containing normalization factors per gene.
     probed_genes:
         Array with ensembl ids of probed genes.
 
@@ -155,22 +152,22 @@ def normalize_by_nonzero_mean(x: sp.csr_matrix,
     y:
         A sparse matrix containing the normalized features.
     """
+    # Load norm factors per gene
+    norm_factor_df = pd.read_csv(norm_factor_file_path)
 
-    # Load dictionary of gene non-zero means
-    with open(gene_nzmeans_file, 'rb') as f:
-        gene_nzmeans_dict = pickle.load(f)
+    # Retrieve norm factors for probed genes
+    norm_factors = np.array(
+        [norm_factor_df[
+            norm_factor_df['gene_id'] == gene_id][norm_factor].values[0]
+         for gene_id in probed_genes])
 
-    # Retrieve gene non-zero means
-    gene_nzmeans = np.array(
-        [gene_nzmeans_dict[gene_id] for gene_id in probed_genes])
-
-    y = x / gene_nzmeans
+    y = sp.csr_matrix(x / norm_factors)
 
     return y
 
 
 def normalize_by_read_depth(x: sp.csr_matrix,
-                            target_size: int=10_000,
+                            target_size: int = 10_000,
                             ) -> sp.csr_matrix:
     """
     Normalize gene expression counts per cell by read depth.
@@ -178,18 +175,17 @@ def normalize_by_read_depth(x: sp.csr_matrix,
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
+        A sparse matrix where each row represents an observation and
+        each column represents a feature.
     target_size:
-        The target read depth per observation (i.e. the sum of features across
-        an observation).
+        The target read depth per observation (i.e. the sum of features
+        across an observation).
 
     Returns
     ----------
     y:
         A sparse matrix containing the normalized features.
     """
-
     y = x / x.sum(axis=1).reshape(-1, 1) * target_size
 
     return y
@@ -197,19 +193,17 @@ def normalize_by_read_depth(x: sp.csr_matrix,
 
 def normalize_by_seurat(x: sp.csr_matrix) -> sp.csr_matrix:
     """
-    Normalize gene expression counts per gene (within the dataset) using seurat
-    v3 `FindVariableFeatures`.
+    Normalize gene expression counts per gene (within the batch) using
+    seurat v3 `FindVariableFeatures`.
 
-    Implements normalization as described in "Stuart, T. et al. Comprehensive
-    Integration of Single-Cell Data. Cell 177, 1888–1902.e21 (2019)". Counts are
-    normalized by centering around the expected mean and scaling by the expected
-    standard deviation, as learned from the global mean-variance relationships.
-    This normalization should be applied independently for each dataset in the
-    training corpus. Note, we do not implement clipping as described in the
-    seurat publication.
-
-    This function should be applied following normalization per cell by cell
-    area or read depth.
+    Implements normalization as described in "Stuart, T. et al.
+    Comprehensive Integration of Single-Cell Data. Cell 177,
+    1888–1902.e21 (2019)". Counts are normalized by centering around the
+    expected mean and scaling by the expected standard deviation, as
+    learned from the global mean-variance relationships. This
+    normalization should be applied independently for each batch in the
+    training corpus. Note, we do not implement clipping as described in
+    the seurat publication.
 
     The implementation is based on
     https://github.com/scverse/scanpy/blob/4642cf8e2e51b257371792cb4fcb9611c0a81123/scanpy/preprocessing/_highly_variable_genes.py#L26.
@@ -217,16 +211,15 @@ def normalize_by_seurat(x: sp.csr_matrix) -> sp.csr_matrix:
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature, containing raw counts as features (i.e. not scaled
-        or normalized).
+        A sparse matrix where each row represents an observation and
+        each column represents a feature, containing raw counts as
+        features (i.e. not scaled or normalized).
 
     Returns
     ----------
     y:
         A sparse matrix containing the normalized features.
     """
-
     if (type(x) == sp._csr.csr_matrix or 
     type(x) == sp._csc.csc_matrix):
         x = x.toarray()
@@ -258,64 +251,18 @@ def normalize_by_seurat(x: sp.csr_matrix) -> sp.csr_matrix:
 def normalize_by_shifted_log(x: sp.csr_matrix) -> sp.csr_matrix:
     """
     Implements normalization using `sc.pp.log1p`.
-    
-    This function should be applied following normalization per cell by cell
-    area or read depth.
 
     Parameters
     ----------
     x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
+        A sparse matrix where each row represents an observation and
+        each column represents a feature.
 
     Returns
     ----------
     y:
         A sparse matrix containing the normalized features.
     """
-
     y = sc.pp.log1p(x)
-
-    return y
-
-
-def normalize_by_shifted_log_mean(x: sp.csr_matrix,
-                                  gene_logmeans_file: Path | str,
-                                  probed_genes: np.ndarray,
-                                  ) -> sp.csr_matrix:
-    """
-    Normalize gene expression counts per gene (across datasets in the corpus) by
-    log shifted mean expression.
-    
-    This function should be applied following normalization per cell by cell
-    area or read depth.
-
-    Parameters
-    ----------
-    x:
-        A sparse matrix where each row represents an observation and each column
-        represents a feature.
-    gene_logmeans_file:
-        Path to pickle file containing dictionary of corpus-wide log mean gene
-        expression values.
-    probed_genes:
-        Array with ensembl ids of probed genes that will be normalized.
-
-    Returns
-    ----------
-    y:
-        A sparse matrix containing the normalized features.
-    """
-
-    log_normalized = sc.pp.log1p(x)
-
-    # Load dictionary of gene logmeans
-    with open(gene_logmeans_file, 'rb') as f:
-        gene_logmeans_dict = pickle.load(f)
-
-    gene_logmeans = np.array(
-        [gene_logmeans_dict[gene_id] for gene_id in probed_genes])
-
-    y = log_normalized / gene_logmeans
 
     return y

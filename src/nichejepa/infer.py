@@ -137,7 +137,7 @@ def infer(args: dict,
         special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
     elif tokenizer_type == 'cell_graph':
         max_special_tokens = 105
-        max_cls_tokens = 100
+        max_cls_tokens = 1
         special_tokens = [
             f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
 
@@ -151,7 +151,7 @@ def infer(args: dict,
         max_cls_tokens = 2
     elif tokenizer_type == 'cell_graph':
         max_special_tokens = 105
-        max_cls_tokens = 100
+        max_cls_tokens = 1
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"

@@ -313,7 +313,7 @@ class CellGraphDataset(CellBaseDataset):
         # Retrieve Huggingface item once
         item = self.dataset[item]
 
-        item["cls_tokens"] = list(np.arange(2, 102))
+        item["cls_tokens"] = [2] # list(np.arange(2, 102))
 
         seg_tokens = np.arange(105, self.n_segments + 105)
         seg_tokens = np.repeat(seg_tokens, self.seq_len_cell)

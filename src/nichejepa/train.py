@@ -157,7 +157,7 @@ def train(args: dict,
         special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
     elif tokenizer_type == 'cell_graph':
         max_special_tokens = 105
-        max_cls_tokens = 100
+        max_cls_tokens = 1
         special_tokens = [
             f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
 
