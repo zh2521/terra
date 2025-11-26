@@ -66,7 +66,6 @@ bsub <<EOF
 #BSUB -gpu "num=$NUM_GPUS_NODE:gmem=80000:mode=exclusive_process:block=yes"
 #BSUB -M ${MEM_NODE}G
 #BSUB -R "select[mem>${MEM_NODE}G] rusage[mem=${MEM_NODE}G] span[ptile=$NUM_PROCESSES_NODE]"
-#BSUB -U megatron
 
 # Set the error handling mode to pipefail
 set -euo pipefail

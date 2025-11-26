@@ -42,10 +42,6 @@ class BlockMaskCollator:
         Ratio of elements to be masked in each block. A list with min and
         max ratio can be provided, in which case a value between the min and
         max will be sampled for each batch.
-    controlled_attention_pattern:
-        The pattern that the model uses to generate the attention matrix.
-    restrict_special_attention:
-        If 'True', restrict attention of special tokens to themselves
     sample_segments:
         If `True`, sample number of neighbors in each batch.
     """
@@ -59,8 +55,6 @@ class BlockMaskCollator:
                  max_cls_tokens: int,
                  per_block_mask_ratio: float=0.5,
                  sample_segments: bool = False,
-                 controlled_attention_pattern: Optional[torch.Tensor]=None,
-                 restrict_special_attention: bool=False,
                  new_spc: bool=False):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
@@ -72,8 +66,6 @@ class BlockMaskCollator:
         self.max_cls_tokens = max_cls_tokens
         self.per_block_mask_ratio = per_block_mask_ratio
         self.sample_segments = sample_segments
-        self.controlled_attention_pattern = controlled_attention_pattern
-        self.restrict_special_attention = restrict_special_attention
         self.new_spc = new_spc
 
     def _sample_gene_mask(self,
@@ -256,7 +248,7 @@ class BlockMaskCollator:
             if 'rel_y_coords' in collated_batch:
                 collated_batch['rel_y_coords'][:, cutoff:] = float('-inf')
 
-        tokens = collated_batch['tokens'] # [B, N]
+        tokens = collated_batch[0] # [B, N]
         B, N = tokens.shape
 
         # Build attention mask

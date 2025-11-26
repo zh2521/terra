@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 128 # 32
+  batch_size: 32 # 32
   num_workers: 24 
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -52,6 +52,7 @@ meta:
   use_flash_attention: True
   use_layer_norm: True
   predict_gene: True
+  new_spc: True
 mask:
   n_contexts: 1 # 1
   n_targets: 8 # 5 # 1 =, this is the number of blocks in block masking
@@ -61,9 +62,7 @@ mask:
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
-  sample_segments: True
-  controlled_attention_pattern: null
-  restrict_special_attention: True
+  sample_segments: False
 optimization:
   warmup: 3
   epochs: 100

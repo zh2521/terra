@@ -125,11 +125,6 @@ def infer(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
-    if args['mask']['controlled_attention_pattern'] is not None:
-        controlled_attention_pattern = torch.tensor(args['mask']['controlled_attention_pattern'])
-    else:
-        controlled_attention_pattern = args['mask']['controlled_attention_pattern']
-    restrict_special_attention = args['mask']['restrict_special_attention']
 
     r_file = args['state']['read_checkpoint']
     tag = args['state']['write_tag']
@@ -200,9 +195,7 @@ def infer(args: dict,
             max_special_tokens=max_special_tokens,
             n_special_tokens=n_special_tokens,
             max_cls_tokens=max_cls_tokens,
-            per_block_mask_ratio=per_block_mask_ratio,
-            controlled_attention_pattern=controlled_attention_pattern,
-            restrict_special_attention=restrict_special_attention)
+            per_block_mask_ratio=per_block_mask_ratio)
     else:
         mask_collator = RandomMaskCollator(
             n_targets=n_targets,
@@ -256,7 +249,7 @@ def infer(args: dict,
     all_cell_gene_emb_dict = {}
     all_neighborhood_gene_emb_dict = {}
 
-    for itr, (udata, _, _, masks_attention, _, _) in tqdm(enumerate(loader)):
+    for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
         # Load gene tokens and segmentation label to the specified device
         tokens = udata[0].to(device, non_blocking=True)
         segments = udata[1].to(device, non_blocking=True)
