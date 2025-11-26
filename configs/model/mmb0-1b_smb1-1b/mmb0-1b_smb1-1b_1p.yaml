@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 32 # 32
+  batch_size: 64 # 32
   num_workers: 24 
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -53,7 +53,7 @@ meta:
   predict_gene: True
 mask:
   n_contexts: 1 # 1
-  n_targets: 3 # 5 # 1 =, this is the number of blocks in block masking
+  n_targets: 5 # 5 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
@@ -67,14 +67,14 @@ optimization:
   warmup: 3
   epochs: 100
   ema:
-  - 0.7 # 0.7, 0.9995
+  - 0.9764319982153814
   - 1.0
   start_lr: 2.0e-05 # 2.0e-05, 1.0e-06 
   lr: 2.0e-05 # 2.0e-05, 0.000625, 6.0e-05
   final_lr: 2.0e-05 # 2.0e-05, 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
-  ipe_scale: 1.0 # 1.0
+  ipe_scale: 1.0
   clip_grad: 2.0
 state:
   log_freq: 20
