@@ -579,12 +579,10 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             dim=self.n_value_bins)
 
     def forward(self,
-                tokens: torch.Tensor,
-                segments: torch.Tensor,
-                counts: torch.Tensor,
-                masks: Optional[Union[List[torch.Tensor], torch.Tensor]]=None,
-                masks_attention: Optional[torch.Tensor]=None 
-                ) -> torch.Tensor:
+                batch: dict[torch.Tensor],
+                masks: list[torch.Tensor] | torch.Tensor | None = None,
+                masks_attention: torch.Tensor | None = None
+                ) -> tuple[torch.Tensor, dict]:
             """
             Run encoder forward pass on a batch of input token sequences. For
             each observation in the batch return only embeddings for tokens
@@ -620,23 +618,23 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
                     masks = [masks]
 
             # Get embeddings for sequence of tokens and segments
-            token_emb = self.token_embed(tokens)
-            seg_emb = self.seg_embed(segments)
+            token_emb = self.token_embed(batch['tokens'])
+            seg_emb = self.seg_embed(batch['segments'])
 
             # Get value embeddings
             value_emb_weights = self.value_emb_weights_projection(
-                counts.unsqueeze(dim=-1))
+                batch['values'].unsqueeze(dim=-1))
             value_emb = torch.matmul(value_emb_weights, self.value_embed.weight)
 
             # Assign padding value embedding to 0 counts 
-            zero_counts_mask = counts == 0.0
+            zero_counts_mask = batch['values'] == 0.0
             zero_value_embed = self.special_value_embed(
-                torch.tensor(0, device=tokens.device)).to(value_emb.dtype)
+                torch.tensor(0, device=batch['tokens'].device)).to(value_emb.dtype)
             value_emb[zero_counts_mask] = zero_value_embed
             
             # Assign special value embeddings to <cls> and other special tokens
             sp_value_embed = self.special_value_embed(
-                counts[:, :self.n_special_tokens].int()).to(
+                batch['values'][:, :self.n_special_tokens].int()).to(
                     value_emb.dtype)
             value_emb[:, :self.n_special_tokens, :] = sp_value_embed
 
@@ -897,8 +895,7 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
     def forward(self,
                 z: torch.Tensor,
-                tokens: torch.Tensor,
-                segments: torch.Tensor,
+                batch: dict[torch.Tensor],
                 enc_token_embed: nn.Embedding,
                 enc_seg_embed: nn.Embedding,
                 masks_enc: Union[List[torch.Tensor], torch.Tensor],
@@ -959,8 +956,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Add "positional" embeddings to tokens from context masks (only
             # keep context mask indices and sum token and segment embeddings
             # without value embeddings)
-            z_token_embs = enc_token_embed(tokens)
-            z_seg_embs = enc_seg_embed(segments)
+            z_token_embs = enc_token_embed(batch['tokens'])
+            z_seg_embs = enc_seg_embed(batch['segments'])
             z += apply_masks(z_token_embs, masks_enc)
             z += apply_masks(z_seg_embs, masks_enc)
 
@@ -969,8 +966,8 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
             # Create "positional" embeddings for tokens from target masks (only
             # keep target mask indices and sum token and segment embeddings
             # without value embeddings; the latter are to be predicted)
-            token_embs = enc_token_embed(tokens)
-            seg_embs = enc_seg_embed(segments)
+            token_embs = enc_token_embed(batch['tokens'])
+            seg_embs = enc_seg_embed(batch['segments'])
             token_embs = apply_masks(token_embs, masks_pred)
             seg_embs = apply_masks(seg_embs, masks_pred)
 

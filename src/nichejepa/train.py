@@ -376,10 +376,8 @@ def train(args: dict,
 
         for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(
         train_loader):
-            tokens = udata[0].to(device, non_blocking=True)
-            segments = udata[1].to(device, non_blocking=True)
-            positions = udata[2].to(device, non_blocking=True)
-            counts = udata[3].to(device, non_blocking=True)
+            for key, val in udata.items():
+                udata[key] = val.to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
             masks_pred = [u.to(device, non_blocking=True) for u in masks_pred]
             masks_attention = masks_attention.to(device, non_blocking=True)
@@ -391,9 +389,6 @@ def train(args: dict,
             #print(udata[-1])
             #raise ValueError
 
-            maskA_meter.update(len(masks_enc[0][0]))
-            maskB_meter.update(len(masks_pred[0][0]))
-
             def train_step():
                 _new_lr = scheduler.step()
                 _new_wd = wd_scheduler.step()
@@ -403,14 +398,10 @@ def train(args: dict,
                         # Target encorder forward pass with output dim 
                         # (BATCH_SIZE, SEQ_LEN, EMBED_DIM)
                         if gt_type == 'rank':
-                            h = target_encoder(tokens=tokens,
-                                               segments=segments,
-                                               positions=positions,
+                            h = target_encoder(batch=udata,
                                                masks_attention=masks_attention)
                         elif gt_type == 'counts':
-                            h = target_encoder(tokens=tokens,
-                                               segments=segments,
-                                               counts=counts,
+                            h = target_encoder(batch=udata,
                                                masks_attention=masks_attention)
 
                         # Normalize over feature dim
@@ -440,15 +431,11 @@ def train(args: dict,
                     # minmum context size in the batch after removal of
                     # overlapping targets
                     if gt_type == 'rank':
-                        z = encoder(positions=positions,
-                                    segments=segments,
-                                    tokens=tokens,
+                        z = encoder(batch=udata,
                                     masks=masks_enc,
                                     masks_attention=None)                       
                     elif gt_type == 'counts':
-                        z = encoder(tokens=tokens,
-                                    segments=segments,
-                                    counts=counts,
+                        z = encoder(batch=udata,
                                     masks=masks_enc,
                                     masks_attention=None)
 
@@ -456,8 +443,7 @@ def train(args: dict,
                     # N_TARGETS * N_CONTEXTS, TARGET_MASK_SIZE, EMB_DIM)
                     if gt_type == 'rank':
                         z = predictor(z=z,
-                                      positions=positions,
-                                      segments=segments,
+                                      batch=udata,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
@@ -465,8 +451,7 @@ def train(args: dict,
                                       masks_attention=None)
                     elif gt_type == 'counts':
                         z = predictor(z=z,
-                                      tokens=tokens,
-                                      segments=segments,
+                                      batch=udata,
                                       masks_enc=masks_enc,
                                       masks_pred=masks_pred,
                                       enc_seg_embed=encoder.module.seg_embed,
@@ -509,38 +494,12 @@ def train(args: dict,
             loss_meter.update(loss)
             time_meter.update(etime)
 
-            # Logging
-            def log_stats():
-                csv_logger.log(epoch + 1,
-                               itr,
-                               loss,
-                               maskA_meter.val,
-                               maskB_meter.val,
-                               etime)
-                if (itr % log_freq == 0) or np.isnan(loss) or np.isinf(loss):
-                    logger.info('[%d, %5d] loss: %.3f '
-                                'masks: %.1f %.1f '
-                                '[wd: %.2e] [lr: %.2e] '
-                                '[mem: %.2e] '
-                                '(%.1f ms)'
-                                % (epoch + 1, itr,
-                                   loss_meter.avg,
-                                   maskA_meter.avg,
-                                   maskB_meter.avg,
-                                   _new_wd,
-                                   _new_lr,
-                                   torch.cuda.max_memory_allocated() / 1024.**2,
-                                   time_meter.avg))
-
-                    if grad_stats is not None:
-                        logger.info(
-                            '[%d, %5d] grad_stats: [%.2e %.2e] (%.2e, %.2e)'
-                            % (epoch + 1, itr,
-                            grad_stats.first_layer,
-                            grad_stats.last_layer,
-                            grad_stats.min,
-                            grad_stats.max))
-            log_stats()
+            if WORLD_RANK == 0 and (itr % log_freq == 0):
+                wandb.log({
+                    "loss": float(loss),
+                    "lr": float(_new_lr),
+                    "epoch": int(epoch+1),
+                })
             assert not np.isnan(loss), 'loss is nan'
 
         # -- Save Checkpoint after every epoch

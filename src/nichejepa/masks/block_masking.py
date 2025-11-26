@@ -243,12 +243,12 @@ class BlockMaskCollator:
                 collated_batch['positions'][:, cutoff:] = 0
             if 'values' in collated_batch:
                 collated_batch['values'][:, cutoff:] = 0.0
-            if 'rel_x_coords' in collated_batch:
-                collated_batch['rel_x_coords'][:, cutoff:] = float('-inf')
-            if 'rel_y_coords' in collated_batch:
-                collated_batch['rel_y_coords'][:, cutoff:] = float('-inf')
+            #if 'rel_x_coords' in collated_batch:
+            #    collated_batch['rel_x_coords'][:, cutoff:] = float('-inf')
+            #if 'rel_y_coords' in collated_batch:
+            #    collated_batch['rel_y_coords'][:, cutoff:] = float('-inf')
 
-        tokens = collated_batch[0] # [B, N]
+        tokens = collated_batch["tokens"] # [B, N]
         B, N = tokens.shape
 
         # Build attention mask
@@ -266,8 +266,8 @@ class BlockMaskCollator:
         for i in range(B):
             # Sample target and context masks for the current observation
             target_masks, context_masks = self._sample_gene_mask(
-                tokens=batch[i][0],
-                segments=batch[i][1])
+                tokens=batch[i]["tokens"],
+                segments=batch[i]["segments"])
 
             keep_tokens_target = min(
                 keep_tokens_target, min(mask.size(0) for mask in target_masks))
