@@ -362,6 +362,13 @@ class CellGraphDataset(CellBaseDataset):
         # Retrieve Hugging Face item once
         item = self.dataset[item]
 
+        # Add <cls> and special tokens
+        item['cls_tokens'] = [2]
+        item['tissue_token'] = [103]
+        item['assay_token'] = [104]
+        item['gene_panel_token'] = [105]
+        item['batch_token'] = [106]
+
         # Expand spatial coordinates (TODO: if statement to support old API)
         if 'rel_x_coord' in item.keys():
             if len(item['rel_x_coord']) != len(item['gene_tokens']):
@@ -504,7 +511,7 @@ class CellGraphDataset(CellBaseDataset):
         # Add special tokens
         if self.n_special_tokens > 0:
             item_dict = self._add_special_seq(item=item,
-                                            item_dict=item_dict)
+                                              item_dict=item_dict)
 
         # Add cell ID
         if self.include_cell_id:
@@ -535,6 +542,13 @@ class CellNeighborhoodDataset(CellBaseDataset):
 
         # Retrieve Hugging Face item once
         item = self.dataset[item]
+
+        # Add <cls> and special tokens
+        item['cls_tokens'] = [2]
+        item['tissue_token'] = [103]
+        item['assay_token'] = [104]
+        item['gene_panel_token'] = [105]
+        item['batch_token'] = [106]
         
         # Get (sampled) gene tokens, positions, segments, and values
         gene_tokens_cell, \
