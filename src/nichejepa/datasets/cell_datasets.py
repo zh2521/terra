@@ -64,6 +64,7 @@ class CellBaseDataset(Dataset):
         self.vocab_size = vocab_size
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
+        self.max_cls_tokens = max_cls_tokens
         self.max_special_tokens = max_special_tokens
         self.gt_type = gt_type
         self.n_special_tokens = len(special_tokens)
@@ -139,19 +140,10 @@ class CellBaseDataset(Dataset):
             gene_expr = item["assay_value"] + gene_expr
             
         n_cls_tokens = len(item["cls_tokens"])
-        n_nz_cls_tokens = sum(
-            1 for token in item["cls_tokens"] if token != 0)
-        n_zero_cls_tokens = n_cls_tokens - n_nz_cls_tokens
         tokens = item["cls_tokens"] + tokens
-        gene_expr = list(
-            range(2, 2 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + gene_expr
-
-        segments = list(
-            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
-            range(1 + n_nz_cls_tokens,  1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + segments
-        positions = list(
-            range(1, 1 + n_nz_cls_tokens)) + [0] * n_zero_cls_tokens + list(
-            range(1 + n_nz_cls_tokens, 1 + n_nz_cls_tokens + (self.n_special_tokens - n_cls_tokens))) + positions
+        gene_expr = list(range(2, 2 + n_cls_tokens)) + gene_expr
+        segments = list(range(1, 1 + self.n_special_tokens)) + segments
+        positions = list(range(1, 1 + self.n_special_tokens)) + positions
 
         return tokens, segments, positions, gene_expr
 
@@ -313,7 +305,11 @@ class CellGraphDataset(CellBaseDataset):
         # Retrieve Huggingface item once
         item = self.dataset[item]
 
-        item["cls_tokens"] = [2] # list(np.arange(2, 102))
+        item["cls_tokens"] = list(np.arange(2, 2+self.max_cls_tokens)) # list(np.arange(2, 102)), [2]
+        item['tissue_token'] = [103]
+        item['assay_token'] = [104]
+        item['gene_panel_token'] = [105]
+        item['batch_token'] = [106]
 
         seg_tokens = np.arange(105, self.n_segments + 105)
         seg_tokens = np.repeat(seg_tokens, self.seq_len_cell)

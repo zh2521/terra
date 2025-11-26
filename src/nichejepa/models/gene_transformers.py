@@ -96,6 +96,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  drop_path_rate: float=0.0,
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
+                 new_spc: bool=False,
                  **kwargs
                  ):
         super().__init__()
@@ -106,6 +107,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
+        self.new_spc = new_spc
             
         # Initialize token embeddings
         self.token_embed = nn.Embedding(vocab_size, # already includes <pad>
@@ -300,6 +302,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  drop_path_rate: float=0.0,
                  norm_layer: torch.nn.modules.normalization=nn.LayerNorm,
                  init_std: float=0.02,
+                 new_spc: bool=False,
                  **kwargs
                  ):
         super().__init__()
@@ -309,6 +312,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.predictor_embed_dim = predictor_embed_dim
         self.num_heads = num_heads
         self.init_std = init_std
+        self.new_spc = new_spc
 
         # Initialize layer to project from encoder to predictor embed dim
         self.predictor_embed = nn.Linear(embed_dim,
@@ -995,20 +999,29 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
             # Concatenate context embeddings and mask tokens (both incl. pos
             # embedding)
-            z = torch.cat([
-                z[:, :self.max_cls_tokens, :], # <cls> tokens
-                pred_tokens[:, self.max_cls_tokens:, :],
-                # non <cls> special tokens and target gene tokens
-                z[:, self.max_cls_tokens:, :]
-                # non <cls> special tokens and context gene tokens
-                ], dim=1)
+            if not self.new_spc:
+                z = torch.cat([
+                    z[:, :self.max_cls_tokens, :], # <cls> tokens
+                    pred_tokens[:, self.max_cls_tokens:, :],
+                    # non <cls> special tokens and target gene tokens
+                    z[:, self.max_cls_tokens:, :]
+                    # non <cls> special tokens and context gene tokens
+                    ], dim=1)
+            else:
+                z = torch.cat([
+                    z[:, :self.n_special_tokens, :], # <cls> and special tokens
+                    pred_tokens[:, self.n_special_tokens:, :],
+                    # target gene tokens
+                    z[:, self.n_special_tokens:, :]
+                    # context gene tokens
+                    ], dim=1)
 
             # Run forward prop
             for blk in self.predictor_blocks:
                 z = blk(z, masks=masks_attention)
             z = self.predictor_norm(z)
 
-            # Return predictions for (target) mask and special tokens
+            # Return <cls> and special tokens and predictions for target gene tokens
             z = z[:, :pred_tokens.size(1), :]
 
             # MLP projection layer

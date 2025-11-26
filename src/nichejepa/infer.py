@@ -102,6 +102,10 @@ def infer(args: dict,
     pos_learnable = args['meta']['pos_learnable']
     seg_learnable = args['meta']['seg_learnable']
     use_bfloat16 = args['meta']['use_bfloat16']
+    if 'new_spc' in args['meta'].keys():
+        new_spc = args['meta']['new_spc']
+    else:
+        new_spc = False
 
     dataset_name = args['data']['dataset_name']
     raw_data_folder_path = args['data']['raw_data_folder_path']
@@ -133,25 +137,17 @@ def infer(args: dict,
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
         max_special_tokens = 7
-        max_cls_tokens = 2
+        max_cls_tokens = args['meta']['n_cls']
         special_tokens = ['cls_cell', 'cls_neighborhood'] + special_tokens
     elif tokenizer_type == 'cell_graph':
         max_special_tokens = 105
-        max_cls_tokens = 1
+        max_cls_tokens = args['meta']['n_cls']
         special_tokens = [
             f'cls_{i}' for i in range(max_cls_tokens)] + special_tokens
 
     # Get token sequence length and number of special tokens
     n_special_tokens = len(special_tokens)
     seq_len = seq_len_cell + seq_len_neighborhood + n_special_tokens
-
-    # Define tokenizer-specific params
-    if tokenizer_type == 'cell_neighborhood':
-        max_special_tokens = 7
-        max_cls_tokens = 2
-    elif tokenizer_type == 'cell_graph':
-        max_special_tokens = 105
-        max_cls_tokens = 1
 
     # Set the folder for saving extracted features
     save_folder = f"{load_folder_path}/extracted_features"
@@ -186,7 +182,8 @@ def infer(args: dict,
         pred_emb_dim=pred_emb_dim,
         pred_depth=pred_depth,
         pos_learnable=pos_learnable,
-        seg_learnable=seg_learnable)
+        seg_learnable=seg_learnable,
+        new_spc=new_spc)
     target_encoder = copy.deepcopy(encoder)
 
     encoder = DistributedDataParallel(encoder, static_graph=True)

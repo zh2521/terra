@@ -133,6 +133,7 @@ def init_model(gt_type: Literal['rank', 'count'],
                pred_depth: int=6,
                pos_learnable: bool=False,
                seg_learnable: bool=False,
+               new_spc: bool=False,
                ) -> Tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -187,7 +188,8 @@ def init_model(gt_type: Literal['rank', 'count'],
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         embed_dim=enc_emb_dim,
-        depth=enc_depth)
+        depth=enc_depth,
+        new_spc=new_spc)
     predictor = gt.__dict__["init_gt_predictor"](
         predictor_type=gt_type,
         embed_dim=enc_emb_dim,
@@ -198,7 +200,8 @@ def init_model(gt_type: Literal['rank', 'count'],
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         predictor_embed_dim=pred_emb_dim,
-        depth=pred_depth)
+        depth=pred_depth,
+        new_spc=new_spc)
 
     def init_weights(m):
         if isinstance(m, torch.nn.Linear):

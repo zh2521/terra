@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 64 # 32
+  batch_size: 128 # 32
   num_workers: 24 
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -34,14 +34,15 @@ data:
 meta:
   api_version: 'v3'
   add_cls: True
+  n_cls: 1
   gt_type: 'counts' # 'rank', 'counts', 'combined'
   count_encoding: 'value_bins' # 'value_bins', 'mlp'
   n_value_bins: 100
   cell_pos_enc: 'segment'
-  enc_depth: 3 # 3
-  enc_emb_dim: 768
-  pred_depth: 1 # 1
-  pred_emb_dim: 768 # 768
+  enc_depth: 3
+  enc_emb_dim: 384
+  pred_depth: 1
+  pred_emb_dim: 384 # 384
   num_heads: 3
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'] # ['batch', 'assay'] # ['batch'] []
@@ -53,13 +54,13 @@ meta:
   predict_gene: True
 mask:
   n_contexts: 1 # 1
-  n_targets: 5 # 5 # 1 =, this is the number of blocks in block masking
+  n_targets: 8 # 5 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.5 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   controlled_attention_pattern: null
   restrict_special_attention: True
@@ -67,7 +68,7 @@ optimization:
   warmup: 3
   epochs: 100
   ema:
-  - 0.9764319982153814
+  - 0.9764319982153814 # 0.9764319982153814
   - 1.0
   start_lr: 2.0e-05 # 2.0e-05, 1.0e-06 
   lr: 2.0e-05 # 2.0e-05, 0.000625, 6.0e-05
