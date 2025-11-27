@@ -110,8 +110,11 @@ def train(args: dict,
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
     if 'precomputed_n_nonzero_tokens' in args['data'].keys():
-        with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
-            n_nonzero_tokens = pickle.load(f)
+        if args['data']['precomputed_n_nonzero_tokens']:
+            with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
+                n_nonzero_tokens = pickle.load(f)
+        else:
+            n_nonzero_tokens = None
     else:
         n_nonzero_tokens = None
 

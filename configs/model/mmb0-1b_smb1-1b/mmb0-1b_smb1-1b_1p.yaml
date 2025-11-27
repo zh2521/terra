@@ -62,7 +62,7 @@ mask:
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
-  sample_segments: False
+  sample_segments: True
   restrict_special_attention: False
 optimization:
   warmup: 3
