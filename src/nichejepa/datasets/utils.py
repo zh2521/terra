@@ -1,4 +1,5 @@
 import json
+import pickle
 import random
 import requests
 from typing import List, Literal, Tuple, Union
@@ -88,6 +89,12 @@ def prepare_dataset(args: dict,
     # Load dataset from the specified path
     data_path = args['data']['tokenized_data_folder_path']
     dataset = load_from_disk(data_path)
+
+    if args['data'].get('precomputed_split'):
+        with open(args['data']['precomputed_split'], 'rb') as f:
+            indices = pickle.load(f)
+        dataset = dataset.select(indices)
+        return dataset, dataset
 
     # Sample subset if specified
     if args['data']['sample_subset']:

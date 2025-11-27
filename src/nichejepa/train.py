@@ -61,7 +61,7 @@ logger = logging.getLogger()
 
 def train(args: dict,
           train_dataset: datasets.Dataset,
-          test_dataset: datasets.Dataset,
+          test_dataset: datasets.Dataset, # TODO REMOVE
           resume_preempt: bool=False,
           save_folder_path: Optional[str]=None,
           LOCAL_RANK=0,
@@ -200,10 +200,10 @@ def train(args: dict,
         yaml.dump(args, f)
     
     # Start multiprocessing
-    try:
-        mp.set_start_method('spawn')
-    except Exception:
-        pass
+    #try:
+    #    mp.set_start_method('spawn')
+    #except Exception:
+    #    pass
     
     # Initialize torch distributed backend
     world_size, rank = init_distributed()
@@ -287,32 +287,8 @@ def train(args: dict,
         sampling_strategy=sampling_strategy,
         n_nonzero_tokens_list=n_nonzero_tokens)
 
-    test_cell_dataset = make_cell_dataset(
-        dataset=test_dataset,
-        vocab_size=vocab_size,
-        seq_len_cell=seq_len_cell,
-        seq_len_neighborhood=seq_len_neighborhood,
-        max_cls_tokens=max_cls_tokens,
-        max_special_tokens=max_special_tokens,
-        tokenizer_type=tokenizer_type,
-        gt_type=gt_type,
-        special_tokens=special_tokens,
-        sampling_strategy=sampling_strategy)
-
     train_loader, train_sampler = init_dataloader_and_sampler(
         cell_dataset=train_cell_dataset,
-        batch_size=batch_size,
-        distributed=True,
-        world_size=world_size,
-        rank=rank,
-        collate_fn=mask_collator,
-        pin_memory=pin_memory,
-        num_workers=num_workers,
-        drop_last=False,
-        persistent_workers=False)
-
-    test_loader, test_sampler = init_dataloader_and_sampler(
-        cell_dataset=test_cell_dataset,
         batch_size=batch_size,
         distributed=True,
         world_size=world_size,

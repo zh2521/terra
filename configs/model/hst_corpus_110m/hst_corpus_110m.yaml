@@ -24,12 +24,12 @@ data:
   seq_len_neighborhood: 2560 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 32 # 32
+  batch_size: 16 # 32 # 32
   num_workers: 24 
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
-  n_special_values: 106 ## 7 + 99
+  n_special_values: 1000 ## 7 + 99
   vocab_size: 23407
 meta:
   api_version: 'v3'

@@ -111,6 +111,19 @@ class CellBaseDataset(Dataset):
         segments:
             Segment labels with 0s for special tokens at sequence start.
         """
+        # TODO: Delete once tokenization is fixed
+        cell_id = item['cell_id'].split('_')[0] + '_' + item['cell_id'].split('_')[1]
+        if cell_id == '1020_batch9':
+            item['batch_value'] = [807]
+        elif cell_id == '1020_batch5':
+            item['batch_value'] = [803]
+        elif cell_id == '1020_batch10':
+            item['batch_value'] = [808]
+        elif cell_id == '1020_batch2':
+            item['batch_value'] = [800]
+        elif cell_id == '1021_batch0':
+            item['batch_value'] = [814]
+
         for spc_tk in self.special_tokens:
             if 'cls' not in spc_tk:
                 if self.gt_type == 'rank':
