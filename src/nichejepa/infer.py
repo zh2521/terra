@@ -166,7 +166,7 @@ def infer(args: dict,
         else latest_path)
 
     # Initialize encoder, predictor, and target encoder
-    encoder, predictor = init_model(
+    target_encoder, _ = init_model(
         gt_type=gt_type,
         device=device,
         vocab_size=vocab_size,
@@ -183,11 +183,6 @@ def infer(args: dict,
         pos_learnable=pos_learnable,
         seg_learnable=seg_learnable,
         new_spc=new_spc)
-    target_encoder = copy.deepcopy(encoder)
-
-    encoder = DistributedDataParallel(encoder, static_graph=True)
-    predictor = DistributedDataParallel(predictor, static_graph=True)
-    target_encoder = DistributedDataParallel(target_encoder)
 
     # Initialize mask collator
     if block_masking:
@@ -237,14 +232,15 @@ def infer(args: dict,
         drop_last=False,
         persistent_workers=False)
     
-    _, _, target_encoder, _, _, start_epoch = load_checkpoint(
+    _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
             device=device,
             r_path=load_path,
-            encoder=encoder,
-            predictor=predictor,
+            encoder=None,
+            predictor=None,
             target_encoder=target_encoder,
             opt=None,
-            scaler=None)
+            scaler=None,
+            is_training=False)
    
     # Retrieve embeddings
     target_encoder.eval()
@@ -276,7 +272,7 @@ def infer(args: dict,
                     ).unsqueeze(1).unsqueeze(1).expand(-1, -1, 1108, -1) # temp
                 masks_attention[mask_indices] = 0
 
-            emb_list = target_encoder.module.return_multi_layer_emb(
+            emb_list = target_encoder.backbone.return_multi_layer_emb(
                 batch=udata,
                 masks_attention=masks_attention)
         

@@ -38,7 +38,7 @@ from tqdm import tqdm
 
 from nichejepa.datasets.cell_datasets import make_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
-from .helper import init_model, init_opt, load_checkpoint
+from nichejepa.helper import init_model, init_opt, load_checkpoint
 from nichejepa.masks.random_masking import RandomMaskCollator
 from nichejepa.masks.block_masking  import BlockMaskCollator
 from nichejepa.masks.utils import apply_masks
@@ -173,6 +173,7 @@ def train(args: dict,
 
     log_freq = args['state']['log_freq']
     checkpoint_freq = args['state']['checkpoint_freq']
+    checkpoint_freq_iter = args['state']['checkpoint_freq_iter']
     write_tag = args['state']['write_tag']
     load_model = args['state']['load_checkpoint'] or resume_preempt
     r_file = args['state']['read_checkpoint']
@@ -479,9 +480,9 @@ def train(args: dict,
                     "global_norm_pred": float(grad_stats_pred.global_norm),
                 })
             assert not np.isnan(float(loss)), 'loss is nan'
-            #if itr % checkpoint_freq_iter == 0:
-            #    logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
-            #    save_checkpoint(epoch, itr // checkpoint_freq_iter)
+            if itr % checkpoint_freq_iter == 0:
+                logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')
+                save_checkpoint(epoch, itr // checkpoint_freq_iter)
 
         # -- Save Checkpoint after every epoch
         logger.info('avg. loss %.3f' % loss_meter.avg)
