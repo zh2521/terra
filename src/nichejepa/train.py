@@ -148,12 +148,12 @@ def train(args: dict,
     context_mask_size = args['mask']['context_mask_size']
     target_mask_size = args['mask']['target_mask_size']
     per_block_mask_ratio = args['mask']['per_block_mask_ratio']
-    if 'restrict_special_attention' in args['meta'].keys():
-        restrict_special_attention = args['meta']['restrict_special_attention']
+    if 'restrict_special_attention' in args['mask'].keys():
+        restrict_special_attention = args['mask']['restrict_special_attention']
     else:
         restrict_special_attention = False
-    if 'sample_segments' in args['meta'].keys():
-        sample_segments = args['meta']['sample_segments']
+    if 'sample_segments' in args['mask'].keys():
+        sample_segments = args['mask']['sample_segments']
     else:
         sample_segments = False
 

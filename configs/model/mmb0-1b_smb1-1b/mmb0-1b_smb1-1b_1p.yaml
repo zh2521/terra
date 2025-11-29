@@ -52,7 +52,7 @@ meta:
   use_flash_attention: True
   use_layer_norm: True
   predict_gene: True
-  new_spc: True
+  new_spc: False
 mask:
   n_contexts: 1 # 1
   n_targets: 8 # 5 # 1 =, this is the number of blocks in block masking
@@ -63,7 +63,7 @@ mask:
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
-  restrict_special_attention: False
+  restrict_special_attention: True
 optimization:
   warmup: 3
   epochs: 100
