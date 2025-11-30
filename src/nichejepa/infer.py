@@ -44,6 +44,9 @@ logger = logging.getLogger()
 def infer(args: dict,
           dataset: CellBaseDataset,
           load_folder_path: str,
+          dataset_ids: list | None = None,
+          obs_cols: list | None = None,
+          uns_cols: list | None = None,
           cell_gene_ids: List=[],
           neighborhood_gene_ids: List=[],
           agg_type: Literal['cls_cell',
@@ -189,6 +192,7 @@ def infer(args: dict,
        mask_collator = BlockMaskCollator(
             n_targets=n_targets,
             n_contexts=n_contexts,
+            n_segments=n_segments,
             seq_len_cell=seq_len_cell,
             seq_len_neighborhood=seq_len_neighborhood,
             max_special_tokens=max_special_tokens,
@@ -381,21 +385,24 @@ def infer(args: dict,
                     else:
                         all_neighborhood_gene_emb_dict[gene_id].append(gene_emb)                  
 
+    # Add metadata
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
         index=range(len(all_cell_ids))))
-
-    # Add metadata
-    adata_metadata = collect_adata_from_folder(raw_data_folder_path)
-    adata_metadata_subset = adata_metadata[
-        adata_metadata.obs['cell_id'].isin(adata.obs['cell_id'])]
+    print("Loading metadata AnnDatas...")
+    adata_metadata = collect_adata_from_folder(
+        raw_data_folder_path,
+        all_cell_ids,
+        dataset_ids,
+        obs_cols,
+        uns_cols)
     merged_obs = pd.merge(adata.obs,
-                          adata_metadata_subset.obs,
+                          adata_metadata.obs,
                           on='cell_id')
     adata.obs = merged_obs.set_index('cell_id')
-    adata_metadata_subset.obs = adata_metadata_subset.obs.set_index('cell_id')
-    adata_metadata_subset = adata_metadata_subset[adata.obs.index, :].copy()
-    adata.obsm['spatial'] = adata_metadata_subset.obsm['spatial']
+    adata_metadata.obs = adata_metadata.obs.set_index('cell_id')
+    adata_metadata = adata_metadata[adata.obs.index, :].copy()
+    adata.obsm['spatial'] = adata_metadata.obsm['spatial']
    
     # Store cell and neighborhood embeddings of all observations across layers  
     for i in range(len(all_cell_emb_list)):

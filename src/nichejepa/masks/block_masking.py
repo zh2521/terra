@@ -46,6 +46,7 @@ class BlockMaskCollator:
     def __init__(self,
                  n_targets: int,
                  n_contexts: int,
+                 n_segments: int,
                  seq_len_cell: int,
                  seq_len_neighborhood: int,
                  max_special_tokens: int,
@@ -57,6 +58,7 @@ class BlockMaskCollator:
                  restrict_special_attention: bool=False):
         self.n_targets = n_targets
         self.n_contexts = n_contexts
+        self.n_segments = n_segments
         self.seq_len_cell = seq_len_cell
         self.seq_len_neighborhood = seq_len_neighborhood
         self.seq_len_genes = self.seq_len_cell + self.seq_len_neighborhood

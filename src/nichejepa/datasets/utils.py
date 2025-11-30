@@ -117,7 +117,7 @@ def prepare_dataset(args: dict,
     if args['data']['split'] > 0:
         train_indices, test_indices = train_test_split(indices, **split_params)
     elif args['data']['test_batch_ids']:
-        cell_ids = dataset['cell_id']
+        cell_ids = list(dataset['cell_id'])
         test_batch_mask = [
             any(batch_id in cell_id for batch_id in args['data'][
                 'test_batch_ids']) for cell_id in cell_ids]

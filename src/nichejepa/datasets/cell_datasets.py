@@ -112,17 +112,17 @@ class CellBaseDataset(Dataset):
             Segment labels with 0s for special tokens at sequence start.
         """
         # TODO: Delete once tokenization is fixed
-        cell_id = item['cell_id'].split('_')[0] + '_' + item['cell_id'].split('_')[1]
-        if cell_id == '1020_batch9':
-            item['batch_value'] = [807]
-        elif cell_id == '1020_batch5':
-            item['batch_value'] = [803]
-        elif cell_id == '1020_batch10':
-            item['batch_value'] = [808]
-        elif cell_id == '1020_batch2':
-            item['batch_value'] = [800]
-        elif cell_id == '1021_batch0':
-            item['batch_value'] = [814]
+        #cell_id = item['cell_id'].split('_')[0] + '_' + item['cell_id'].split('_')[1]
+        #if cell_id == '1020_batch9':
+        #    item['batch_value'] = [807]
+        #elif cell_id == '1020_batch5':
+        #    item['batch_value'] = [803]
+        #elif cell_id == '1020_batch10':
+        #    item['batch_value'] = [808]
+        #elif cell_id == '1020_batch2':
+        #    item['batch_value'] = [800]
+        #elif cell_id == '1021_batch0':
+        #    item['batch_value'] = [814]
 
         for spc_tk in self.special_tokens:
             if 'cls' not in spc_tk:
@@ -138,8 +138,9 @@ class CellBaseDataset(Dataset):
             range(2, 2 + n_cls_tokens)) + item_dict['values']
         item_dict['segments'] = list(
             range(1, 1 + self.n_special_tokens)) + item_dict['segments']
-        item_dict['positions'] = list(
-            range(1, 1 + self.n_special_tokens)) + item_dict['positions']
+        if self.gt_type != 'counts':
+            item_dict['positions'] = list(
+                range(1, 1 + self.n_special_tokens)) + item_dict['positions']
 
         return item_dict
 
@@ -331,7 +332,8 @@ class CellGraphDataset(CellBaseDataset):
         item_dict['segments'] = [
             self.max_special_tokens if gene_token != 0 else 0 for
             gene_token in gene_tokens_cell]
-        item_dict['positions'] = list(range(1, len(gene_tokens_cell) + 1))
+        if self.gt_type != 'counts':
+            item_dict['positions'] = list(range(1, len(gene_tokens_cell) + 1))
         gene_tokens_neighborhood = []
         values_neighborhood = []
         for segment in np.unique(item["seg_tokens"]):
@@ -345,12 +347,14 @@ class CellGraphDataset(CellBaseDataset):
                 item_dict['segments'].extend(
                     [segment if gene_token != 0 else 0 for
                     gene_token in segment_gene_tokens])
-                item_dict['positions'].extend(
-                    list(range(1, len(segment_gene_tokens) + 1)))
+                if self.gt_type != 'counts':
+                    item_dict['positions'].extend(
+                        list(range(1, len(segment_gene_tokens) + 1)))
         item_dict['tokens'] = gene_tokens_cell + gene_tokens_neighborhood
-        item_dict['positions'] = [
-            position if item_dict['tokens'][i] != 0 else 0 for i, position in
-            enumerate(item_dict['positions'])]
+        if self.gt_type != 'counts':
+            item_dict['positions'] = [
+                position if item_dict['tokens'][i] != 0 else 0 for i, position in
+                enumerate(item_dict['positions'])]
         item_dict['values'] = values_cell + values_neighborhood
 
         current_len = len(item_dict['tokens'])
@@ -360,13 +364,15 @@ class CellGraphDataset(CellBaseDataset):
             # Truncate
             item_dict['tokens'] = item_dict['tokens'][:target_len]
             item_dict['segments'] = item_dict['segments'][:target_len]
-            item_dict['positions'] = item_dict['positions'][:target_len]
+            if self.gt_type != 'counts':
+                item_dict['positions'] = item_dict['positions'][:target_len]
             item_dict['values'] = item_dict['values'][:target_len]
         elif current_len < target_len:
             # Add padding
             item_dict['tokens'] += [0] * (target_len - current_len)
             item_dict['segments'] += [0] * (target_len - current_len)
-            item_dict['positions'] += [0] * (target_len - current_len)
+            if self.gt_type != 'counts':
+                item_dict['positions'] += [0] * (target_len - current_len)
             item_dict['values'] += [0.0] * (target_len - current_len)
 
         # Add special tokens
@@ -376,7 +382,8 @@ class CellGraphDataset(CellBaseDataset):
 
         item_dict['tokens'] = torch.tensor(item_dict['tokens'])
         item_dict['segments'] = torch.tensor(item_dict['segments']).long()
-        item_dict['positions'] = torch.tensor(item_dict['positions'])
+        if self.gt_type != 'counts':
+            item_dict['positions'] = torch.tensor(item_dict['positions'])
         item_dict['values'] = torch.tensor(item_dict['values'])
 
         # Add cell ID
@@ -427,10 +434,11 @@ class CellNeighborhoodDataset(CellBaseDataset):
             ] + [
             self.max_special_tokens + 1 if gene_token != 0 else 0 for
             gene_token in gene_tokens_neighborhood]
-        positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
-            range(1, len(gene_tokens_neighborhood) + 1))
-        positions = [position if tokens[i] != 0 else 0 for i, position in 
-                     enumerate(positions)]
+        if self.gt_type != 'counts':
+            positions = list(range(1, len(gene_tokens_cell) + 1)) + list(
+                range(1, len(gene_tokens_neighborhood) + 1))
+            positions = [position if tokens[i] != 0 else 0 for i, position in 
+                        enumerate(positions)]
 
         # Add special tokens
         tokens, segments, positions, values = self._add_special_tokens_to_seq(
@@ -442,7 +450,10 @@ class CellNeighborhoodDataset(CellBaseDataset):
 
         tokens = torch.tensor(tokens)
         segments = torch.tensor(segments)
-        positions = torch.tensor(positions)
+        if self.gt_type != 'counts':
+            positions = torch.tensor(positions)
+        else:
+            positions = None
         values = torch.tensor(values)
 
         return tokens, segments, positions, values, item["cell_id"]

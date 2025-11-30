@@ -25,7 +25,7 @@ data:
   n_segments: 11
   sampling_strategy: null
   batch_size: 16 # 32 # 32
-  num_workers: 24
+  num_workers: 24 # 16, 24
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
@@ -39,10 +39,10 @@ meta:
   count_encoding: 'value_bins' # 'value_bins', 'mlp'
   n_value_bins: 100
   cell_pos_enc: 'segment'
-  enc_depth: 6
-  enc_emb_dim: 768
-  pred_depth: 3
-  pred_emb_dim: 768
+  enc_depth: 6 # 6, 8
+  enc_emb_dim: 768 # 768, 384
+  pred_depth: 3 # 3, 4
+  pred_emb_dim: 768 # 384
   num_heads: 8
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'] # ['batch', 'assay'] # ['batch'] []
