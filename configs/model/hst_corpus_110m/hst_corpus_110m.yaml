@@ -25,7 +25,7 @@ data:
   n_segments: 11
   sampling_strategy: null
   batch_size: 16 # 32 # 32
-  num_workers: 24 # 16, 24
+  num_workers: 16 # 16, 24
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
@@ -77,6 +77,8 @@ optimization:
   final_weight_decay: 0.4
   ipe_scale: 1.0
   clip_grad: 100.0
+  lambda_var: 1.0
+  lambda_cov: 0.1
 state:
   log_freq: 20
   checkpoint_freq: 1

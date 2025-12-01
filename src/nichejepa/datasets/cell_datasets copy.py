@@ -60,7 +60,13 @@ class CellBaseDataset(Dataset):
         if gt_type not in ['rank', 'counts']:
             raise ValueError(f'Invalid "gt_type": {gt_type}.')
 
+        # Format dataset
+        cols = [
+            c for c in dataset.column_names if c != 'cell_id' or include_cell_id]
+        dataset.set_format(
+            type="torch", columns=cols, output_all_columns=False)
         self.dataset = dataset
+
         self.len = len(self.dataset)
         if n_nonzero_tokens_list:
             self.n_nonzero_tokens = n_nonzero_tokens_list
@@ -114,20 +120,29 @@ class CellBaseDataset(Dataset):
         for spc_tk in self.special_tokens:
             if 'cls' not in spc_tk:
                 if self.gt_type == 'rank':
-                    item_dict['tokens'] = item[f"{spc_tk}_value_token"] + item_dict['tokens']
+                    item_dict['tokens'] = torch.cat(
+                        [item[f'{spc_tk}_value_token'],
+                        item_dict['tokens']])
                 elif self.gt_type == 'counts':
-                    item_dict['tokens'] = item[f"{spc_tk}_token"] + item_dict['tokens']
-                item_dict['values'] = item[f"{spc_tk}_value"] + item_dict['values']
+                    item_dict['tokens'] = torch.cat(
+                        [item[f'{spc_tk}_token'],
+                        item_dict['tokens']])
+                item_dict['values'] = torch.cat(
+                    [item[f'{spc_tk}_value'],
+                    item_dict['values']])
                 
-        n_cls_tokens = len(item["cls_tokens"])
-        item_dict['tokens'] = item["cls_tokens"] + item_dict['tokens']
-        item_dict['values'] = list(
-            range(2, 2 + n_cls_tokens)) + item_dict['values']
-        item_dict['segments'] = list(
-            range(1, 1 + self.n_special_tokens)) + item_dict['segments']
+        n_cls_tokens = item["cls_tokens"].shape[0]
+        item_dict['tokens'] = torch.cat(
+            [item['cls_tokens'], item_dict['tokens']])
+        item_dict['values'] = torch.cat([
+            torch.arange(2, 2 + n_cls_tokens), item_dict['values']])
+        item_dict['segments'] = torch.cat([
+            torch.arange(1, 1 + self.n_special_tokens), item_dict['segments']])
         if self.gt_type != 'counts':
-            item_dict['positions'] = list(
-                range(1, 1 + self.n_special_tokens)) + item_dict['positions']
+            item_dict['positions'] = torch.cat([
+                torch.arange(1, 1 + self.n_special_tokens),
+                item_dict['positions']
+            ])
 
         return item_dict
 
@@ -216,17 +231,20 @@ class CellBaseDataset(Dataset):
 
             Returns
             --------
-            segment_gene_tokens:
+            segment_tokens:
                 List of tokens for a given segment.
             """
             # Only keep gene tokens and gene expr in specified segment
-            segment_start_idx = item["seg_tokens"].index(segment)
-            if segment + 1 in item["seg_tokens"]:
-                segment_end_idx = item["seg_tokens"].index(segment+1)
+            segment_indices = torch.where(item["seg_tokens"] == segment)[0]
+            segment_start_idx = segment_indices[0].item()
+            next_segment_indices = torch.where(
+                item["seg_tokens"] == segment + 1)[0]
+            if len(next_segment_indices) > 0:
+                segment_end_idx = next_segment_indices[0].item()
             else:
-                segment_end_idx = len(item["seg_tokens"])
+                segment_end_idx = item["seg_tokens"].shape[0]
             
-            segment_gene_tokens = item["gene_tokens"][
+            segment_tokens = item["gene_tokens"][
                 segment_start_idx: segment_end_idx]
             segment_values = item["gene_expr"][
                 segment_start_idx: segment_end_idx]
@@ -236,12 +254,7 @@ class CellBaseDataset(Dataset):
             self.sampling_strategy):
                 pass
             else:
-                if segment_seq_len > len(segment_gene_tokens):
-                    print(segment_seq_len)
-                    print(len(segment_gene_tokens))
-                    print(segment)
-                    print(segment_gene_tokens)
-                    print(item["seg_tokens"])
+                if segment_seq_len > len(segment_tokens):
                     raise ValueError(
                         'Sequence length for a given segment cannot be larger '
                         'than segment size when not sampling with replacement.')
@@ -249,21 +262,21 @@ class CellBaseDataset(Dataset):
             # If no sampling strategy is specified, use all tokens up to
             # specified length
             if self.sampling_strategy is None:
-                segment_gene_tokens = segment_gene_tokens[:segment_seq_len]
+                segment_tokens = segment_tokens[:segment_seq_len]
                 segment_values = segment_values[:segment_seq_len]
             # Otherwise, sample a subset of tokens based on the sampling
             # strategy
             else:
                 segment_n_nonzero_tokens = sum(
-                    1 for token in segment_gene_tokens if token != 0)
+                    1 for token in segment_tokens if token != 0)
 
-                segment_gene_tokens, segment_values = self._sample_seq(
-                    tokens=segment_gene_tokens,
+                segment_tokens, segment_values = self._sample_seq(
+                    tokens=segment_tokens,
                     counts=segment_values,
                     n_nonzero_tokens=segment_n_nonzero_tokens,
                     size=segment_seq_len)       
                     
-            return segment_gene_tokens, segment_values
+            return segment_tokens, segment_values
 
 
 class CellGraphDataset(CellBaseDataset):
@@ -292,11 +305,11 @@ class CellGraphDataset(CellBaseDataset):
         item = self.dataset[item]
 
         # Add <cls> and special tokens
-        item["cls_tokens"] = list(np.arange(2, 2+self.max_cls_tokens)) # list(np.arange(2, 102)), [2]
-        item['tissue_token'] = [103]
-        item['assay_token'] = [104]
-        item['gene_panel_token'] = [105]
-        item['batch_token'] = [106]
+        item["cls_tokens"] = torch.arange(2, 2 + self.max_cls_tokens)
+        #item["tissue_token"] = torch.tensor([103])
+        #item["assay_token"] = torch.tensor([104])
+        #item["gene_panel_token"] = torch.tensor([105])
+        item["batch_token"] = torch.tensor([106])
 
         """
         item['rel_x_coord'] = torch.repeat_interleave(
@@ -305,38 +318,37 @@ class CellGraphDataset(CellBaseDataset):
             item['rel_y_coord'], self.seq_len_cell)
         """
 
-        seg_tokens = np.arange(105, self.n_segments + 105)
-        seg_tokens = np.repeat(seg_tokens, self.seq_len_cell)
-        mask = np.array([e != 0 for e in item["gene_tokens"]])
-        seg_tokens = seg_tokens * mask
-        item['seg_tokens'] = seg_tokens.tolist()
+        seg_tokens = torch.arange(105, 105 + self.n_segments)
+        seg_tokens = seg_tokens.repeat_interleave(self.seq_len_cell)
+        mask = (item["gene_tokens"] != 0)
+        item["seg_tokens"] = seg_tokens * mask
 
         # Get (sampled) gene tokens and counts
         gene_tokens_cell, values_cell = self._get_segment_seq(
             item=item,
             segment=self.max_special_tokens, # index cell seg
             segment_seq_len=self.seq_len_cell)
-        item_dict['segments'] = [
-            self.max_special_tokens if gene_token != 0 else 0 for
-            gene_token in gene_tokens_cell]
+        item_dict['segments'] = (
+            gene_tokens_cell != 0).long() * self.max_special_tokens
         if self.gt_type != 'counts':
-            item_dict['positions'] = list(range(1, len(gene_tokens_cell) + 1))
+            item_dict['positions'] = torch.arange(
+                1, gene_tokens_cell.shape[0]) + 1)
         gene_tokens_neighborhood = []
         values_neighborhood = []
-        for segment in np.unique(item["seg_tokens"]):
-            if segment > self.max_special_tokens: # neighbor cell segments
-                segment_gene_tokens, segment_values = self._get_segment_seq(
+        for segment in torch.unique(item['seg_tokens']):
+            if segment.item() > self.max_special_tokens: # neighbor cell segments
+                segment_tokens, segment_values = self._get_segment_seq(
                     item=item,
                     segment=segment, # neighbor cell segs
                     segment_seq_len=self.seq_len_cell)
-                gene_tokens_neighborhood.extend(segment_gene_tokens)
+                gene_tokens_neighborhood.extend(segment_tokens)
                 values_neighborhood.extend(segment_values)
                 item_dict['segments'].extend(
                     [segment if gene_token != 0 else 0 for
-                    gene_token in segment_gene_tokens])
+                    gene_token in segment_tokens])
                 if self.gt_type != 'counts':
                     item_dict['positions'].extend(
-                        list(range(1, len(segment_gene_tokens) + 1)))
+                        list(range(1, len(segment_tokens) + 1)))
         item_dict['tokens'] = gene_tokens_cell + gene_tokens_neighborhood
         if self.gt_type != 'counts':
             item_dict['positions'] = [

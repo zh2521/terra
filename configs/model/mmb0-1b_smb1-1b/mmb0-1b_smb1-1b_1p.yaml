@@ -61,7 +61,7 @@ mask:
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.4 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   restrict_special_attention: False
 optimization:
@@ -77,6 +77,8 @@ optimization:
   final_weight_decay: 0.4
   ipe_scale: 1.0
   clip_grad: 100.0
+  lambda_var: 1.0
+  lambda_cov: 0.1
 state:
   log_freq: 20
   checkpoint_freq: 5

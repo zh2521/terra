@@ -170,6 +170,14 @@ def train(args: dict,
     final_wd = float(args['optimization']['final_weight_decay'])
     ipe_scale = args['optimization']['ipe_scale'] # scheduler scale factor
     clip_grad = args['optimization']['clip_grad']
+    if 'lambda_var' in args['optimization'].keys():
+        lambda_var = args['optimization']['lambda_var']
+    else:
+        lambda_var = 1.0
+    if 'lambda_cov' in args['optimization'].keys():
+        lambda_cov = args['optimization']['lambda_cov']
+    else:
+        lambda_cov = 0.1
 
     log_freq = args['state']['log_freq']
     checkpoint_freq = args['state']['checkpoint_freq']
@@ -433,6 +441,31 @@ def train(args: dict,
                         loss += torch.mean(
                             torch.abs(zi - hi)**loss_exp) / loss_exp
                 loss /= len(masks_pred)
+
+                # ----------------------------------------------------
+                # VICReg-style variance + covariance regularization
+                # ----------------------------------------------------
+
+                all_z = torch.cat(z, dim=0)
+                all_z = all_z.reshape(-1, all_z.shape[-1])
+
+                # ----- variance loss -----
+                def variance_loss(z, gamma=1.0, eps=1e-4):
+                    std = z.std(dim=0) + eps
+                    return torch.mean(torch.relu(gamma - std))
+
+                # ----- covariance loss -----
+                def covariance_loss(z):
+                    z = z - z.mean(dim=0)
+                    N, D = z.shape
+                    cov = (z.T @ z) / (N - 1)
+                    off_diag = cov - torch.diag(torch.diag(cov))
+                    return (off_diag**2).sum() / D
+
+                loss_var = variance_loss(all_z)
+                loss_cov = covariance_loss(all_z)
+
+                loss = loss + lambda_var * loss_var + lambda_cov * loss_cov
 
             # Step 2: backward pass and step
             _enc_norm, _pred_norm = 0., 0.
