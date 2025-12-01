@@ -60,6 +60,17 @@ class CellBaseDataset(Dataset):
         if gt_type not in ['rank', 'counts']:
             raise ValueError(f'Invalid "gt_type": {gt_type}.')
 
+        exclude_cols = [
+            'rel_x_coord',
+            'rel_y_coord',
+            'gene_panel_value',
+            'assay_value',
+            'species_value',
+            'tissue_value']
+        if not include_cell_id:
+            exclude_cols += ['cell_id']
+        dataset = dataset.remove_columns(exclude_cols)
+
         self.dataset = dataset
         self.len = len(self.dataset)
         if n_nonzero_tokens_list:
