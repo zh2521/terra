@@ -142,13 +142,21 @@ class BlockMaskCollator:
         ctx_idx = context_keep.nonzero(as_tuple=False).squeeze(-1)
         if ctx_idx.numel() > 1:
             ctx_idx = ctx_idx[torch.randperm(ctx_idx.numel())]
-        special_idx = torch.arange(
-            self.n_special_tokens,
-            device=tokens.device,
-            dtype=torch.long)
-        ctx_idx = torch.cat((special_idx, ctx_idx), dim=0)
-
         context_masks = [ctx_idx]
+
+        if self.n_special_tokens > 0:
+            special_idx = torch.arange(
+                self.n_special_tokens,
+                device=tokens.device,
+                dtype=torch.long)
+            ctx_idx = torch.cat((special_idx, ctx_idx), dim=0)
+
+            context_masks = [
+                torch.cat((special_idx, ctx_idx),
+                dim=0) for ctx_idx in context_masks]
+            target_masks = [
+                torch.cat((special_idx, tgt_idx),
+                dim=0) for tgt_idx in target_masks]
 
         return target_masks, context_masks
 
@@ -185,7 +193,7 @@ class BlockMaskCollator:
             # Number of segments kept in cell graph; k in [1,
             # n_segments]
             k = torch.randint(low=1, high=self.n_segments+1, size=(1,)).item()
-            cutoff = self.seq_len_cell * k
+            cutoff = self.n_special_tokens + (self.seq_len_cell * k)
 
             # Pad all segments not kept in cell graph
             if 'tokens' in collated:

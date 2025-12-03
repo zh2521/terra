@@ -67,19 +67,19 @@ mask:
   restrict_special_attention: False
 optimization:
   warmup: 1
-  epochs: 30
+  epochs: 9
   ema:
-  - 0.9764319982153814 # 0.9764319982153814
+  - 0.9995 # 0.998, 0.9995
   - 1.0
-  start_lr: 2.0e-05 # 2.0e-05, 1.0e-06 
-  lr: 2.0e-05 # 2.0e-05, 0.000625, 6.0e-05
-  final_lr: 2.0e-05 # 2.0e-05, 1.0e-06
+  start_lr: 1.0e-06 # 1.0e-06, 2.0e-05
+  lr: 6.0e-05 # 6.0e-05, 0.000625
+  final_lr: 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
-  ipe_scale: 1.0
+  ipe_scale: 1.25
   clip_grad: 100.0
-  lambda_var: 1.0
-  lambda_cov: 0.05
+  lambda_var: 0.8
+  lambda_cov: 0.2
 state:
   log_freq: 20
   checkpoint_freq: 1

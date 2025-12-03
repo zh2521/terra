@@ -60,6 +60,20 @@ class CellBaseDataset(Dataset):
         
         self.gt_type = gt_type
         self.cell_pos_enc = cell_pos_enc
+
+        exclude_cols = [
+            'gene_panel_value',
+            'assay_value',
+            'species_value',
+            'tissue_value']
+        #if self.cell_pos_enc != 'coord':
+        #    exclude_cols += [
+        #        'rel_x_coord',
+        #        'rel_y_coord']
+        #if not include_cell_id:
+        #    exclude_cols += ['cell_id']
+        dataset = dataset.remove_columns(exclude_cols)
+
         self.dataset = dataset
         self.len = len(self.dataset)
         self.vocab_size = vocab_size
@@ -361,6 +375,11 @@ class CellGraphDataset(CellBaseDataset):
 
         # Retrieve Hugging Face item once
         item = self.dataset[item]
+
+        #item['tissue_token'] = torch.tensor([103])
+        #item['assay_token'] = torch.tensor([104])
+        #item['gene_panel_token'] = torch.tensor([105])
+        item['batch_token'] = torch.tensor([106])
 
         # Expand spatial coordinates (TODO: if statement to support old API)
         if 'rel_x_coord' in item.keys():
