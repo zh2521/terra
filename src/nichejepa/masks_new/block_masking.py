@@ -149,7 +149,6 @@ class BlockMaskCollator:
                 self.n_special_tokens,
                 device=tokens.device,
                 dtype=torch.long)
-            ctx_idx = torch.cat((special_idx, ctx_idx), dim=0)
 
             context_masks = [
                 torch.cat((special_idx, ctx_idx),

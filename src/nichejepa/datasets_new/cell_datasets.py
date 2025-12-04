@@ -528,6 +528,11 @@ class CellGraphDataset(CellBaseDataset):
         # Add cell ID
         if self.include_cell_id:
             item_dict['cell_id'] = item['cell_id']
+            
+        print(item_dict['tokens'])
+        print(item_dict['values'])
+        print(item_dict['segments'])
+        print(item_dict['positions'])
         
         return item_dict
 
