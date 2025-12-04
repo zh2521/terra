@@ -711,18 +711,19 @@ def embed_dataset(dataset: Dataset,
 
     # Store cell, spatially contextualized cell and neighborhood embeddings of
     # all observations
-    output_embed["cell_emb"] = np.array(torch.cat(
-        all_cell_emb_list,
-        dim=0))
-    output_embed["neighborhood_emb"] = np.array(torch.cat(
-        all_neighborhood_emb_list,
-        dim=0))
-    if include_spatial_cell_emb:
-        output_embed["spatial_cell_emb"] = np.array(torch.cat(
-            all_spatial_cell_emb_list,
-            dim=0))        
-    if return_token_embeddings:
-        output_embed["token_emb"] = np.array(torch.cat(
-            all_token_emb_list,
-            dim=0))
+    for i in range(len(all_cell_emb_list)):
+        output_embed[f"cell_emb_layer_{i}"] = np.array(torch.cat(
+            all_cell_emb_list[i],
+            dim=0).cpu())
+        output_embed[f"neighborhood_emb_layer_{i}"] = np.array(torch.cat(
+            all_neighborhood_emb_list[i],
+            dim=0).cpu())
+    #if include_spatial_cell_emb:
+    #    output_embed["spatial_cell_emb"] = np.array(torch.cat(
+    #        all_spatial_cell_emb_list,
+    #        dim=0))        
+    #if return_token_embeddings:
+    #    output_embed["token_emb"] = np.array(torch.cat(
+    #        all_token_emb_list,
+    #        dim=0))
     return output_embed
