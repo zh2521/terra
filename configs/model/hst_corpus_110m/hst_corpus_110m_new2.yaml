@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 256 # 128, 32
+  batch_size: 256 # 128, 144, 288
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -38,7 +38,7 @@ meta:
   gt_type: 'counts' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
-  cell_pos_enc: 'segment'
+  cell_pos_enc: 'segment' # 'segment'
   enc_depth: 12
   enc_emb_dim: 384
   pred_depth: 12
@@ -68,14 +68,14 @@ optimization:
   warmup: 1 # 1, 2
   epochs: 5 # 5, 8
   ema:
-  - 0.997 # 0.9764319982153814
+  - 0.992 # 0.9764319982153814
   - 1.0
   start_lr: 1.0e-06 # 2.0e-05, 1.0e-06 
   lr: 6.0e-05 # 2.0e-05, 0.000625, 6.0e-05
   final_lr: 1.0e-06 # 2.0e-05, 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
-  ipe_scale: 1.5 # 1.25
+  ipe_scale: 0.75
   clip_grad: 2.0
   lambda_var: 0.
   lambda_cov: 0.
