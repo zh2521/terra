@@ -700,7 +700,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
         # Remove special token contents
         if self.n_special_tokens:
-            x[:, : self.n_special_tokens, :] = 0
+            x[:, :self.n_special_tokens, :] = 0
 
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,

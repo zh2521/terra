@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 512 # 32
+  batch_size: 32 # 32
   num_workers: 16 
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -36,7 +36,7 @@ meta:
   api_version: 'v3'
   add_cls: False
   n_cls: 1
-  gt_type: 'combined' # 'rank', 'counts', 'combined'
+  gt_type: 'rank' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
   cell_pos_enc: 'segment'
@@ -67,7 +67,7 @@ mask:
   restrict_special_attention: False
 optimization:
   warmup: 3
-  epochs: 1000
+  epochs: 300
   ema:
   - 0.995
   - 1.0
