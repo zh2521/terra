@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 256 # 256, 128, 288
+  batch_size: 8 # 256, 128, 288
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -35,7 +35,7 @@ meta:
   api_version: 'v3'
   add_cls: False
   n_cls: 1
-  gt_type: 'rank' # 'rank', 'counts', 'combined'
+  gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
   cell_pos_enc: 'coord'
@@ -61,7 +61,7 @@ mask:
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.8 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   restrict_special_attention: False
 optimization:

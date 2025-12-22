@@ -123,9 +123,18 @@ class CellBaseDataset(Dataset):
             special tokens considered at sequence start.
         """
         for spc_tk in self.special_tokens:
-            item_dict['tokens'] = torch.cat(
-                [item[f'{spc_tk}_token'],
-                 item_dict['tokens']])
+            if self.gt_type != 'rank':
+                item_dict['tokens'] = torch.cat(
+                    [item[f'{spc_tk}_token'],
+                    item_dict['tokens']])
+            else:
+                if self.vocab_size == 2785:
+                    spv_idx_subtract = torch.tensor([1674]) # mus musculus token dict
+                else:
+                    spv_idx_subtract = torch.tensor([21957]) # homo sapiens token dict
+                item_dict['tokens'] = torch.cat(
+                    [item[f'{spc_tk}_value'] + spv_idx_subtract, # see tokenizers module
+                    item_dict['tokens']])
 
             if self.gt_type != 'rank':
                 item_dict['values'] = torch.cat(
