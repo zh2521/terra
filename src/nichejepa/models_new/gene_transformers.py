@@ -194,7 +194,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             attn_base: torch.Tensor | None,
             layers: Sequence[int],
             masks: list[torch.Tensor] | torch.Tensor | None,
-            cell_only: bool) -> dict[int, torch.Tensor]:
+            cell_only: bool,
+            ignore_spc_tokens: bool = False) -> dict[int, torch.Tensor]:
         """
         Helper function to return embeddings for either full context or
         cell only context.
@@ -212,9 +213,10 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 attn = attn_base.expand(-1, -1, attn_base.size(-1), -1).clone()
             else:
                 attn = attn_base.clone()
-            # Never attend to special tokens
-            if self.n_special_tokens > 0:
-                attn[:, :, :, :self.n_special_tokens] = False
+            if ignore_spc_tokens:
+                # Never attend to special tokens
+                if self.n_special_tokens > 0:
+                    attn[:, :, :, :self.n_special_tokens] = False
             # Optionally block cross-attention from cell queries to
             # neighborhood keys
             if cell_only:
@@ -648,6 +650,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
+            ignore_spc_tokens: bool = True,
             ) -> tuple[
                 dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
@@ -699,21 +702,24 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         x = seg_emb + pos_emb + token_emb # [B, L, D]
 
         # Remove special token contents
-        if self.n_special_tokens:
-            x[:, :self.n_special_tokens, :] = 0
+        if ignore_spc_tokens:
+            if self.n_special_tokens:
+                x[:, :self.n_special_tokens, :] = 0
 
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=False)
+            cell_only=False,
+            ignore_spc_tokens=ignore_spc_tokens)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=True) if need_cell_only_context else None
+            cell_only=True,
+            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
@@ -880,6 +886,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
+            ignore_spc_tokens: bool = True,
             ) -> tuple[
                 dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
@@ -972,21 +979,24 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         x = seg_emb + token_emb + value_emb # [B, L, D]
 
         # Remove special token contents
-        if self.n_special_tokens:
-            x[:, :self.n_special_tokens, :] = 0
+        if ignore_spc_tokens:
+            if self.n_special_tokens:
+                x[:, :self.n_special_tokens, :] = 0
 
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=False)
+            cell_only=False,
+            ignore_spc_tokens=ignore_spc_tokens)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=True) if need_cell_only_context else None
+            cell_only=True,
+            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
@@ -1177,6 +1187,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
             need_cell_only_context: bool = True,
+            ignore_spc_tokens: bool = True,
             ) -> tuple[
                 dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
@@ -1271,21 +1282,24 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         x = seg_emb + pos_emb + token_emb + value_emb # [B, L, D]
 
         # Remove special token contents
-        if self.n_special_tokens:
-            x[:, :self.n_special_tokens, :] = 0
+        if ignore_spc_tokens:
+            if self.n_special_tokens:
+                x[:, :self.n_special_tokens, :] = 0
 
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=False)
+            cell_only=False,
+            ignore_spc_tokens=ignore_spc_tokens)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
-            cell_only=True) if need_cell_only_context else None
+            cell_only=True,
+            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
