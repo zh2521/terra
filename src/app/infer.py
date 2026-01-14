@@ -72,6 +72,7 @@ def infer(args: dict,
           return_gene_marker_score: bool=False,
           return_distance: bool=False,
           include_spatial_cell_emb: bool = False,
+          ignore_spc_tokens: bool = True,
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -409,6 +410,7 @@ def infer(args: dict,
                 batch=udata,
                 masks_attention=masks_attention,
                 need_cell_only_context=True,
+                ignore_spc_tokens=ignore_spc_tokens,
             )
 
             cell_emb_list = []

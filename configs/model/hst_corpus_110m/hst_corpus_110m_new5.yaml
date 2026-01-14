@@ -11,8 +11,8 @@ data:
   raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/hst_corpus_110m'
   token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_homo_sapiens.pkl'
   tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/hst_corpus_110m/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10.dataset'
-  precomputed_split: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_precomputed_split_train.pkl'
-  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_n_nonzero_tokens_train.pkl'
+  precomputed_split: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_precomputed_split_full.pkl'
+  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_n_nonzero_tokens_full.pkl'
   test_batch_ids: ['49_batch0']
   val_batch_ids: ['49_batch0']
   tokenizer_type: 'cell_graph'
@@ -38,7 +38,7 @@ meta:
   n_cls: 1
   gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
-  n_value_bins: 20
+  n_value_bins: 10
   cell_pos_enc: 'segment'
   enc_depth: 12
   enc_emb_dim: 384 # 384, 768
@@ -54,16 +54,13 @@ meta:
   use_layer_norm: True
   predict_gene: True
   new_spc: True
-  restrict_special_attention: False
-mask:
-  n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.8 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
 optimization:
   warmup: 1 # 1
@@ -89,4 +86,4 @@ state:
   load_checkpoint: False # true, false
   read_checkpoint: null # null, 'nichejepa-ep5.pth.tar'
   checkpoint_freq_iter: 5000
-
+                   .,´®ß∑£¢rfetd g
