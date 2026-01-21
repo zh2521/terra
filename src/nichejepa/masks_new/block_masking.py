@@ -51,6 +51,8 @@ class BlockMaskCollator:
                  n_special_tokens: int,
                  per_block_mask_ratio: float = 0.5,
                  sample_segments: bool = False,
+                 cell_segment_sampling_ratio: float = 0.09090909090909091,
+                 special_token_pad_ratio: float = 0.,
                  sample_gene_masks: bool = True,
                  restrict_special_attention: bool = False):
         self.n_targets = n_targets
@@ -64,6 +66,9 @@ class BlockMaskCollator:
         self.sample_segments = sample_segments
         self.sample_gene_masks = sample_gene_masks
         self.restrict_special_attention = restrict_special_attention
+        self.cell_segment_sampling_ratio = cell_segment_sampling_ratio
+        self.special_token_pad_ratio = special_token_pad_ratio
+        print(self.special_token_pad_ratio)
 
     def _sample_gene_mask(
         self,
@@ -193,7 +198,11 @@ class BlockMaskCollator:
         if self.sample_segments:
             # Number of segments kept in cell graph; k in [1,
             # n_segments]
-            k = torch.randint(low=1, high=self.n_segments+1, size=(1,)).item()
+            if torch.rand(1).item() < self.cell_segment_sampling_ratio:
+                k = 1
+            else:
+                k = torch.randint(low=2, high=self.n_segments + 1, size=(1,)).item()
+            #k = torch.randint(low=1, high=self.n_segments+1, size=(1,)).item()
             cutoff = self.n_special_tokens + (self.seq_len_cell * k)
 
             # Pad all segments not kept in cell graph
@@ -209,6 +218,23 @@ class BlockMaskCollator:
                 collated['rel_x_coords'][:, cutoff:] = float('-inf')
             if 'rel_y_coords' in collated:
                 collated['rel_y_coords'][:, cutoff:] = float('-inf')
+
+        if self.n_special_tokens > 0:
+            print(self.special_token_pad_ratio)
+            if torch.rand(1).item() < self.special_token_pad_ratio:
+                # Pad special tokens
+                if 'tokens' in collated:
+                    collated['tokens'][:, :self.n_special_tokens] = 0
+                if 'segments' in collated:
+                    collated['segments'][:, :self.n_special_tokens] = 0
+                if 'positions' in collated:
+                    collated['positions'][:, :self.n_special_tokens] = 0
+                if 'values' in collated:
+                    collated['values'][:, :self.n_special_tokens] = 0.0
+                if 'rel_x_coords' in collated:
+                    collated['rel_x_coords'][:, :self.n_special_tokens] = float('-inf')
+                if 'rel_y_coords' in collated:
+                    collated['rel_y_coords'][:, :self.n_special_tokens] = float('-inf')
 
         tokens = collated['tokens'] # [B, N]
         B, N = tokens.shape

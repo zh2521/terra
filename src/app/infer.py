@@ -939,6 +939,7 @@ def embed_dataset(dataset: Dataset,
                   num_workers: int = 12,
                   include_spatial_cell_emb: bool = True,
                   return_token_embeddings: bool = False,
+                  ignore_spc_tokens: bool = False,
                   ) -> dict:
     """
     Parameters
@@ -1126,6 +1127,7 @@ def embed_dataset(dataset: Dataset,
                 batch=udata,
                 masks_attention=masks_attention,
                 need_cell_only_context=True,
+                ignore_spc_tokens=ignore_spc_tokens,
             )
 
             c_emb = cell_only_ctx[emb_layer].cpu()
@@ -1318,6 +1320,7 @@ def harmonize_tokenize_embed_pipeline(
         use_generator: bool = True,
         add_neigh_cell_ids: bool = False,
         min_cells_per_gene: int = 0,
+        ignore_spc_tokens: bool = False,
         ) -> ad.AnnData:
     """
     Harmonize, tokenize and embed an AnnData object.
@@ -1442,7 +1445,8 @@ def harmonize_tokenize_embed_pipeline(
         top_k=top_k,
         batch_size=batch_size,
         pin_memory=pin_memory,
-        num_workers=num_workers)
+        num_workers=num_workers,
+        ignore_spc_tokens=ignore_spc_tokens)
     print(f"Embedded tokenized data.")
 
     # Add embeddings to adata
