@@ -37,7 +37,7 @@ meta:
   add_cls: False
   n_cls: 1
   gt_type: 'combined' # 'rank', 'counts', 'combined'
-  count_encoding: 'value_bins' # 'value_bins', 'mlp'
+  count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
   cell_pos_enc: 'segment'
   enc_depth: 12
@@ -55,6 +55,7 @@ meta:
   predict_gene: True
   new_spc: True
   restrict_special_attention: False
+  excl_spc_from_loss: True
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -65,15 +66,16 @@ mask:
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
+  special_token_pad_ratio: 0.
 optimization:
   warmup: 1 # 1
-  epochs: 3 # 5
+  epochs: 5 # 5
   ema:
-  - 0.9995 # 0.998, 0.9995
+  - 0.995 # 0.998, 0.9995
   - 1.0
-  start_lr: 2.0e-05 # 1.0e-06, 2.0e-05
-  lr: 2.0e-05 # 6.0e-05, 0.000625
-  final_lr: 2.0e-05 # 1.0e-06
+  start_lr: 1.0e-05 # 1.0e-06, 2.0e-05
+  lr: 1.0e-05 # 6.0e-05, 0.000625
+  final_lr: 1.0e-05 # 1.0e-06
   weight_decay: 0.04 # 0.04
   final_weight_decay: 0.4 # 0.4
   ipe_scale: 1.25

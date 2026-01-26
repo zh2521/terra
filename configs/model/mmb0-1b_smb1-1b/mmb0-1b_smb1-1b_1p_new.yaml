@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 64 # 32
+  batch_size: 32 # 32
   num_workers: 16 
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -32,7 +32,6 @@ data:
   n_special_values: 200
   vocab_size: 23407
   nz_spc: True
-  overwrite_batch_value: False
 meta:
   api_version: 'v3'
   add_cls: False
@@ -41,11 +40,11 @@ meta:
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 100
   cell_pos_enc: 'segment'
-  enc_depth: 12 # 12, 3
-  enc_emb_dim: 384
-  pred_depth: 12 # 12, 1
-  pred_emb_dim: 192 # 384
-  num_heads: 6 # 12, 6
+  enc_depth: 3
+  enc_emb_dim: 768
+  pred_depth: 1
+  pred_emb_dim: 768 # 384
+  num_heads: 8
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'] # ['batch', 'assay'] # ['batch'] []
   pos_learnable: False
@@ -54,7 +53,8 @@ meta:
   use_flash_attention: True
   use_layer_norm: True
   predict_gene: True
-  new_spc: True
+  new_spc: False
+  excl_spc_from_loss: True
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -66,24 +66,25 @@ mask:
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   restrict_special_attention: False
+  special_token_pad_ratio: 0.15
 optimization:
   warmup: 3
   epochs: 300
   ema:
-  - 0.9995
+  - 0.995
   - 1.0
-  start_lr: 1.0e-06 # 2.0e-05, 1.0e-06 
+  start_lr: 2.0e-05 # 2.0e-05, 1.0e-06 
   lr: 6.0e-05 # 2.0e-05, 0.000625, 6.0e-05
-  final_lr: 1.0e-06 # 2.0e-05, 1.0e-06
+  final_lr: 2.0e-05 # 2.0e-05, 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
-  ipe_scale: 1.25
+  ipe_scale: 1.0
   clip_grad: 2.0
   lambda_var: 0.
   lambda_cov: 0.
 state:
   log_freq: 20
-  checkpoint_freq: 100
+  checkpoint_freq: 5
   write_tag: nichejepa
   read_timestamp: ''
   folder_path: null

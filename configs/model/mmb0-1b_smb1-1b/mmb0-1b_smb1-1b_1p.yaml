@@ -67,17 +67,17 @@ mask:
   restrict_special_attention: False
 optimization:
   warmup: 3
-  epochs: 100
+  epochs: 300
   ema:
-  - 0.99 # 0.9764319982153814
+  - 0.995
   - 1.0
   start_lr: 2.0e-05 # 2.0e-05, 1.0e-06 
-  lr: 2.0e-05 # 2.0e-05, 0.000625, 6.0e-05
+  lr: 6.0e-05 # 2.0e-05, 0.000625, 6.0e-05
   final_lr: 2.0e-05 # 2.0e-05, 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
   ipe_scale: 1.0
-  clip_grad: 100.0
+  clip_grad: 2.0
   lambda_var: 0.
   lambda_cov: 0.
 state:
