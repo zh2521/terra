@@ -172,6 +172,11 @@ def train(args: dict,
         new_spc = args['meta']['new_spc']
     else:
         new_spc = False
+    if 'excl_spc_from_loss' in args['meta'].keys():
+        excl_spc_from_loss = args['meta']['excl_spc_from_loss']
+    else:
+        excl_spc_from_loss = False
+
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -184,6 +189,10 @@ def train(args: dict,
         restrict_special_attention = args['mask']['restrict_special_attention']
     else:
         restrict_special_attention = False
+    if 'special_token_pad_ratio' in args['mask'].keys():
+        special_token_pad_ratio = args['mask']['special_token_pad_ratio']
+    else:
+        special_token_pad_ratio = 0.0
     if 'sample_segments' in args['mask'].keys():
         sample_segments = args['mask']['sample_segments']
     else:
@@ -345,7 +354,8 @@ def train(args: dict,
             per_block_mask_ratio=per_block_mask_ratio,
             sample_segments=sample_segments,
             sample_gene_masks=True,
-            restrict_special_attention=restrict_special_attention)
+            restrict_special_attention=restrict_special_attention,
+            special_token_pad_ratio=special_token_pad_ratio)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,
@@ -580,7 +590,7 @@ def train(args: dict,
                 with torch.no_grad():
                     h, _ = target_encoder(
                         batch=udata, masks_attention=masks_attention)
-                    h = F.layer_norm(h, (h.size(-1),))
+                    #h = F.layer_norm(h, (h.size(-1),))
                     h = apply_masks(h, masks_pred, concat=False)
 
                 # Forward pass of context encoder
@@ -603,10 +613,17 @@ def train(args: dict,
                 loss = 0.
                 for zi, hi in zip(z, h):
                     if loss_fn_type == 'smooth_l1':
-                        loss += F.smooth_l1_loss(zi, hi)
+                        if excl_spc_from_loss:
+                            loss += F.smooth_l1_loss(zi[:, n_special_tokens:, :], hi[:, n_special_tokens:, :])
+                        else:
+                            loss += F.smooth_l1_loss(zi, hi)
                     elif loss_fn_type == 'l1':
-                        loss += torch.mean(
-                            torch.abs(zi - hi)**loss_exp) / loss_exp
+                        if excl_spc_from_loss:
+                            loss += torch.mean(
+                                torch.abs(zi[:, n_special_tokens:, :] - hi[:, n_special_tokens:, :])**loss_exp) / loss_exp
+                        else:
+                            loss += torch.mean(
+                                torch.abs(zi - hi)**loss_exp) / loss_exp
                 loss /= len(masks_pred)
 
                 # ----------------------------------------------------

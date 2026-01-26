@@ -68,7 +68,7 @@ class BlockMaskCollator:
         self.restrict_special_attention = restrict_special_attention
         self.cell_segment_sampling_ratio = cell_segment_sampling_ratio
         self.special_token_pad_ratio = special_token_pad_ratio
-        print(self.special_token_pad_ratio)
+        print("Special token pad ratio", self.special_token_pad_ratio)
 
     def _sample_gene_mask(
         self,
@@ -220,7 +220,6 @@ class BlockMaskCollator:
                 collated['rel_y_coords'][:, cutoff:] = float('-inf')
 
         if self.n_special_tokens > 0:
-            print(self.special_token_pad_ratio)
             if torch.rand(1).item() < self.special_token_pad_ratio:
                 # Pad special tokens
                 if 'tokens' in collated:

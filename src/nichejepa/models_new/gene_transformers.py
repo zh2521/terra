@@ -1283,8 +1283,6 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         # Add segment, positional, and gene embeddings to value embeddings
         x = seg_emb + pos_emb + token_emb + value_emb # [B, L, D]
 
-        print(ignore_spc_tokens)
-
         # Remove special token contents
         if ignore_spc_tokens:
             if self.n_special_tokens:
