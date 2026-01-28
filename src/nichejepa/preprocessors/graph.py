@@ -54,7 +54,7 @@ def _combine_neighbor_graphs(adata: ad.AnnData,
                 'spatial_connectivities'] = radius_conn.multiply(
                     adata.obsp['spatial_connectivities'])
 
-        return adata
+    return adata
 
 
 def construct_neighbor_graph(adata: ad.AnnData,
@@ -104,7 +104,7 @@ def construct_neighbor_graph(adata: ad.AnnData,
         `adata.layers['X_neighborhood']`.
     """
     if batch_key is not None:
-        batches = adata.obs[batch_key].unique()
+        batches = adata.obs[batch_key].unique().tolist()
         adata_batch_list = []
 
         for batch in batches:
