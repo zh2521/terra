@@ -1,4 +1,5 @@
 import anndata as ad
+import scipy.sparse as sp
 try:
     import squidpy as sq
 except:
