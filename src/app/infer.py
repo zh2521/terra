@@ -939,7 +939,7 @@ def embed_dataset(dataset: Dataset,
                   num_workers: int = 12,
                   include_spatial_cell_emb: bool = True,
                   return_token_embeddings: bool = False,
-                  ignore_spc_tokens: bool = False,
+                  ignore_spc_tokens: bool = True,
                   ) -> dict:
     """
     Parameters
@@ -1193,7 +1193,7 @@ def embed_dataset(dataset: Dataset,
     return output_embed
 
 
-def _build_perturb_index(df: pd.DataFrame) -> Dict[str, List[dict]]:
+def _build_perturb_index(df: pd.DataFrame) -> dict[str, list[dict]]:
     """
     Turn perturb_df into an index:
         {perturbed_cell_id: [row_as_dict, …]}
@@ -1206,18 +1206,22 @@ def _build_perturb_index(df: pd.DataFrame) -> Dict[str, List[dict]]:
 
 def _perturb_batch(
     batch: dict,
-    index: Dict[str, List[dict]],
+    index: dict[str, list[dict]],
     seq_len_cell: int = 256,
 ) -> dict:
     """
-    `batch` is the dictionary of column -> list-of-values
-    returned by Hugging-Face when batched=True.
     Modify the tensors in-place (cheap) and return the same dict.
+
+    Parameters
+    -----------
+    batch:
+        The dictionary mapping column -> list-of-values returned by huggingface
+        when batched=True.
     """
-    B = len(batch["cell_ids"])          # batch size
+    B = len(batch["cell_ids"]) # batch size
     for b in range(B):
-        cell_ids: List[str] = list(dict.fromkeys(batch["cell_ids"][b]))
-        # Fast reject: does this example touch any perturbed cell at all?
+        cell_ids = list(dict.fromkeys(batch["cell_ids"][b]))
+        # Fast reject: does this batch touch any perturbed cell at all?
         if not any(cid in index for cid in cell_ids):
             continue
 
@@ -1252,7 +1256,7 @@ def _perturb_batch(
                 # ---------------------------------------------------------
 
                 if row["perturbation_type"] == "knockout":
-                    gene_expr[idx]   = 0.0
+                    gene_expr[idx] = 0.0
                 elif row["perturbation_type"] == "foldchange":
                     gene_expr[idx] *= row["foldchange"]
                 else:
@@ -1260,35 +1264,40 @@ def _perturb_batch(
 
     return batch
 
-def perturb_dataset(
-    dataset: Dataset,
-    perturb_df: pd.DataFrame,
-    model_folder_path: str,
-    seq_len_cell: int = 256,
-    nproc: int = 4,
-    batch_size: int = 1000,
-    keep_in_memory: bool = False,
-) -> Dataset:
-    # 1) Load token dictionary once
+def perturb_dataset(dataset: Dataset,
+                    perturb_df: pd.DataFrame,
+                    model_folder_path: str,
+                    seq_len_cell: int = 256,
+                    nproc: int = 4,
+                    batch_size: int = 1000,
+                    keep_in_memory: bool = False,
+                    ) -> Dataset:
+    """
+    Perturb a huggingface dataset.
+    """
+    # Load token dictionary
     with open(Path(model_folder_path) / "token_dictionary.pkl", "rb") as f:
         token_dict = pickle.load(f)
 
-    # 2) Convert gene IDs to token IDs up-front (vectorised)
+    # Convert gene IDs to token IDs
     perturb_df = perturb_df.copy()
     perturb_df["perturbed_gene_token"] = perturb_df["perturbed_ensembl_id"].where(
         perturb_df["perturbed_ensembl_id"] == "all",
         perturb_df["perturbed_ensembl_id"].map(token_dict),
     )
 
-    # 3) Build an index for O(1) lookup
+    # Build an index for fast cell lookup
     perturb_index = _build_perturb_index(perturb_df)
-    # 4) Partial-apply so the mapper sees only one argument
+
+    # Use partial so the dataset mapper sees only one argument (as expected)
     perturb_fn = partial(
         _perturb_batch,
         index=perturb_index,
         seq_len_cell=seq_len_cell,
     )
-    # 5) Map in batch mode
+    print(perturb_index)
+
+    # Map in batch mode
     return dataset.map(
         perturb_fn,
         batched=True,
@@ -1320,7 +1329,7 @@ def harmonize_tokenize_embed_pipeline(
         use_generator: bool = True,
         add_neigh_cell_ids: bool = False,
         min_cells_per_gene: int = 0,
-        ignore_spc_tokens: bool = False,
+        ignore_spc_tokens: bool = True,
         ) -> ad.AnnData:
     """
     Harmonize, tokenize and embed an AnnData object.
