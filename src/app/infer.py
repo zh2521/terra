@@ -1204,11 +1204,11 @@ def _build_perturb_index(df: pd.DataFrame) -> dict[str, list[dict]]:
         index[row.perturbed_cell_id].append(row._asdict())
     return index
 
-def _perturb_batch(
+def _perturb_batch_with_idx(
     batch: dict,
     index: dict[str, list[dict]],
     seq_len_cell: int = 256,
-) -> dict:
+    ) -> dict:
     """
     Modify the tensors in-place (cheap) and return the same dict.
 
@@ -1264,6 +1264,73 @@ def _perturb_batch(
 
     return batch
 
+def _perturb_batch_with_df(
+    batch: dict,
+    df: pd.DataFrame,
+    seq_len_cell: int = 256,
+    ) -> dict:
+    """
+    Modify batch of token sequences in place based on config defined in
+    perturbation dataframe.
+
+    Parameters
+    -----------
+    batch:
+        Batch of token sequences, a dictionary mapping field -> tensor of
+        tokens, returned by huggingface when batched is `True`.
+    df:
+        Dataframe containing the perturbation config.
+    seq_len_cell:
+        Number of cell gene tokens (excluding neighborhood gene tokens).
+
+    Returns
+    -----------
+    batch:
+        Batch of perturbed token sequences, modified in place.
+    """
+    for idx, row in df.iterrows():
+        # Validate perturbation dataframe
+        if row["perturbation_target"] not in ['cell', 'neighborhood']:
+            raise ValueError(
+                f"Invalid perturbation_target: {row['perturbation_target']}.")
+        if row["perturbation_type"] not in ['knockout', 'foldchange']:
+            raise ValueError(
+                f"Bad perturbation_type: {row['perturbation_type']}")
+
+        # Get indices of tokens to be perturbed
+        cell_perturbation = row["perturbation_target"] == 'cell'
+        if row["perturbed_gene_token"] == "all":
+            if cell_perturbation:
+                idx = slice(0, seq_len_cell)
+            else: # neighborhood perturbation
+                idx = slice(seq_len_cell, None)
+        else:
+            token_id = row["perturbed_gene_token"]
+            token_slice = (
+                batch["gene_tokens"][:, :seq_len_cell] if cell_perturbation
+                else batch["gene_tokens"][:, seq_len_cell:])
+            cell_pert_idx = torch.nonzero(
+                token_slice == token_id, as_tuple=True)[0]
+            rel_gene_pert_idx = torch.nonzero(
+                token_slice == token_id, as_tuple=True)[1]
+            offset = 0 if cell_perturbation else seq_len_cell
+            abs_gene_pert_idx = rel_gene_pert_idx + offset
+
+        # Perturb tokens
+        if row["perturbation_type"] == "knockout":
+            batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
+            batch["gene_tokens"][cell_pert_idx, abs_gene_pert_idx] = 0
+        elif row["perturbation_type"] == "foldchange":
+            batch["gene_expr"][
+                cell_pert_idx, abs_gene_pert_idx] *= row["foldchange"]
+
+        if len(cell_pert_idx) == 0:
+            print(f"No qualifying cells for perturbation with row idx: {idx}.")
+        else:
+            print(f"{len(cell_pert_idx)} qualifying cells for perturbation with row idx: {idx}.")
+
+    return batch
+
 def perturb_dataset(dataset: Dataset,
                     perturb_df: pd.DataFrame,
                     model_folder_path: str,
@@ -1279,23 +1346,34 @@ def perturb_dataset(dataset: Dataset,
     with open(Path(model_folder_path) / "token_dictionary.pkl", "rb") as f:
         token_dict = pickle.load(f)
 
-    # Convert gene IDs to token IDs
+    # Convert ensembl IDs to token IDs, keeping "all"
     perturb_df = perturb_df.copy()
     perturb_df["perturbed_gene_token"] = perturb_df["perturbed_ensembl_id"].where(
         perturb_df["perturbed_ensembl_id"] == "all",
         perturb_df["perturbed_ensembl_id"].map(token_dict),
     )
 
-    # Build an index for fast cell lookup
-    perturb_index = _build_perturb_index(perturb_df)
+    # If all perturbations are on all cells, skip indexing
+    perturbed_cell_ids = perturb_df["perturbed_cell_id"].unique().tolist()
+    if len(perturbed_cell_ids) == 1 and perturbed_cell_ids[0] == "all":
 
-    # Use partial so the dataset mapper sees only one argument (as expected)
-    perturb_fn = partial(
-        _perturb_batch,
-        index=perturb_index,
-        seq_len_cell=seq_len_cell,
-    )
-    print(perturb_index)
+        # Use partial so the dataset mapper sees only one argument as expected
+        perturb_fn = partial(
+            _perturb_batch_with_df,
+            df=perturb_df,
+            seq_len_cell=seq_len_cell,
+        )
+    
+    else:
+        # Build an index for fast cell lookup
+        perturb_index = _build_perturb_index(perturb_df)
+
+        # Use partial so the dataset mapper sees only one argument as expected
+        perturb_fn = partial(
+            _perturb_batch_with_idx,
+            index=perturb_index,
+            seq_len_cell=seq_len_cell,
+        )
 
     # Map in batch mode
     return dataset.map(
