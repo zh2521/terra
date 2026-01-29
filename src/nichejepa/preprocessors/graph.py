@@ -105,7 +105,9 @@ def construct_neighbor_graph(adata: ad.AnnData,
         `adata.layers['X_neighborhood']`.
     """
     if batch_key is not None:
-        batches = adata.obs[batch_key].unique().tolist()
+        # Get ordered batches
+        first_idx = adata.obs.reset_index().groupby(batch_key).head(1).index
+        batches = adata.obs.iloc[first_idx][batch_key].tolist()
         adata_batch_list = []
 
         for batch in batches:
@@ -121,8 +123,6 @@ def construct_neighbor_graph(adata: ad.AnnData,
                 delaunay,
                 include_self_loop)
             adata_batch_list.append(adata_batch)
-
-        adata = ad.concat(adata_batch_list, join="inner")
 
         # Block-diagonal concatenate graphs (disconnected components)
         adata.obsp['spatial_connectivities'] = sp.block_diag(
