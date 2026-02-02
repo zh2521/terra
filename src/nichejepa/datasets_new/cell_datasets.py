@@ -309,15 +309,8 @@ class CellBaseDataset(Dataset):
 
             # Only keep gene tokens, values, and coords of specified
             # segment
-            curr_seg_mask = item['seg_tokens'] == segment
-            next_seg_mask = (item['seg_tokens'] == (segment + 1))
-            segment_start_idx = torch.nonzero(
-                curr_seg_mask, as_tuple=True)[0][0]
-            if next_seg_mask.any():
-                segment_end_idx = torch.nonzero(
-                    next_seg_mask, as_tuple=True)[0][0]
-            else:
-                segment_end_idx = item['seg_tokens'].size(0)
+            segment_start_idx = int((segment - 1) * self.seq_len_cell)
+            segment_end_idx = int(segment * self.seq_len_cell)
             segment_tokens = item['gene_tokens'][
                 segment_start_idx: segment_end_idx]
             if self.gt_type != 'rank':
@@ -345,6 +338,9 @@ class CellBaseDataset(Dataset):
                 pass
             else:
                 if segment_tokens.size(0) < segment_seq_len:
+                    torch.set_printoptions(threshold=float('inf'))
+                    print(segment_tokens.size(0))
+                    print(item['seg_tokens'])
                     raise ValueError(
                         'Sequence length for a given segment cannot be larger '
                         'than segment size when not sampling with replacement.'

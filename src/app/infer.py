@@ -1309,14 +1309,20 @@ def _perturb_batch_with_df(
             token_slice = (
                 batch["gene_tokens"][:, :seq_len_cell] if cell_perturbation
                 else batch["gene_tokens"][:, seq_len_cell:])
-            cell_pert_idx = torch.nonzero(
-                token_slice == token_id, as_tuple=True)[0]
-            rel_gene_pert_idx = torch.nonzero(
-                token_slice == token_id, as_tuple=True)[1]
+            cell_pert_idx, rel_gene_pert_idx = torch.nonzero(
+                token_slice == token_id, as_tuple=True)
             offset = 0 if cell_perturbation else seq_len_cell
             abs_gene_pert_idx = rel_gene_pert_idx + offset
 
-        # Perturb tokens
+        # Perturb tokens and track perturbation flags
+        batch[f'pert_flag_idx_{idx}'] = torch.zeros(
+            batch["gene_tokens"].size(0),
+            #batch["gene_tokens"].size(1),
+            dtype=torch.bool)
+        batch[f'pert_flag_idx_{idx}'][
+            cell_pert_idx,
+            #abs_gene_pert_idx
+            ] = True
         if row["perturbation_type"] == "knockout":
             batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
             batch["gene_tokens"][cell_pert_idx, abs_gene_pert_idx] = 0
@@ -1324,10 +1330,10 @@ def _perturb_batch_with_df(
             batch["gene_expr"][
                 cell_pert_idx, abs_gene_pert_idx] *= row["foldchange"]
 
-        if len(cell_pert_idx) == 0:
-            print(f"No qualifying cells for perturbation with row idx: {idx}.")
-        else:
-            print(f"{len(cell_pert_idx)} qualifying cells for perturbation with row idx: {idx}.")
+        #if len(cell_pert_idx) == 0:
+        #    print(f"No qualifying cells for perturbation with row idx: {idx}.")
+        #else:
+        #    print(f"{len(cell_pert_idx)} qualifying cells for perturbation with row idx: {idx}.")
 
     return batch
 
@@ -1338,6 +1344,7 @@ def perturb_dataset(dataset: Dataset,
                     nproc: int = 4,
                     batch_size: int = 1000,
                     keep_in_memory: bool = False,
+                    return_only_perturbed_cells: bool = False,
                     ) -> Dataset:
     """
     Perturb a huggingface dataset.
@@ -1352,6 +1359,8 @@ def perturb_dataset(dataset: Dataset,
         perturb_df["perturbed_ensembl_id"] == "all",
         perturb_df["perturbed_ensembl_id"].map(token_dict),
     )
+    print("Applying perturbations using dataframe:")
+    print(perturb_df)
 
     # If all perturbations are on all cells, skip indexing
     perturbed_cell_ids = perturb_df["perturbed_cell_id"].unique().tolist()
@@ -1376,14 +1385,30 @@ def perturb_dataset(dataset: Dataset,
         )
 
     # Map in batch mode
-    return dataset.map(
+    dataset = dataset.map(
         perturb_fn,
         batched=True,
         batch_size=batch_size,
         num_proc=nproc,
         keep_in_memory=keep_in_memory,
-        load_from_cache_file=False,
-    )
+        load_from_cache_file=False)
+
+    # Optionally, return only perturbed cells
+    if return_only_perturbed_cells:
+        pert_cols = [
+            c for c in dataset.column_names if c.startswith("pert_flag_idx")]
+        dataset = dataset.filter(
+            lambda x: [
+                any(x[c][i] for c in pert_cols)
+                for i in range(len(x[pert_cols[0]]))
+            ],
+        batched=True,
+        batch_size=batch_size,
+        num_proc=nproc,
+        keep_in_memory=keep_in_memory,
+        load_from_cache_file=False)
+
+    return dataset
 
 
 @torch.inference_mode()
