@@ -32,13 +32,14 @@ data:
   n_special_values: 200
   vocab_size: 23407
   nz_spc: True
+  mega_batch_mult_max: 1000
 meta:
   api_version: 'v3'
   add_cls: False
   n_cls: 1
   gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
-  n_value_bins: 100
+  n_value_bins: 20
   cell_pos_enc: 'segment'
   enc_depth: 3
   enc_emb_dim: 768
@@ -54,6 +55,8 @@ meta:
   use_layer_norm: True
   predict_gene: True
   new_spc: False
+  excl_spc_from_loss: False
+  target_enc_layer_norm: True
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -65,9 +68,10 @@ mask:
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   restrict_special_attention: False
+  special_token_pad_ratio: 0.
 optimization:
   warmup: 3
-  epochs: 300
+  epochs: 100
   ema:
   - 0.995
   - 1.0
@@ -76,7 +80,7 @@ optimization:
   final_lr: 2.0e-05 # 2.0e-05, 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
-  ipe_scale: 1.0
+  ipe_scale: 1.25
   clip_grad: 2.0
   lambda_var: 0.
   lambda_cov: 0.

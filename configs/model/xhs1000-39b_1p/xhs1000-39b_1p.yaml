@@ -24,6 +24,7 @@ data:
   n_special_values: 1000
   nz_spc: True
   overwrite_batch_value: False
+  mega_batch_mult_max: 10000
 meta:
   api_version: 'v3'
   add_cls: False
@@ -47,7 +48,8 @@ meta:
   predict_gene: True
   new_spc: True
   restrict_special_attention: False
-  excl_spc_from_loss: True
+  excl_spc_from_loss: False
+  target_enc_layer_norm: False
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -58,7 +60,7 @@ mask:
   target_mask_size: 50 # this doesn't have meaning in block masking.
   per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
-  special_token_pad_ratio: 0.1
+  special_token_pad_ratio: 0.0
 optimization:
   warmup: 3 # 1
   epochs: 100 # 5
@@ -66,7 +68,7 @@ optimization:
   - 0.9995 # 0.998, 0.9995
   - 1.0
   start_lr: 2.0e-05 # 1.0e-06, 2.0e-05
-  lr: 2.0e-05 # 6.0e-05, 0.000625
+  lr: 6.0e-05 # 6.0e-05, 0.000625
   final_lr: 2.0e-05 # 1.0e-06
   weight_decay: 0.04 # 0.04
   final_weight_decay: 0.4 # 0.4
@@ -76,7 +78,7 @@ optimization:
   lambda_cov: 0.
 state:
   log_freq: 20
-  checkpoint_freq: 1
+  checkpoint_freq: 5
   write_tag: nichejepa
   read_timestamp: ''
   folder_path: null
