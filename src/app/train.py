@@ -131,6 +131,10 @@ def train(args: dict,
         use_sampler = args['data']['use_sampler']
     else:
         use_sampler = False
+    if 'mega_batch_mult_max' in args['data'].keys():
+        mega_batch_mult_max = args['data']['mega_batch_mult_max']
+    else:
+        mega_batch_mult_max = 1000
 
     add_cls = args['meta']['add_cls']
     gt_type = args['meta']['gt_type']
@@ -177,6 +181,10 @@ def train(args: dict,
     else:
         excl_spc_from_loss = False
 
+    if 'target_enc_layer_norm' in args['meta'].keys():
+        target_enc_layer_norm = args['meta']['target_enc_layer_norm']
+    else:
+        target_enc_layer_norm = False
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -418,7 +426,8 @@ def train(args: dict,
                 num_workers=num_workers,
                 drop_last=True,
                 prefetch_factor=(4 if num_workers > 0 else None),
-                persistent_workers=False)
+                persistent_workers=False,
+                mega_batch_mult_max=mega_batch_mult_max)
             train_loaders.append(train_loader)
             train_samplers.append(train_sampler)
 
@@ -434,7 +443,8 @@ def train(args: dict,
             num_workers=num_workers,
             drop_last=True,
             prefetch_factor=(4 if num_workers > 0 else None),
-            persistent_workers=False)
+            persistent_workers=False,
+            mega_batch_mult_max=mega_batch_mult_max)
 
     ipe = len(train_loader)
 
@@ -564,7 +574,7 @@ def train(args: dict,
         #maskA_meter = AverageMeter()
         #maskB_meter = AverageMeter()
 
-        for itr, (udata, masks_enc, masks_pred, masks_attention) in enumerate(train_loader):
+        for itr, (udata, masks_enc, masks_pred, masks_attention, pad_special_tokens) in enumerate(train_loader):
             for key, val in udata.items():
                 udata[key] = val.to(device, non_blocking=True)
             masks_enc = [u.to(device, non_blocking=True) for u in masks_enc]
@@ -590,7 +600,8 @@ def train(args: dict,
                 with torch.no_grad():
                     h, _ = target_encoder(
                         batch=udata, masks_attention=masks_attention)
-                    #h = F.layer_norm(h, (h.size(-1),))
+                    if target_enc_layer_norm:
+                        h = F.layer_norm(h, (h.size(-1),))
                     h = apply_masks(h, masks_pred, concat=False)
 
                 # Forward pass of context encoder
@@ -613,12 +624,12 @@ def train(args: dict,
                 loss = 0.
                 for zi, hi in zip(z, h):
                     if loss_fn_type == 'smooth_l1':
-                        if excl_spc_from_loss:
+                        if excl_spc_from_loss and not pad_special_tokens:
                             loss += F.smooth_l1_loss(zi[:, n_special_tokens:, :], hi[:, n_special_tokens:, :])
                         else:
                             loss += F.smooth_l1_loss(zi, hi)
                     elif loss_fn_type == 'l1':
-                        if excl_spc_from_loss:
+                        if excl_spc_from_loss and not pad_special_tokens:
                             loss += torch.mean(
                                 torch.abs(zi[:, n_special_tokens:, :] - hi[:, n_special_tokens:, :])**loss_exp) / loss_exp
                         else:

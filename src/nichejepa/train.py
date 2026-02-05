@@ -115,6 +115,10 @@ def train(args: dict,
     batch_size = args['data']['batch_size']
     num_workers = args['data']['num_workers']
     pin_memory = args['data']['pin_memory']
+    if 'mega_batch_mult_max' in args['data'].keys():
+        mega_batch_mult_max = args['data']['mega_batch_mult_max']
+    else:
+        mega_batch_mult_max = 1000
     if 'precomputed_n_nonzero_tokens' in args['data'].keys():
         if args['data']['precomputed_n_nonzero_tokens']:
             with open(args['data']['precomputed_n_nonzero_tokens'], "rb") as f: 
@@ -336,7 +340,8 @@ def train(args: dict,
                 num_workers=num_workers,
                 drop_last=False,
                 prefetch_factor=(4 if num_workers > 0 else None),
-                persistent_workers=False)
+                persistent_workers=False,
+                mega_batch_mult_max=mega_batch_mult_max)
             train_loaders.append(train_loader)
             train_samplers.append(train_sampler)
     else:
@@ -351,7 +356,8 @@ def train(args: dict,
             num_workers=num_workers,
             drop_last=False,
             prefetch_factor=(4 if num_workers > 0 else None),
-            persistent_workers=False)
+            persistent_workers=False,
+            mega_batch_mult_max=mega_batch_mult_max)
 
     ipe = len(train_loader)
 

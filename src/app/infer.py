@@ -200,6 +200,11 @@ def infer(args: dict,
     else:
         nz_spc = False
 
+    if 'mega_batch_mult_max' in args['data'].keys():
+        mega_batch_mult_max = args['data']['mega_batch_mult_max']
+    else:
+        mega_batch_mult_max = 1000
+
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
     block_masking = args['mask']['block_masking']
@@ -345,7 +350,8 @@ def infer(args: dict,
         pin_memory=pin_memory,
         num_workers=num_workers,
         drop_last=False,
-        persistent_workers=False)
+        persistent_workers=False,
+        mega_batch_mult_max=mega_batch_mult_max)
     
     _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
             device=device,
@@ -374,7 +380,7 @@ def infer(args: dict,
     emd_list = []
 
 
-    for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
+    for itr, (udata, _, _, masks_attention, pad_special_tokens) in tqdm(enumerate(loader)):
         for key in udata.keys():
             if key != 'cell_id':
                 udata[key] = udata[key].to(device, non_blocking=True)
@@ -1084,7 +1090,8 @@ def embed_dataset(dataset: Dataset,
         pin_memory=pin_memory,
         num_workers=num_workers,
         drop_last=False,
-        persistent_workers=False)
+        persistent_workers=False,
+        mega_batch_mult_max=model_config['data'].get('mega_batch_mult_max', 1000))
 
     # Load model checkpoint
     _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
@@ -1106,7 +1113,7 @@ def embed_dataset(dataset: Dataset,
     if return_token_embeddings:
         all_token_emb_list = []
 
-    for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
+    for itr, (udata, _, _, masks_attention, pad_special_tokens) in tqdm(enumerate(loader)):
         for key in udata.keys():
             if key != 'cell_id':
                 udata[key] = udata[key].to(device, non_blocking=True)
@@ -1735,7 +1742,8 @@ def gene_embed_dataset(dataset: Dataset,
         pin_memory=pin_memory,
         num_workers=num_workers,
         drop_last=False,
-        persistent_workers=False)
+        persistent_workers=False,
+        mega_batch_mult_max=model_config['data'].get('mega_batch_mult_max', 1000))
 
     # Load model checkpoint
     _, _, target_encoder, _, _, start_epoch, _ = load_checkpoint(
@@ -1764,7 +1772,7 @@ def gene_embed_dataset(dataset: Dataset,
     MAX_OCC = model_config['data']['n_segments'] -1 
 
 
-    for itr, (udata, _, _, masks_attention) in tqdm(enumerate(loader)):
+    for itr, (udata, _, _, masks_attention, pad_special_tokens) in tqdm(enumerate(loader)):
         for key in udata.keys():
             if key != 'cell_id':
                 udata[key] = udata[key].to(device, non_blocking=True)
