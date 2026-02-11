@@ -938,7 +938,7 @@ def tokenize_adata(adata: ad.AnnData,
 def embed_dataset(dataset: Dataset,
                   model_folder_path: str,
                   emb_layer: int | None = None,
-                  agg_excluded_tokens: list[int] | None = None,
+                  agg_excluded_genes: list[str] | None = None,
                   top_k: int | None = None,
                   batch_size: int = 128,
                   pin_memory: bool = False,
@@ -957,8 +957,8 @@ def embed_dataset(dataset: Dataset,
         normalization factors.
     emb_layer:
         Layer for which to retrieve the embedding.
-    agg_excluded_tokens:
-        List of tokens to be excluded from the aggregation.
+    agg_excluded_genes:
+        List of gene ensembl IDs to be excluded from the aggregation.
     top_k:
         Include only top_k genes in aggregation.
     batch_size:
@@ -1010,6 +1010,12 @@ def embed_dataset(dataset: Dataset,
     #n_special_values = sum(
     #    1 for key in token_dict if "spv" in key) # this only works now because of the dummy special values
     n_special_values = model_config['data'].get('n_special_values', 0)
+
+    if agg_excluded_genes:
+        agg_excluded_tokens = [
+            token_dict[gene] for gene in agg_excluded_genes]
+    else:
+        agg_excluded_tokens = None
 
     print('==================================================')
     print('STEP 2: GENERATING EMBEDDINGS...')
