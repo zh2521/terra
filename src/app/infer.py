@@ -63,7 +63,7 @@ def infer(args: dict,
                             'avg',
                             'weighted_avg'] = 'avg',
           masked_tokens: list[int] | None = None,
-          agg_excluded_tokens: list[int] | None = None,
+          agg_excluded_genes: list[int] | None = None,
           top_k: int | None = None,
           return_gene: bool=True,
           return_cosine_sim: bool=False,
@@ -101,7 +101,7 @@ def infer(args: dict,
     masked_tokens:
         List of tokens to be masked by the attention mask during
         inference.
-    agg_excluded_tokens:
+    agg_excluded_genes:
         List of tokens to be excluded from the aggregation.
     top_k:
         Include only top_k genes in aggregation.
@@ -238,6 +238,12 @@ def infer(args: dict,
             1 for key in token_dict if "spv" in key) # this only works now because of the dummy special values
     max_special_tokens = sum(1 for key in token_dict if "cls" in key) + sum(
         1 for key in token_dict if "spt" in key)
+
+    if agg_excluded_genes:
+        agg_excluded_tokens = [
+            token_dict[gene] for gene in agg_excluded_genes]
+    else:
+        agg_excluded_tokens = None
 
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
@@ -1281,6 +1287,9 @@ def _perturb_batch_with_df(
     batch: dict,
     df: pd.DataFrame,
     seq_len_cell: int = 256,
+    n_segments: int = 11,
+    pad_gene_tokens: bool = True,
+    adjust_positions: bool = False,
     ) -> dict:
     """
     Modify batch of token sequences in place based on config defined in
@@ -1338,10 +1347,33 @@ def _perturb_batch_with_df(
             ] = True
         if row["perturbation_type"] == "knockout":
             batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
-            batch["gene_tokens"][cell_pert_idx, abs_gene_pert_idx] = 0
+            if pad_gene_tokens:
+                batch["gene_tokens"][cell_pert_idx, abs_gene_pert_idx] = 0
         elif row["perturbation_type"] == "foldchange":
             batch["gene_expr"][
                 cell_pert_idx, abs_gene_pert_idx] *= row["foldchange"]
+
+        if adjust_positions:
+            gt = batch["gene_tokens"] # (B, n_segments*seq_len_cell)
+            ge = batch["gene_expr"] # (B, n_segments*seq_len_cell)
+
+            B = gt.shape[0]
+            gt = gt.reshape(B, n_segments, seq_len_cell)
+            ge = ge.reshape(B, n_segments, seq_len_cell)
+
+            # mask: True where token==0; sort so False first, True last (stable keeps order)
+            mask = (gt == 0)
+
+            # indices shape: (B, n_segments, seq_len_cell)
+            idx = torch.argsort(mask.to(torch.int64), dim=-1, stable=True)
+
+            # reorder both tensors with same indices
+            gt_sorted = torch.gather(gt, dim=-1, index=idx)
+            ge_sorted = torch.gather(ge, dim=-1, index=idx)
+
+            # flatten back to (B, n_segments*seq_len_cell)
+            batch["gene_tokens"] = gt_sorted.reshape(B, n_segments * seq_len_cell)
+            batch["gene_expr"] = ge_sorted.reshape(B, n_segments * seq_len_cell)
 
         #if len(cell_pert_idx) == 0:
         #    print(f"No qualifying cells for perturbation with row idx: {idx}.")
@@ -1354,10 +1386,13 @@ def perturb_dataset(dataset: Dataset,
                     perturb_df: pd.DataFrame,
                     model_folder_path: str,
                     seq_len_cell: int = 256,
+                    n_segments: int = 11,
                     nproc: int = 4,
                     batch_size: int = 1000,
                     keep_in_memory: bool = False,
                     return_only_perturbed_cells: bool = False,
+                    pad_gene_tokens: bool = True,
+                    adjust_positions: bool = False,
                     ) -> Dataset:
     """
     Perturb a huggingface dataset.
@@ -1384,6 +1419,9 @@ def perturb_dataset(dataset: Dataset,
             _perturb_batch_with_df,
             df=perturb_df,
             seq_len_cell=seq_len_cell,
+            n_segments=n_segments,
+            pad_gene_tokens=pad_gene_tokens,
+            adjust_positions=adjust_positions
         )
     
     else:
@@ -1437,7 +1475,7 @@ def harmonize_tokenize_embed_pipeline(
         save_dataset_path: Path | str | None = None,
         num_shards: int = 32,
         emb_layer: int | None = None,
-        agg_excluded_tokens: list[int] | None = None,
+        agg_excluded_genes: list[int] | None = None,
         top_k: int | None = None,
         batch_size: int = 128,
         pin_memory: bool = False,
@@ -1481,7 +1519,7 @@ def harmonize_tokenize_embed_pipeline(
         Number of shards with which huggingface dataset is saved.
     emb_layer:
         Layer for which to retrieve the embedding.
-    agg_excluded_tokens:
+    agg_excluded_genes:
         List of tokens to be excluded from the aggregation.
     top_k:
         Include only top_k genes in aggregation.
@@ -1566,7 +1604,7 @@ def harmonize_tokenize_embed_pipeline(
         dataset=dataset,
         model_folder_path=model_folder_path,
         emb_layer=emb_layer,
-        agg_excluded_tokens=agg_excluded_tokens,
+        agg_excluded_genes=agg_excluded_genes,
         top_k=top_k,
         batch_size=batch_size,
         pin_memory=pin_memory,
