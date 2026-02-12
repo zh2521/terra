@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 128 # 256 # 224, 256, 128, 288
+  batch_size: 128 # 224, 256, 128, 288
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -40,11 +40,11 @@ meta:
   gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
-  cell_pos_enc: 'segment' # 'segment', 'coord'
+  cell_pos_enc: 'coord' # 'segment', 'coord'
   enc_depth: 12
-  enc_emb_dim: 768 # 384, 768
-  pred_depth: 12 # 12
-  pred_emb_dim: 384 # 384, 192, 384
+  enc_emb_dim: 384 # 384, 768
+  pred_depth: 6 # 12
+  pred_emb_dim: 192 # 384, 192, 384
   num_heads: 6 # 12, 6
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'], ['assay', 'batch'],['assay', 'gene_panel', 'batch'], ['tissue', 'assay', 'gene_panel', 'batch']
@@ -66,7 +66,7 @@ mask:
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.2 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   special_token_pad_ratio: 1.0
 optimization:

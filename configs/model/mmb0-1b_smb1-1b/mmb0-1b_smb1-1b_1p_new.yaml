@@ -32,7 +32,7 @@ data:
   n_special_values: 200
   vocab_size: 23407
   nz_spc: True
-  mega_batch_mult_max: 10000
+  mega_batch_mult_max: 1000
 meta:
   api_version: 'v3'
   add_cls: False
@@ -44,7 +44,7 @@ meta:
   enc_depth: 3
   enc_emb_dim: 768
   pred_depth: 1
-  pred_emb_dim: 768 # 384
+  pred_emb_dim: 192 # 384, 768
   num_heads: 8
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'] # ['batch', 'assay'] # ['batch'] []
@@ -56,7 +56,7 @@ meta:
   predict_gene: True
   new_spc: False
   excl_spc_from_loss: False
-  target_enc_layer_norm: False
+  target_enc_layer_norm: True
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -65,7 +65,7 @@ mask:
   targets_list: null
   context_mask_size: 200 # this doesn't have meaning in block masking.
   target_mask_size: 50 # this doesn't have meaning in block masking.
-  per_block_mask_ratio: 0.6 # 0.2, 0.4, 0.6, 0.8
+  per_block_mask_ratio: 0.2 # 0.2, 0.4, 0.6, 0.8
   sample_segments: True
   restrict_special_attention: False
   special_token_pad_ratio: 0.
