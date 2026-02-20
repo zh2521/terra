@@ -13,11 +13,11 @@ from typing import Literal
 import torch
 #from peft import get_peft_model, LoraConfig
 
-import nichejepa.models_new.gene_transformers as gt
-from nichejepa.models_new.multimask import (EncoderMultiMaskWrapper,
+import nichejepa.models.gene_transformers as gt
+from nichejepa.models.multimask import (EncoderMultiMaskWrapper,
                                         PredictorMultiMaskWrapper)
-from nichejepa.models_new.utils import trunc_normal_
-from nichejepa.utils_new.schedulers import (CosineWDSchedule,
+from nichejepa.models.utils import trunc_normal_
+from nichejepa.utils.schedulers import (CosineWDSchedule,
                                         WarmupCosineSchedule)
 
 

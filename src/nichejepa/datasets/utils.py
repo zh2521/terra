@@ -2,16 +2,14 @@ import json
 import pickle
 import random
 import requests
-from typing import List, Literal, Tuple, Union
+from typing import Literal
 
 import datasets
+import numpy as np
 from datasets import load_from_disk
-from sklearn.model_selection import train_test_split
-
-from ..utils.embedding import collect_adata_from_folder
 
 
-def get_ensembl_ids(gene_names: List,
+def get_ensembl_ids(gene_names: list[str],
                     species: Literal['homo_sapiens',
                                      'mus_musculus'],
                     ) -> dict:
@@ -32,7 +30,8 @@ def get_ensembl_ids(gene_names: List,
     """
     server = 'https://rest.ensembl.org'
     endpoint = f'/lookup/symbol/{species}'
-    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+    headers = {
+        'Content-Type': 'application/json', 'Accept': 'application/json'}
 
     data = {'symbols': gene_names}
     response = requests.post(f'{server}{endpoint}',
@@ -52,103 +51,97 @@ def get_ensembl_ids(gene_names: List,
         response.raise_for_status()
 
 
-def prepare_dataset(args: dict,
-                    split_dataset: bool=True,
-                    ) -> Union[Tuple[datasets.Dataset, datasets.Dataset],
-                               datasets.Dataset]:
-    """
-    Prepare dataset by loading it, determining sample size, and splitting it
-    into training and test sets based on `split_dataset`.
-
-    Parameters
-    -----------
-    args:
-        A dictionary containing the configuration parameters, including:
-            - tokenized_data_folder_path: The path to the tokenized dataset.
-            - sample_subset: Whether to sample a subset of the dataset.
-            - sample_size: The size of the dataset to sample.
-            - split: The train-test split ratio.
-            - stratify: Whether to stratify the dataset based on cell types
-                        during the split.
-            - random_state: The random seed for reproducibility.
-    split_dataset:
-        If 'True', split the dataset into train and test datasets.
-
-    Returns
-    -----------
-    if `split_dataset` is True:
-        train_dataset:
-            The training portion of the dataset.
-        test_dataset:
-            The test portion of the dataset.
-    else:
-        dataset:
-            The combined training and test portion of the dataset with a `split`
-            label.
-    """
-    # Load dataset from the specified path
+def prepare_dataset(args: dict, train_mode: bool = False):
     data_path = args['data']['tokenized_data_folder_path']
-    dataset = load_from_disk(data_path)
+    ds = load_from_disk(data_path)
 
+    # 1) Remove obviously unneeded columns but KEEP cell_id for now
+    fields_to_remove = [
+        'cell_degrees','batch_value_token','gene_panel_value_token',
+        'assay_value_token','species_value_token','tissue_value_token',
+        'cls_tokens','cell_total_counts','cell_n_probed_genes'
+    ]
+    if 'cell_pos_enc' not in args['meta'] or args['meta']['cell_pos_enc'] == 'segment':
+        fields_to_remove += ['rel_x_coord','rel_y_coord']
+
+    existing = [c for c in fields_to_remove if c in ds.column_names]
+    if existing:
+        ds = ds.remove_columns(existing)
+
+    # Early outs with precomputed splits
+    if args['data'].get('precomputed_epoch_splits'):
+        with open(args['data']['precomputed_epoch_splits'], 'rb') as f:
+            epoch_indices = pickle.load(f)
+        splits = [ds.select(idx) for idx in epoch_indices]
+        # Drop cell_id if training
+        if train_mode and 'cell_id' in splits[0].column_names:
+            splits = [s.remove_columns(['cell_id']) for s in splits]
+        # Set minimal torch format on each split
+        for i in range(len(splits)):
+            cols = [c for c in splits[i].column_names if c != 'cell_id' or not train_mode]
+            splits[i].set_format(type="torch", columns=cols, output_all_columns=False)
+        return splits, None, None
     if args['data'].get('precomputed_split'):
         with open(args['data']['precomputed_split'], 'rb') as f:
             indices = pickle.load(f)
-        dataset = dataset.select(indices)
-        if args['data'].get('chunk_dataset'):
-            chunk_size = 12508671
-            chunks = []
-            for start in range(0, len(dataset), chunk_size):
-                end = min(start + chunk_size, len(dataset))
-                indices = list(range(start, end))
-                chunk = dataset.select(indices)
-                chunks.append(chunk)
-            return chunks, None
-        else:
-            return dataset, dataset
+        ds = ds.select(indices)
+        # Drop cell_id if training
+        if train_mode and 'cell_id' in ds.column_names:
+            ds = ds.remove_columns(['cell_id'])
+        # Set minimal torch format
+        cols = [c for c in ds.column_names if c != 'cell_id' or not train_mode]
+        ds.set_format(type="torch", columns=cols, output_all_columns=False)
+        return ds, None, None
 
-    # Sample subset if specified
-    if args['data']['sample_subset']:
-        total_size = len(dataset)
-        sample_size = min(args['data']['sample_size'], total_size)
-        rng = random.Random(args['data']['random_state'])
-        sampled_indices = rng.sample(range(total_size), sample_size)
-        dataset = dataset.select(sampled_indices)
+    # Early outs without test and validation sets
+    test_set = set(args['data'].get('test_batch_ids', []) or [])
+    val_set  = set(args['data'].get('val_batch_ids', [])  or [])
 
-    # Prepare for dataset split
-    indices = list(range(len(dataset)))
+    if len(test_set) == 0 and len(val_set) == 0:
+        # Drop cell_id if training
+        if train_mode and 'cell_id' in ds.column_names:
+            ds = ds.remove_columns(['cell_id'])
+        # Set minimal torch format
+        cols = [c for c in ds.column_names if c != 'cell_id' or not train_mode]
+        ds.set_format(type="torch", columns=cols, output_all_columns=False)
+        return ds, None, None
 
-    # Prepare train-test split parameters
-    split_params = {'test_size': args['data']['split'],
-                    'random_state': args['data']['random_state']}
-    if args['data']['stratify']:
-        split_params['stratify'] = dataset['cell_types']
+    # Vectorized batch_id extraction
+    cell_ids = np.asarray(ds['cell_id'], dtype='U')  # zero-copy from Arrow buffers
+    p1 = np.char.partition(cell_ids, '_')
+    first = p1[:, 0]
+    rest = p1[:, 2]
+    p2 = np.char.partition(rest, '_')
+    second = p2[:, 0]
+    batch_ids = np.char.add(np.char.add(first, '_'), second)  # "<part0>_<part1>"
 
-    # Perform train test split
-    if args['data']['split'] > 0:
-        train_indices, test_indices = train_test_split(indices, **split_params)
-    elif args['data']['test_batch_ids']:
-        cell_ids = list(dataset['cell_id'])
-        test_batch_mask = [
-            any(batch_id in cell_id for batch_id in args['data'][
-                'test_batch_ids']) for cell_id in cell_ids]
-        train_indices = [
-            index for index, value in enumerate(test_batch_mask) if not value]
-        test_indices = [
-            index for index, value in enumerate(test_batch_mask) if value]
-    else:
-        train_indices = indices
-        test_indices = indices
+    # Masks -> indices (single pass)
+    test_mask = np.isin(batch_ids, np.fromiter(test_set, dtype=batch_ids.dtype)) if test_set else np.zeros(len(batch_ids), dtype=bool)
+    val_mask  = np.isin(batch_ids, np.fromiter(val_set,  dtype=batch_ids.dtype)) if val_set  else np.zeros(len(batch_ids), dtype=bool)
+    train_mask = ~(test_mask | val_mask)
 
-    if split_dataset:
-        train_dataset = dataset.select(train_indices)
-        test_dataset = dataset.select(test_indices)
+    train_idx = np.nonzero(train_mask)[0].tolist()
+    val_idx   = np.nonzero(val_mask)[0].tolist()
+    test_idx  = np.nonzero(test_mask)[0].tolist()
 
-        return train_dataset, test_dataset
-    else:
-        split_labels = {i: 'train' for i in train_indices}
-        split_labels.update({i: 'test' for i in test_indices})
-        def add_split_label(example, idx):
-            return {'split': split_labels[idx]}
-        dataset = dataset.map(add_split_label, with_indices=True)
+    train_ds = ds.select(train_idx)
+    val_ds   = ds.select(val_idx)
+    test_ds  = ds.select(test_idx)
 
-        return dataset
+    # Now drop cell_id for training if requested
+    if train_mode and 'cell_id' in train_ds.column_names:
+        train_ds = train_ds.remove_columns(['cell_id'])
+        if 'cell_id' in val_ds.column_names:  val_ds  = val_ds.remove_columns(['cell_id'])
+        if 'cell_id' in test_ds.column_names: test_ds = test_ds.remove_columns(['cell_id'])
+
+    # Minimal torch formatting per split
+    def set_minimal_format(d):
+        cols = [c for c in d.column_names if c != 'cell_id' or not train_mode]
+        d.set_format(type="torch", columns=cols, output_all_columns=False)
+        return d
+
+    train_ds = set_minimal_format(train_ds)
+    val_ds   = set_minimal_format(val_ds)
+    test_ds  = set_minimal_format(test_ds)
+
+    return train_ds, val_ds, test_ds

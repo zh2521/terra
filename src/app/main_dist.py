@@ -3,9 +3,9 @@ import torch
 
 import logging
 
-import torch.multiprocessing as mp
+#import torch.multiprocessing as mp
 import torch.distributed as dist
-from nichejepa.train import train
+from app.train import train
 from nichejepa.datasets.utils import prepare_dataset
 from nichejepa.utils.config import create_params_from_YAML_wandb_config
 import wandb
@@ -141,10 +141,10 @@ def main():
     print(f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}")
 
     # Set multiprocessing start method
-    try:
-        mp.set_start_method("spawn", force=True)
-    except RuntimeError as e:
-        logger.info(f"Multiprocessing start method unchanged: {e}")
+    #try:
+    #    mp.set_start_method("spawn", force=True)
+    #except RuntimeError as e:
+    #    logger.info(f"Multiprocessing start method unchanged: {e}")
 
     torch.cuda.set_device(LOCAL_RANK)
 
@@ -159,10 +159,10 @@ def main():
     dist.barrier()
     setup_for_distributed(LOCAL_RANK == 0)
 
-    dataset, _ = prepare_dataset(params)
+    train_dataset, val_dataset, test_dataset = prepare_dataset(params, train_mode=True)
     train(params,
-          dataset,
-          resume_preempt=False,
+          train_dataset,
+          test_dataset,
           save_folder_path=folder_path,
           LOCAL_RANK=LOCAL_RANK,
           WORLD_RANK=WORLD_RANK)

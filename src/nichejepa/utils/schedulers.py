@@ -1,26 +1,45 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture.
-Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/utils/schedulers.py
 (05.06.2024).
 """
 
 import math
 
+import torch
+
 
 class WarmupCosineSchedule(object):
+    """
+    WarmupCosineSchedule class to schedule learning rate.
+
+    Parameters
+    ----------
+    optimizer:
+        Optimizer.
+    warmup_steps:
+        Number of warmup steps.
+    start_lr:
+        Starting learning rate.
+    ref_lr:
+        Reference learning rate.
+    T_max:
+        Maximum number of training steps.
+    last_epoch:
+        Last epoch.
+    final_lr:
+        Final learning rate.
+    """
     def __init__(self,
-                 optimizer,
+                 optimizer: torch.optim.Optimizer,
                  warmup_steps: int,
                  start_lr: float,
                  ref_lr: float,
-                 T_max,
-                 last_epoch: int=-1,
-                 final_lr: float=0.):
-        """
-        WarmupCosineSchedule class to schedule learning rate.
-        """ 
+                 T_max: int,
+                 last_epoch: int = -1,
+                 final_lr: float = 0.):
         self.optimizer = optimizer
         self.start_lr = start_lr
         self.ref_lr = ref_lr
@@ -39,8 +58,9 @@ class WarmupCosineSchedule(object):
             progress = float(self._step - self.warmup_steps) / float(
                 max(1, self.T_max))
             new_lr = max(self.final_lr,
-                         self.final_lr + (self.ref_lr - self.final_lr) * 0.5 * (
-                            1. + math.cos(math.pi * progress)))
+                         self.final_lr + (
+                            self.ref_lr - self.final_lr) * 0.5 * (
+                                1. + math.cos(math.pi * progress)))
 
         for group in self.optimizer.param_groups:
             group['lr'] = new_lr
@@ -49,14 +69,25 @@ class WarmupCosineSchedule(object):
 
 
 class CosineWDSchedule(object):
+    """
+    CosineWDSchedule class to schedule weight decay.
+
+    Parameters
+    ----------
+    optimizer:
+        Optimizer.
+    ref_wd:
+        Reference weight decay.
+    T_max:
+        Maximum number of training steps.
+    final_wd:
+        Final weight decay.
+    """
     def __init__(self,
                  optimizer,
                  ref_wd,
                  T_max,
-                 final_wd: float=0.):
-        """
-        CosineWDSchedule class to schedule weight decay.
-        """
+                 final_wd: float = 0.):
         self.optimizer = optimizer
         self.ref_wd = ref_wd
         self.final_wd = final_wd

@@ -1,9 +1,16 @@
-from typing import Optional, Tuple
+"""
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transformer.py
+(05.06.2024).
+"""
+
+from typing import Literal
 
 import torch
 import torch.nn as nn
-
-from .utils import drop_path
+from torch.nn.attention import SDPBackend, sdpa_kernel
 
 
 class Attention(nn.Module):
@@ -25,14 +32,17 @@ class Attention(nn.Module):
         Dropout ratio in attention layer.
     proj_drop:
         Dropout ratio in projection layer.
+    use_flash_attention:
+        If `True`, use flash_attention.
     """
     def __init__(self,
                  dim: int,
-                 num_heads: int=8,
-                 qkv_bias: bool=False,
-                 qk_scale: Optional[float]=None,
+                 num_heads: int = 8,
+                 qkv_bias: bool = False,
+                 qk_scale: float | None = None,
                  attn_drop: float=0.0,
                  proj_drop: float=0.0,
+                 use_flash_attention: bool = True,
                  ):
         super().__init__()
         self.num_heads = num_heads
@@ -44,11 +54,12 @@ class Attention(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
+        self.use_flash_attention = use_flash_attention
 
     def forward(self,
                 x: torch.Tensor,
-                masks: Optional[torch.Tensor]=None,
-                ) -> Tuple[torch.Tensor, torch.Tensor]:
+                masks: torch.Tensor | None = None
+                ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the attention module.
 
@@ -70,19 +81,27 @@ class Attention(nn.Module):
 
         # Obtain query, key and value vectors
         qkv = self.qkv(x).reshape(
-            B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+            B, N, 3, self.num_heads, C // self.num_heads).permute(
+                2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
 
-        # Compute and mask attention
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        if masks is not None:
-            attn = attn.masked_fill(masks == 0, float('-inf'))
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        # Compute dot product of attention and value vectors and apply
-        # projection
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        if self.use_flash_attention:
+            if masks is not None:
+                x = nn.functional.scaled_dot_product_attention(
+                    q, k, v, attn_mask=masks!= 0, scale=self.scale)
+                attn=None
+            else:
+                x = nn.functional.scaled_dot_product_attention(
+                    q, k, v, scale=self.scale)
+                attn=None
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            if (masks is not None):
+                attn = attn.masked_fill(masks == 0, float('-inf'))
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+            x = (attn @ v)
+        x = x.transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
 
@@ -100,47 +119,56 @@ class Block(nn.Module):
     num_heads:
         Number of attention heads.
     mlp_ratio:
-        Ratio to determine number of hidden dimensions in MLP module compared to
-        input and output dimensions.
+        Ratio to determine number of hidden dimensions in MLP module
+        compared to input and output dimensions.
     qkv_bias:
-        If 'True', include bias in query, key, and value layers of Attention
-        module.
+        If 'True', include bias in query, key, and value layers of
+        Attention module.
     qk_scale:
         Scaling factor for query and key vectors of Attention module.
     drop:
-        Dropout ratio in projection layer of Attention module and in MLP module.
+        Dropout ratio in projection layer of Attention module and in MLP
+        module.
     attn_drop:
         Dropout ratio in attention layer of Attention module.
-    drop_path:
-        Probability for dropping paths in Drop Path module.
     act_layer:
         Activation layer used in MLP module.
+    use_layer_norm:
+        If `True`, use LayerNorm, else use dynamic tanh.
     norm_layer:
         Normalization layer.
+    use_flash_attention:
+        If `True`, use flash_attention.
     """
     def __init__(self,
                  dim: int,
                  num_heads: int,
-                 mlp_ratio: float=4.,
-                 qkv_bias: bool=False,
-                 qk_scale: Optional[float]=None,
-                 drop: float=0.0,
+                 mlp_ratio: float = 4.,
+                 qkv_bias: bool = False,
+                 qk_scale: float | None = None,
+                 drop: float = 0.0,
                  attn_drop: float=0.0,
-                 drop_path: float=0.0,
                  act_layer: nn.modules.activation=nn.GELU,
+                 use_layer_norm: bool=True,
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
+                 use_flash_attention: bool=True,
                  ):
         super().__init__()
-        self.norm1 = norm_layer(dim)
+        if use_layer_norm:
+            self.norm1 = norm_layer(dim)
+        else:
+            self.norm1 = DyT(dim)
         self.attn = Attention(dim,
                               num_heads=num_heads,
                               qkv_bias=qkv_bias,
                               qk_scale=qk_scale,
                               attn_drop=attn_drop,
-                              proj_drop=drop)
-        self.drop_path = DropPath(
-            drop_path) if drop_path > 0. else nn.Identity()
-        self.norm2 = norm_layer(dim)
+                              proj_drop=drop,
+                              use_flash_attention=use_flash_attention)
+        if use_layer_norm:
+            self.norm2 = norm_layer(dim)
+        else:
+            self.norm2 = DyT(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = MLP(in_features=dim,
                        hidden_features=mlp_hidden_dim,
@@ -149,8 +177,8 @@ class Block(nn.Module):
 
     def forward(self,
                 x: torch.Tensor,
-                return_attention: bool=False,
-                masks: Optional[torch.Tensor]=None,
+                return_attention: bool = False,
+                masks: torch.Tensor | None = None,
                 ) -> torch.Tensor:
         """
         Forward pass of the transformer block.
@@ -160,8 +188,8 @@ class Block(nn.Module):
         x:
             Input to the transformer block with shape (B, N, D).
         return_attention:
-            If 'True', return attention vector instead of transformer block
-            output.
+            If `True`, return attention vector instead of transformer
+            block output.
         masks:
             Mask used in Attention module.
 
@@ -174,60 +202,95 @@ class Block(nn.Module):
                             masks=masks)
         if return_attention:
             return attn
-        x = x + self.drop_path(y)
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
+        x = x + y
+        x = x + self.mlp(self.norm2(x))
 
         return x
 
 
-class ValueEmbWeightsProjection(nn.Module):
+class ClassificationModel(nn.Module):
+    """
+    Add a classification head to a base model. Adds a fully connected layer or a multi-layer perceptron (MLP)
+    for classification based on the output of a base model.
+    """
+
     def __init__(self,
-                 dim=100):
+                 base_model: nn.Module,
+                 gt_type: Literal['rank', 'counts'],
+                 num_classes: int, use_mlp: bool = False, hidden_dim: int = 512):
         """
-        Project counts to value embedding weights.
+        Initialize the classification head.
 
         Parameters
         -----------
-        dim:
-            Dimensionality of the value embedding.        
+        base_model:
+            The base model whose output is used for classification.
+        num_classes:
+            The number of output classes for classification.
+        use_mlp:
+            Whether to use an MLP head (default is False, which uses a simple linear layer).
+        hidden_dim:
+            The dimension of the hidden layer in the MLP (default is 512).
         """
-        super().__init__()
-        self.linear1 = nn.Linear(1, dim)
-        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
-        self.linear2 = nn.Linear(dim, dim)
-        self.softmax = nn.Softmax(dim=-1)
-    
-    def forward(self, x):
-        x = self.linear1(x)
-        x = self.leaky_relu(x)
-        out = self.linear2(x)
-        out = x + out # residual connection
-        out = self.softmax(out)
+        super(ClassificationModel, self).__init__()
+
+        self.base_model = base_model
+        self.gt_type = gt_type
+
+        if use_mlp:
+            # Using MLP with one hidden layer
+            self.classification_head = nn.Sequential(
+                nn.Linear(base_model.output_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, num_classes)
+            )
+        else:
+            # Using a simple linear layer
+            self.classification_head = nn.Linear(
+                base_model.output_dim, num_classes)
+
+    def forward(self, **base_model_kwargs) -> torch.Tensor:
+        """
+        Forward pass through the classification head.
+
+        Parameters:
+        - x (Tensor): The input tensor (feature vector) from the base model.
+
+        Returns:
+        - Tensor: The class logits.
+        """
+        h, _= self.base_model(**base_model_kwargs)
+
+        # Normalize over feature dim
+        h = F.layer_norm(h, (h.size(-1),))
         
-        return out
+        logits = self.classification_head(h)
+        return logits
 
 
-class DropPath(nn.Module):
+class DyT(nn.Module):
     """
-    DropPath module to drop paths per observation, applied in main path of
-    residual blocks of transformer blocks, with stochastically increasing drop
-    path rate per depth.
+    Dynamic tanh module.
 
     Parameters
     -----------
-    drop_prob:
-        Probability for dropping paths.    
+    num_features:
+        Number of features.
+    alpha_init_value:
+        Initial value for alpha.
     """
     def __init__(self,
-                 drop_prob: float=0.0,
+                 num_features: int,
+                 alpha_init_value: float = 0.5
                  ):
         super().__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self,
-                x: torch.Tensor
-                ) -> torch.Tensor:
-        return drop_path(x, self.drop_prob, self.training)
+        self.alpha = nn.Parameter(torch.ones(1) * alpha_init_value)
+        self.weight = nn.Parameter(torch.ones(num_features))
+        self.bias = nn.Parameter(torch.zeros(num_features))
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.tanh(self.alpha * x)
+        return x * self.weight + self.bias
 
 
 class MLP(nn.Module):
@@ -239,11 +302,11 @@ class MLP(nn.Module):
     in_features:
         Number of input features.
     hidden_features:
-        Number of hidden features. If not specified, equals number of input
-        features.
+        Number of hidden features. If not specified, equals number of
+        input features.
     out_features:
-        Number of output features. If not specified, equals number of input
-        features.
+        Number of output features. If not specified, equals number of
+        input features.
     act_layer:
         Activation layer after first fully connected layer.
     drop:
@@ -251,10 +314,10 @@ class MLP(nn.Module):
     """
     def __init__(self,
                  in_features: int, 
-                 hidden_features: Optional[int]=None,
-                 out_features: Optional[int]=None,
-                 act_layer: nn.modules.activation=nn.GELU,
-                 drop: float=0.0,
+                 hidden_features: int | None = None,
+                 out_features: int | None = None,
+                 act_layer: nn.modules.activation = nn.GELU,
+                 drop: float = 0.0,
                  ):
         super().__init__()
         out_features = out_features or in_features
@@ -278,7 +341,8 @@ class MLP(nn.Module):
         Returns
         -----------
         x:
-            Output of the MLP module with shape (B, N, O), by default O=I.
+            Output of the MLP module with shape (B, N, O), by default
+            O=I.
         """
         x = self.fc1(x)
         x = self.act(x)
@@ -287,3 +351,31 @@ class MLP(nn.Module):
         x = self.drop(x)
 
         return x
+
+
+class ValueEmbWeightsProjection(nn.Module):
+    def __init__(self,
+                 dim: int = 100
+                 ):
+        """
+        Project counts to value embedding weights.
+
+        Parameters
+        -----------
+        dim:
+            Dimensionality of the value embedding.        
+        """
+        super().__init__()
+        self.linear1 = nn.Linear(1, dim)
+        self.leaky_relu = nn.LeakyReLU(negative_slope=0.1)
+        self.linear2 = nn.Linear(dim, dim)
+        self.softmax = nn.Softmax(dim=-1)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.linear1(x)
+        x = self.leaky_relu(x)
+        out = self.linear2(x)
+        out = x + out # residual connection
+        out = self.softmax(out)
+        
+        return out

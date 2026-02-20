@@ -39,14 +39,14 @@ from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
 from app.helper import init_model, init_opt, load_checkpoint
-from nichejepa.datasets_new.cell_datasets import init_cell_dataset
-from nichejepa.datasets_new.dataloaders import init_dataloader_and_sampler
-from nichejepa.masks_new.block_masking  import BlockMaskCollator
-from nichejepa.masks_new.cell_masking import CellMaskCollator
-from nichejepa.masks_new.utils import apply_masks
-from nichejepa.models_new.utils import repeat_interleave_batch
-from nichejepa.utils_new.distributed import init_distributed
-from nichejepa.utils_new.logging import (AverageMeter,
+from nichejepa.datasets.cell_datasets import init_cell_dataset
+from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
+from nichejepa.masks.block_masking  import BlockMaskCollator
+from nichejepa.masks.cell_masking import CellMaskCollator
+from nichejepa.masks.utils import apply_masks
+from nichejepa.models.utils import repeat_interleave_batch
+from nichejepa.utils.distributed import init_distributed
+from nichejepa.utils.logging import (AverageMeter,
                                      CSVLogger,
                                      grad_logger)
 

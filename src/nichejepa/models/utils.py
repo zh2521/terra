@@ -1,7 +1,7 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf. Comput.
-Vis. Pattern Recognit. 15619–15629 (2023);
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/utils/tensors.py
 (05.06.2024).
 """
@@ -22,12 +22,13 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     Parameters
     -----------
     embed_dim:
-        Output dimension of the positional embedding (for each position). Has to
-        be divisible by 2.
+        Output dimension of the positional embedding (for each
+        position). Has to be divisible by 2.
     n_zero_pos:
         Number of positions to be embedded with 0s.
     n_sincos_pos:
-        Number of positions to be embedded with sin cos positional embeddings.
+        Number of positions to be embedded with sin cos positional
+        embeddings.
 
     Returns
     -----------
@@ -45,48 +46,24 @@ def get_1d_sincos_pos_embed(embed_dim: int,
     return pos_embed
 
 
-def drop_path(x: torch.Tensor,
-              drop_prob: float=0.0,
-              training: bool=False,
-              ) -> torch.Tensor:
+def repeat_interleave_batch(x: torch.Tensor, B: int, repeat: int
+                            ) -> torch.Tensor:
     """
-    Helper function for forward pass of DropPath module.
+    Helper function to repeat tensors across batch dimension.
 
     Parameters
     -----------
     x:
-        Input to DropPath module forward pass.
-    drop_prob:
-        Probability for dropping paths.
-    training:
-        If 'True', do not drop paths.
+        Tensor to repeat.
+    B:
+        Batch size.
+    repeat:
+        Number of times to repeat the tensor.   
 
     Returns
     -----------
-    output:
-        Output of DropPath module forward pass, with some paths dropped (set to
-        0) and others scaled.
-    """
-    if drop_prob == 0. or not training:
-        return x
-    keep_prob = 1 - drop_prob
-    
-    # Create binary random tensor
-    shape = (x.shape[0],) + (1,) * (x.ndim - 1) # works with tensors of diff dim
-    random_tensor = keep_prob + torch.rand(shape,
-                                           dtype=x.dtype,
-                                           device=x.device)
-    random_tensor.floor_()
-
-    # Drop some paths by setting them to 0 and scale rest to keep sum consistent
-    output = x.div(keep_prob) * random_tensor
-
-    return output
-
-
-def repeat_interleave_batch(x, B, repeat):
-    """
-    Helper function to repeat tensors across batch dimension.
+    x:
+        Tensor with repeated elements.
     """
     N = len(x) // B
     x = torch.cat(
@@ -97,26 +74,50 @@ def repeat_interleave_batch(x, B, repeat):
     return x
 
 
-def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
+def trunc_normal_(tensor: torch.Tensor,
+                  mean: float = 0.,
+                  std: float = 1.,
+                  a: float = -2.,
+                  b: float = 2.
+                  ) -> torch.Tensor:
     """
-    Helper function to initialize tensors with truncated normal distribution.
+    Helper function to initialize tensors with truncated normal
+    distribution.
+
+    Parameters
+    -----------
+    tensor:
+        Tensor to initialize.
+    mean:
+        Mean of the normal distribution.
+    std:
+        Standard deviation of the normal distribution.
+    a:
+        Lower bound of the truncated normal distribution.
+    b:
+        Upper bound of the truncated normal distribution.
+
+    Returns
+    -----------
+    tensor:
+        Initialized tensor.
     """
     # type: (Tensor, float, float, float, float) -> Tensor
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
 
 def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
-                                     pos: np.ndarray,
-                                     ) -> np.ndarray:
+                                      pos: np.ndarray,
+                                      ) -> np.ndarray:
     """
-    Retrieve 1D sin cos positional embedding from an array of positions/sequence
-    index.
+    Retrieve 1D sin cos positional embedding from an array of
+    positions/sequence index.
 
     Parameters
     -----------
     embed_dim:
-        Output dimension of the positional embedding (for each position). Has
-        to be divisible by 2.
+        Output dimension of the positional embedding (for each
+        position). Has to be divisible by 2.
     pos:
         An array containing the positions to be embedded.
         
@@ -143,29 +144,98 @@ def _get_1d_sincos_pos_embed_from_pos(embed_dim: int,
     return pos_emb
 
 
-def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+def get_1d_sincos_pos_embed_from_coord(embed_dim: int,
+                                       omega: torch.Tensor,
+                                       coord: torch.Tensor,
+                                       ) -> torch.Tensor:
     """
-    Cut & paste from PyTorch official master until it's in a few official
-    releases - RW Method based on
+    Retrieve 1D sin cos positional embedding from a tensor of relative
+    coordinates.
+
+    Parameters
+    -----------
+    embed_dim:
+        Output dimension of the positional embedding (for each
+        position). Has to be divisible by 2.
+    omega:
+    coord:
+        A tensor containing the relative coordinates to be embedded.
+        
+    Returns
+    -----------
+    pos_emb:
+        The positional embedding with shape (len(coord), embed_dim).
+    """
+    assert embed_dim % 2 == 0
+
+    mask = torch.isneginf(coord)
+    # Replace -inf with zero for computation (safe dummy value)
+    coord[mask] = 0.0
+
+    omega = omega.to(coord.device) # TODO
+
+    # outer product: (seq_len, embed_dim // 2)
+    out = torch.einsum('bl,d->bld', coord, omega)  # (B, seq_len, emb_dim/2)
+
+    # sin and cos embeddings
+    emb_sin = torch.sin(out)
+    emb_cos = torch.cos(out)
+
+    # concatenate along last dimension
+    pos_emb = torch.cat([emb_sin, emb_cos], dim=-1)  # (seq_len, embed_dim)
+
+    # Zero out positions where coord == -inf
+    pos_emb[mask.unsqueeze(-1).expand_as(pos_emb)] = 0.0  # (B, L, D)
+
+    return pos_emb
+
+
+def _no_grad_trunc_normal_(tensor: torch.Tensor,
+                           mean: float,
+                           std: float,
+                           a: float,
+                           b: float
+                           ) -> torch.Tensor:
+    """
+    Cut & paste from PyTorch official master until it's in a few
+    official releases - RW Method based on
     https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
+
+    Parameters
+    -----------
+    tensor:
+        Tensor to initialize.
+    mean:
+        Mean of the normal distribution.
+    std:
+        Standard deviation of the normal distribution.
+    a:
+        Lower bound of the truncated normal distribution.
+    b:
+        Upper bound of the truncated normal distribution.
+
+    Returns
+    -----------
+    tensor:
+        Initialized tensor.
     """
-    def norm_cdf(x):
+    def norm_cdf(x: float) -> float:
         # Computes standard normal cumulative distribution function
         return (1. + math.erf(x / math.sqrt(2.))) / 2.
 
     with torch.no_grad():
-        # Values are generated by using a truncated uniform distribution and
-        # then using the inverse CDF for the normal distribution.
+        # Values are generated by using a truncated uniform distribution
+        # and then using the inverse CDF for the normal distribution.
         # Get upper and lower cdf values
         l = norm_cdf((a - mean) / std)
         u = norm_cdf((b - mean) / std)
 
-        # Uniformly fill tensor with values from [l, u], then translate to
-        # [2l-1, 2u-1].
+        # Uniformly fill tensor with values from [l, u], then translate
+        # to [2l-1, 2u-1].
         tensor.uniform_(2 * l - 1, 2 * u - 1)
 
-        # Use inverse cdf transform for normal distribution to get truncated
-        # standard normal
+        # Use inverse cdf transform for normal distribution to get
+        # truncated standard normal
         tensor.erfinv_()
 
         # Transform to proper mean, std

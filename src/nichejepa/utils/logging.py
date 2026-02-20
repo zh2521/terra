@@ -1,7 +1,7 @@
 """
-Adapted from Assran, M. et al. Self-supervised learning from images with a
-Joint-Embedding Predictive Architecture.
-Proc. IEEE Comput. Soc. Conf. Comput. Vis. Pattern Recognit. 15619–15629 (2023);
+Adapted from Assran, M. et al. Self-supervised learning from images with
+a Joint-Embedding Predictive Architecture. Proc. IEEE Comput. Soc. Conf.
+Comput. Vis. Pattern Recognit. 15619–15629 (2023);
 https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 (05.06.2024).
 """
@@ -9,30 +9,47 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 import torch
 
 
-def gpu_timer(closure, log_timings: bool=True):
+class AverageMeter(object):
     """
-    Helper to time gpu-time to execute closure().
+    Computes and stores the average and current value.
     """
-    log_timings = log_timings and torch.cuda.is_available()
+    def __init__(self):
+        self.reset()
 
-    elapsed_time = -1.
-    if log_timings:
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-        start.record()
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.max = float('-inf')
+        self.min = float('inf')
+        self.sum = 0
+        self.count = 0
 
-    result = closure()
-
-    if log_timings:
-        end.record()
-        torch.cuda.synchronize()
-        elapsed_time = start.elapsed_time(end)
-
-    return result, elapsed_time
+    def update(self,
+               val: float,
+               n: int = 1):
+        """
+        Update the average and current value.
+        """
+        if isinstance(val, torch.Tensor):
+                val = val.item()
+        self.val = val
+        try:
+            self.max = max(val, self.max)
+            self.min = min(val, self.min)
+        except Exception:
+            pass
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 class CSVLogger(object):
-    def __init__(self, fname, *argv):
+    """
+    CSVLogger class to log data to a CSV file.
+    """
+    def __init__(self,
+                 fname: str,
+                 *argv):
         self.fname = fname
         self.types = []
         # -- print headers
@@ -51,46 +68,35 @@ class CSVLogger(object):
                 print(tv[0] % tv[1], end=end, file=f)
 
 
-class AverageMeter(object):
+def grad_logger(named_params: list[tuple[str, torch.Tensor]],
+                ) -> AverageMeter:
     """
-    Computes and stores the average and current value.
+    Log the gradient norm of the model parameters.
+
+    Parameters
+    ----------
+    named_params:
+        List of named parameters.
+
+    Returns
+    -------
+    stats:
+        AverageMeter object.
     """
-
-    def __init__(self):
-        self.reset()
-
-    def reset(self):
-        self.val = 0
-        self.avg = 0
-        self.max = float('-inf')
-        self.min = float('inf')
-        self.sum = 0
-        self.count = 0
-
-    def update(self, val, n=1):
-        self.val = val
-        try:
-            self.max = max(val, self.max)
-            self.min = min(val, self.min)
-        except Exception:
-            pass
-        self.sum += val * n
-        self.count += n
-        self.avg = self.sum / self.count
-
-
-def grad_logger(named_params):
     stats = AverageMeter()
     stats.first_layer = None
     stats.last_layer = None
+
     for n, p in named_params:
-        if (p.grad is not None) and not (n.endswith('.bias') or len(p.shape) == 1):
-            grad_norm = float(torch.norm(p.grad.data))
+        if p.grad is not None and not (n.endswith('.bias') or len(p.shape) == 1):
+            grad_norm = p.grad.detach().norm().item()
             stats.update(grad_norm)
             if 'qkv' in n:
                 stats.last_layer = grad_norm
                 if stats.first_layer is None:
                     stats.first_layer = grad_norm
+
     if stats.first_layer is None or stats.last_layer is None:
-        stats.first_layer = stats.last_layer = 0.
+        stats.first_layer = stats.last_layer = 0.0
+
     return stats

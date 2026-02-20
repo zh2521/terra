@@ -22,12 +22,12 @@ from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
 from app.helper import init_model, load_checkpoint
-from nichejepa.datasets_new.cell_datasets import CellBaseDataset, init_cell_dataset
-from nichejepa.datasets_new.dataloaders import init_dataloader_and_sampler
-from nichejepa.masks_new.block_masking  import BlockMaskCollator
-from nichejepa.masks_new.cell_masking import CellMaskCollator
+from nichejepa.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
+from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
+from nichejepa.masks.block_masking  import BlockMaskCollator
+from nichejepa.masks.cell_masking import CellMaskCollator
 from nichejepa.tokenizers import cell_tokenizers
-from nichejepa.utils_new.embedding import (create_binary_selection_mask,
+from nichejepa.utils.embedding import (create_binary_selection_mask,
                                        compute_mean_unmasked_emb,
                                        compute_unmasked_rank_based_weights,
                                        collect_adata_from_folder,
@@ -35,7 +35,7 @@ from nichejepa.utils_new.embedding import (create_binary_selection_mask,
                                        compute_count_mean_cosine_sim,
                                        compute_sum_and_nonzero_count,
                                        batch_rowwise_distances)
-from nichejepa.utils_new.logging import CSVLogger
+from nichejepa.utils.logging import CSVLogger
 from typing import Dict, List
 
 
@@ -172,6 +172,7 @@ def infer(args: dict,
     special_tokens = args['meta']['special_tokens']
     use_bfloat16 = args['meta']['use_bfloat16']
     use_flash_attention = args['meta']['use_flash_attention']
+    use_layer_norm = args['meta']['use_layer_norm']
     
     if 'api_version' in args['meta'].keys():
         api_version = args['meta']['api_version']
@@ -295,6 +296,7 @@ def infer(args: dict,
         num_heads=num_heads,
         mlp_ratio=mlp_ratio,
         use_flash_attention=use_flash_attention,
+        use_layer_norm=use_layer_norm,
         api_version=api_version,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
         predict_gene=predict_gene,
@@ -318,7 +320,8 @@ def infer(args: dict,
             per_block_mask_ratio=per_block_mask_ratio,
             sample_segments=False,
             sample_gene_masks=False,
-            restrict_special_attention=restrict_special_attention)
+            restrict_special_attention=restrict_special_attention,
+            special_token_pad_ratio=1.0)
     elif cell_masking:
        mask_collator = CellMaskCollator(
             n_targets=n_targets,

@@ -40,11 +40,11 @@ class EncoderMultiMaskWrapper(nn.Module):
             masks = [masks]
         outs = []
         for m in masks:
-            x = self.backbone(batch=batch,
-                              masks=m,
-                              masks_attention=masks_attention)
+            x, token_emb = self.backbone(batch=batch,
+                                         masks=m,
+                                         masks_attention=masks_attention)
             outs.append(x)
-        return outs
+        return outs, token_emb
 
 
 class PredictorMultiMaskWrapper(nn.Module):
@@ -65,9 +65,8 @@ class PredictorMultiMaskWrapper(nn.Module):
 
     def forward(self,
                 z: torch.Tensor | list,
+                token_emb: torch.Tensor,
                 batch: dict[torch.Tensor],
-                enc_token_embed: nn.Embedding,
-                enc_seg_embed: nn.Embedding,
                 masks_enc: torch.Tensor | list,
                 masks_pred: torch.Tensor | list,
                 masks_attention: torch.Tensor
@@ -83,9 +82,8 @@ class PredictorMultiMaskWrapper(nn.Module):
         for mp in masks_pred:
             outs += [
                 self.backbone(z=z[0],
+                              token_emb=token_emb,
                               batch=batch,
-                              enc_token_embed=enc_token_embed,
-                              enc_seg_embed=enc_seg_embed,
                               masks_enc=masks_enc[0],
                               masks_pred=mp,
                               masks_attention=masks_attention)]
