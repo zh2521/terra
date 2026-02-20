@@ -207,6 +207,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         if masks is not None and not isinstance(masks, list):
             masks = [masks]
 
+        x = x.clone()
+
         attn = None
         if attn_base is not None:
             if attn_base.size(2) == 1: # [B, 1, 1, L] -> [B, 1, L, L]
@@ -217,8 +219,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             #    # Never attend to special tokens
             #    if self.n_special_tokens > 0:
             #        attn[:, :, :, :self.n_special_tokens] = False
-            # Optionally block cross-attention from cell queries to
-            # neighborhood keys
+            # Block attention from included cell queries to excluded cell keys
             if n_included_cells:
                 attn[
                     :,

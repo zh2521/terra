@@ -393,10 +393,7 @@ def infer(args: dict,
         n_included_cells_list = [1, n_segments]
     all_ctx_agg_emb = [[] for i in range(len(n_included_cells_list))]
 
-    found = False
     for itr, (udata, _, _, masks_attention, pad_special_tokens) in tqdm(enumerate(loader)):
-        if found:
-            break
         for key in udata.keys():
             if key != 'cell_id':
                 udata[key] = udata[key].to(device, non_blocking=True)
