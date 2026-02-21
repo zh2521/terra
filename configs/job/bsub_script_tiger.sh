@@ -32,7 +32,7 @@ echo "LOG_DIR=$LOG_DIR"               # Log directory (default empty)
 export CPROFILE_FILE_NAME="${OUTPUT_DIR}/${RUN_NAME}.prof"
 
 # Set PYTHONPYCACHEPREFIX to the experiment directory
-export PYTHONPYCACHEPREFIX="/tmp/pycache"
+#export PYTHONPYCACHEPREFIX="/tmp/pycache"
 
 # Calculating Total Number of GPUs
 TOTAL_NUM_GPUS=$(($NUM_NODES * $NUM_GPUS_NODE))
