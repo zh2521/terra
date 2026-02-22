@@ -41,10 +41,10 @@ meta:
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
   cell_pos_enc: 'coord' # 'segment', 'coord'
-  enc_depth: 3
-  enc_emb_dim: 384 # 768, 384, 192
-  pred_depth: 3 # 12
-  pred_emb_dim: 384 # 768, 384, 192
+  enc_depth: 2
+  enc_emb_dim: 768 # 768, 384, 192
+  pred_depth: 2 # 12
+  pred_emb_dim: 768 # 768, 384, 192
   num_heads: 6 # 12, 6
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'], ['assay', 'batch'],['assay', 'gene_panel', 'batch'], ['tissue', 'assay', 'gene_panel', 'batch']
