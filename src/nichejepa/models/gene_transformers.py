@@ -227,8 +227,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                     self.n_special_tokens: (self.n_special_tokens + self.seq_len_cell * n_included_cells),
                     (self.n_special_tokens + self.seq_len_cell * n_included_cells):] = False
 
-        #if n_included_cells:
-        #    x[:, (self.n_special_tokens + self.seq_len_cell * n_included_cells):, :] = 0
+        if n_included_cells:
+            x[:, (self.n_special_tokens + self.seq_len_cell * n_included_cells):, :] = 0
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -238,9 +238,9 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         out: dict[int, torch.Tensor] = {}
         for i, blk in enumerate(self.blocks, start=1):
             x = blk(x, masks=attn)
-            if i == len(self.blocks) and (self.norm is not None):
+            #if i == len(self.blocks) and (self.norm is not None):
                 # Apply norm only for last layer as in training
-                x = self.norm(x)
+                #x = self.norm(x)
             if i in layers:
                 # Remove special tokens from output
                 out[i] = x[:, self.n_special_tokens:, :]
