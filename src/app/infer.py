@@ -459,12 +459,91 @@ def infer(args: dict,
                 n_segments=n_segments).cpu()
 
         for i, (c_emb, n_emb) in enumerate(zip(cell_emb_list, neighborhood_emb_list)):
+            x = n_emb
+            first_k=256
+            if x.dim() != 3:
+                raise ValueError(f"Expected x to be (B,S,D), got {x.shape}")
+
+            # Non-zero rows PER OBSERVATION: row is valid if any dim != 0
+            mask_all = x.ne(0).any(dim=-1)              # (B, S)
+            x_first = x[:, :first_k, :]                 # (B, K, D)
+            mask_first = mask_all[:, :first_k]          # (B, K)
+
+            # Mean over first_k valid rows
+            mask_first_f = mask_first.to(x.dtype)
+            sum_first = (x_first * mask_first_f.unsqueeze(-1)).sum(dim=1)        # (B, D)
+            cnt_first = mask_first_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)     # (B, 1)
+            mean_first = sum_first / cnt_first                                   # (B, D)
+
+            # Mean over all valid rows
+            mask_all_f = mask_all.to(x.dtype)
+            sum_all = (x * mask_all_f.unsqueeze(-1)).sum(dim=1)                  # (B, D)
+            cnt_all = mask_all_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)         # (B, 1)
+            mean_all = sum_all / cnt_all                                         # (B, D)
+
+            # Cosine similarity between means
+            cos = F.cosine_similarity(mean_first, mean_all, dim=-1)              # (B,)
+
+            # If either had zero valid rows originally, set cos=0
+            valid = (mask_first.sum(dim=1) > 0) & (mask_all.sum(dim=1) > 0)
+            cos = torch.where(valid, cos, torch.zeros_like(cos))
+
+
+            print(cos)
+
+
             # Average gene embeddings into cell and neighborhood embedding 
             if agg_type == 'avg':
                 cell_emb = compute_mean_unmasked_emb(c_emb, cell_mask)
                 if include_spatial_cell_emb:
                     spatial_cell_emb = compute_mean_unmasked_emb(n_emb, cell_mask)
                 neighborhood_emb = compute_mean_unmasked_emb(n_emb, neighborhood_mask)
+                print(neighborhood_emb.shape)
+                print(neighborhood_mask.shape)
+                print(cell_mask.sum(dim=1))
+                print(neighborhood_mask.sum(dim=1))
+                cos2 = F.cosine_similarity(spatial_cell_emb, neighborhood_emb, dim=1)
+                print(cos2)
+
+                nonzero_first = (n_emb[:, :256, :].abs().sum(-1) != 0)
+                nonzero_all   = (n_emb.abs().sum(-1) != 0)
+
+                # For cell_mask
+                cell_true_but_zero = (cell_mask[:, :256] & ~nonzero_first).float().mean()
+                cell_false_but_nonzero = ((~cell_mask[:, :256]) & nonzero_first).float().mean()
+
+                # For neighborhood_mask
+                neigh_true_but_zero = (neighborhood_mask & ~nonzero_all).float().mean()
+                neigh_false_but_nonzero = ((~neighborhood_mask) & nonzero_all).float().mean()
+
+                print("cell:   True-but-zero =", cell_true_but_zero.item(),
+                    " False-but-nonzero =", cell_false_but_nonzero.item())
+                print("neigh:  True-but-zero =", neigh_true_but_zero.item(),
+                    " False-but-nonzero =", neigh_false_but_nonzero.item())
+
+                # Token-based zero mask
+                token_zero = (ns_tokens == 0).cpu()                  # (B, S)
+
+                # Embedding-based zero-row mask
+                emb_zero = (n_emb.abs().sum(dim=-1) == 0).cpu()      # (B, S)
+                # or: n_emb.eq(0).all(dim=-1)
+
+                token_zero_but_emb_nonzero = token_zero & (~emb_zero)
+                print("token==0 but emb nonzero:",
+                    token_zero_but_emb_nonzero.float().mean())
+
+                emb_zero_but_token_nonzero = emb_zero & (~token_zero)
+                print("emb zero but token!=0:",
+                    emb_zero_but_token_nonzero.float().mean())
+
+                both_zero = token_zero & emb_zero
+                percentage_both_zero = both_zero.float().mean()
+
+                print("token==0 AND emb row == 0:", percentage_both_zero)
+
+                percentage_zero = (ns_tokens == 0).float().mean()
+                print("Fraction of zeros:", percentage_zero)
+                raise ValueError
             elif agg_type == "weighted_avg":
                 cell_weights = compute_unmasked_rank_based_weights(
                     tokens, cell_mask)
