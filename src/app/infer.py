@@ -543,6 +543,13 @@ def infer(args: dict,
 
                 percentage_zero = (ns_tokens == 0).float().mean()
                 print("Fraction of zeros:", percentage_zero)
+
+                emb_zero = (n_emb.abs().sum(dim=-1) == 0)  # (B, S)
+
+                percentage_zero_emb_rows = emb_zero.float().mean()
+
+                print("Fraction of zero embedding rows:", percentage_zero_emb_rows)
+
                 raise ValueError
             elif agg_type == "weighted_avg":
                 cell_weights = compute_unmasked_rank_based_weights(

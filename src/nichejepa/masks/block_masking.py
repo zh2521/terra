@@ -249,6 +249,9 @@ class BlockMaskCollator:
         masks_attention = (
             tokens != 0).unsqueeze(1).unsqueeze(1) # [B, 1, 1, N]
 
+        #print("Attention mask")
+        #print(masks_attention.shape)
+
         if self.restrict_special_attention:
             # Make special tokens only attent to themselves
             masks_attention = masks_attention.expand(
