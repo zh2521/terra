@@ -189,8 +189,8 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
     selection_mask:
         The resulting 2D selection mask tensor.
     """
-    print("HEEEERE")
-    print(ns_tokens.shape)
+    #print("HEEEERE")
+    #print(ns_tokens.shape)
     selection_mask = torch.zeros_like(ns_tokens, dtype=torch.bool)
 
     if selection_type == 'agg_cell':

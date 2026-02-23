@@ -173,6 +173,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                pos_learnable: bool = False,
                nz_spc: bool = False,
                new_spc: bool = False,
+               mlp_bias: bool = False,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -244,7 +245,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         api_version=api_version,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
         pos_learnable=pos_learnable,
-        nz_spc=nz_spc)
+        nz_spc=nz_spc,
+        mlp_bias=mlp_bias)
     if api_version == 'v3' or api_version == 'v4':
         encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](

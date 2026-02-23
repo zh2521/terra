@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 2560 # 384/640, 1536/2816
   n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 192 # 224, 256, 128, 288
+  batch_size: 288 # 224, 256, 128, 288
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -32,7 +32,7 @@ data:
   n_special_values: 1000
   nz_spc: True
   overwrite_batch_value: False
-  mega_batch_mult_max: 100
+  mega_batch_mult_max: 50
 meta:
   api_version: 'v3'
   add_cls: False
@@ -41,10 +41,10 @@ meta:
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
   cell_pos_enc: 'coord' # 'segment', 'coord'
-  enc_depth: 2
-  enc_emb_dim: 768 # 768, 384, 192
-  pred_depth: 2 # 12
-  pred_emb_dim: 768 # 768, 384, 192
+  enc_depth: 3
+  enc_emb_dim: 1152 # 768, 384, 192
+  pred_depth: 3 # 12
+  pred_emb_dim: 576 # 768, 384, 192
   num_heads: 6 # 12, 6
   mlp_ratio: 4
   special_tokens: ['batch'] # ['batch'], ['assay', 'batch'],['assay', 'gene_panel', 'batch'], ['tissue', 'assay', 'gene_panel', 'batch']
@@ -58,9 +58,10 @@ meta:
   restrict_special_attention: False
   excl_spc_from_loss: True
   target_enc_layer_norm: False
+  mlp_bias: False
 mask:
   n_contexts: 1 # 1
-  n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
+  n_targets: 4 # 5 # 1 =, this is the number of blocks in block masking
   block_masking: True # True, False
   cell_masking: False # True, False
   targets_list: null
@@ -75,9 +76,9 @@ optimization:
   ema:
   - 0.9995 # 0.998, 0.9995
   - 1.0
-  start_lr: 2.0e-05 # 1.0e-06, 2.0e-05
+  start_lr: 1.0e-06 # 1.0e-06, 2.0e-05
   lr: 6.0e-05 # 6.0e-05, 0.000625
-  final_lr: 2.0e-05 # 1.0e-06
+  final_lr: 1.0e-06 # 1.0e-06
   weight_decay: 0.04 # 0.04
   final_weight_decay: 0.4 # 0.4
   ipe_scale: 1.25

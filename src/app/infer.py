@@ -73,6 +73,7 @@ def infer(args: dict,
           return_distance: bool=False,
           include_spatial_cell_emb: bool = False,
           ignore_spc_tokens: bool = True,
+          debug: bool = False,
           ) -> ad.AnnData:
     """
     Use a trained model for inference. Run forward pass on a given
@@ -178,6 +179,10 @@ def infer(args: dict,
         api_version = args['meta']['api_version']
     else:
         api_version = 'v3'
+    if 'mlp_bias' in args['meta'].keys():
+        mlp_bias = args['meta']['mlp_bias']
+    else:
+        mlp_bias = True
 
     dataset_name = args['data']['dataset_name']
     token_dict_folder_path = args['data']['token_dict_folder_path']
@@ -301,7 +306,8 @@ def infer(args: dict,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
         predict_gene=predict_gene,
         pos_learnable=pos_learnable,
-        nz_spc=nz_spc)
+        nz_spc=nz_spc,
+        mlp_bias=mlp_bias)
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
@@ -459,37 +465,38 @@ def infer(args: dict,
                 n_segments=n_segments).cpu()
 
         for i, (c_emb, n_emb) in enumerate(zip(cell_emb_list, neighborhood_emb_list)):
-            x = n_emb
-            first_k=256
-            if x.dim() != 3:
-                raise ValueError(f"Expected x to be (B,S,D), got {x.shape}")
+            if (i + 1) == len(cell_emb_list) and debug:
+                x = n_emb
+                first_k=256
+                if x.dim() != 3:
+                    raise ValueError(f"Expected x to be (B,S,D), got {x.shape}")
 
-            # Non-zero rows PER OBSERVATION: row is valid if any dim != 0
-            mask_all = x.ne(0).any(dim=-1)              # (B, S)
-            x_first = x[:, :first_k, :]                 # (B, K, D)
-            mask_first = mask_all[:, :first_k]          # (B, K)
+                # Non-zero rows PER OBSERVATION: row is valid if any dim != 0
+                mask_all = x.ne(0).any(dim=-1)              # (B, S)
+                x_first = x[:, :first_k, :]                 # (B, K, D)
+                mask_first = mask_all[:, :first_k]          # (B, K)
 
-            # Mean over first_k valid rows
-            mask_first_f = mask_first.to(x.dtype)
-            sum_first = (x_first * mask_first_f.unsqueeze(-1)).sum(dim=1)        # (B, D)
-            cnt_first = mask_first_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)     # (B, 1)
-            mean_first = sum_first / cnt_first                                   # (B, D)
+                # Mean over first_k valid rows
+                mask_first_f = mask_first.to(x.dtype)
+                sum_first = (x_first * mask_first_f.unsqueeze(-1)).sum(dim=1)        # (B, D)
+                cnt_first = mask_first_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)     # (B, 1)
+                mean_first = sum_first / cnt_first                                   # (B, D)
 
-            # Mean over all valid rows
-            mask_all_f = mask_all.to(x.dtype)
-            sum_all = (x * mask_all_f.unsqueeze(-1)).sum(dim=1)                  # (B, D)
-            cnt_all = mask_all_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)         # (B, 1)
-            mean_all = sum_all / cnt_all                                         # (B, D)
+                # Mean over all valid rows
+                mask_all_f = mask_all.to(x.dtype)
+                sum_all = (x * mask_all_f.unsqueeze(-1)).sum(dim=1)                  # (B, D)
+                cnt_all = mask_all_f.sum(dim=1).clamp_min(1.0).unsqueeze(-1)         # (B, 1)
+                mean_all = sum_all / cnt_all                                         # (B, D)
 
-            # Cosine similarity between means
-            cos = F.cosine_similarity(mean_first, mean_all, dim=-1)              # (B,)
+                # Cosine similarity between means
+                cos = F.cosine_similarity(mean_first, mean_all, dim=-1)              # (B,)
 
-            # If either had zero valid rows originally, set cos=0
-            valid = (mask_first.sum(dim=1) > 0) & (mask_all.sum(dim=1) > 0)
-            cos = torch.where(valid, cos, torch.zeros_like(cos))
+                # If either had zero valid rows originally, set cos=0
+                valid = (mask_first.sum(dim=1) > 0) & (mask_all.sum(dim=1) > 0)
+                cos = torch.where(valid, cos, torch.zeros_like(cos))
 
 
-            print(cos)
+                print(cos)
 
 
             # Average gene embeddings into cell and neighborhood embedding 
@@ -498,59 +505,60 @@ def infer(args: dict,
                 if include_spatial_cell_emb:
                     spatial_cell_emb = compute_mean_unmasked_emb(n_emb, cell_mask)
                 neighborhood_emb = compute_mean_unmasked_emb(n_emb, neighborhood_mask)
-                print(neighborhood_emb.shape)
-                print(neighborhood_mask.shape)
-                print(cell_mask.sum(dim=1))
-                print(neighborhood_mask.sum(dim=1))
-                cos2 = F.cosine_similarity(spatial_cell_emb, neighborhood_emb, dim=1)
-                print(cos2)
+                if (i + 1) == len(cell_emb_list) and debug:
+                    print(neighborhood_emb.shape)
+                    print(neighborhood_mask.shape)
+                    print(cell_mask.sum(dim=1))
+                    print(neighborhood_mask.sum(dim=1))
+                    cos2 = F.cosine_similarity(spatial_cell_emb, neighborhood_emb, dim=1)
+                    print(cos2)
 
-                nonzero_first = (n_emb[:, :256, :].abs().sum(-1) != 0)
-                nonzero_all   = (n_emb.abs().sum(-1) != 0)
+                    nonzero_first = (n_emb[:, :256, :].abs().sum(-1) != 0)
+                    nonzero_all   = (n_emb.abs().sum(-1) != 0)
 
-                # For cell_mask
-                cell_true_but_zero = (cell_mask[:, :256] & ~nonzero_first).float().mean()
-                cell_false_but_nonzero = ((~cell_mask[:, :256]) & nonzero_first).float().mean()
+                    # For cell_mask
+                    cell_true_but_zero = (cell_mask[:, :256] & ~nonzero_first).float().mean()
+                    cell_false_but_nonzero = ((~cell_mask[:, :256]) & nonzero_first).float().mean()
 
-                # For neighborhood_mask
-                neigh_true_but_zero = (neighborhood_mask & ~nonzero_all).float().mean()
-                neigh_false_but_nonzero = ((~neighborhood_mask) & nonzero_all).float().mean()
+                    # For neighborhood_mask
+                    neigh_true_but_zero = (neighborhood_mask & ~nonzero_all).float().mean()
+                    neigh_false_but_nonzero = ((~neighborhood_mask) & nonzero_all).float().mean()
 
-                print("cell:   True-but-zero =", cell_true_but_zero.item(),
-                    " False-but-nonzero =", cell_false_but_nonzero.item())
-                print("neigh:  True-but-zero =", neigh_true_but_zero.item(),
-                    " False-but-nonzero =", neigh_false_but_nonzero.item())
+                    print("cell:   True-but-zero =", cell_true_but_zero.item(),
+                        " False-but-nonzero =", cell_false_but_nonzero.item())
+                    print("neigh:  True-but-zero =", neigh_true_but_zero.item(),
+                        " False-but-nonzero =", neigh_false_but_nonzero.item())
 
-                # Token-based zero mask
-                token_zero = (ns_tokens == 0).cpu()                  # (B, S)
+                    # Token-based zero mask
+                    token_zero = (ns_tokens == 0).cpu()                  # (B, S)
 
-                # Embedding-based zero-row mask
-                emb_zero = (n_emb.abs().sum(dim=-1) == 0).cpu()      # (B, S)
-                # or: n_emb.eq(0).all(dim=-1)
+                    # Embedding-based zero-row mask
+                    emb_zero = (n_emb.abs().sum(dim=-1) == 0).cpu()      # (B, S)
+                    # or: n_emb.eq(0).all(dim=-1)
 
-                token_zero_but_emb_nonzero = token_zero & (~emb_zero)
-                print("token==0 but emb nonzero:",
-                    token_zero_but_emb_nonzero.float().mean())
+                    token_zero_but_emb_nonzero = token_zero & (~emb_zero)
+                    print("token==0 but emb nonzero:",
+                        token_zero_but_emb_nonzero.float().mean())
 
-                emb_zero_but_token_nonzero = emb_zero & (~token_zero)
-                print("emb zero but token!=0:",
-                    emb_zero_but_token_nonzero.float().mean())
+                    emb_zero_but_token_nonzero = emb_zero & (~token_zero)
+                    print("emb zero but token!=0:",
+                        emb_zero_but_token_nonzero.float().mean())
 
-                both_zero = token_zero & emb_zero
-                percentage_both_zero = both_zero.float().mean()
+                    both_zero = token_zero & emb_zero
+                    percentage_both_zero = both_zero.float().mean()
 
-                print("token==0 AND emb row == 0:", percentage_both_zero)
+                    print("token==0 AND emb row == 0:", percentage_both_zero)
 
-                percentage_zero = (ns_tokens == 0).float().mean()
-                print("Fraction of zeros:", percentage_zero)
+                    percentage_zero = (ns_tokens == 0).float().mean()
+                    print("Fraction of zeros:", percentage_zero)
 
-                emb_zero = (n_emb.abs().sum(dim=-1) == 0)  # (B, S)
+                    emb_zero = (n_emb.abs().sum(dim=-1) == 0)  # (B, S)
 
-                percentage_zero_emb_rows = emb_zero.float().mean()
+                    percentage_zero_emb_rows = emb_zero.float().mean()
 
-                print("Fraction of zero embedding rows:", percentage_zero_emb_rows)
+                    print("Fraction of zero embedding rows:", percentage_zero_emb_rows)
 
-                raise ValueError
+                    #raise ValueError
             elif agg_type == "weighted_avg":
                 cell_weights = compute_unmasked_rank_based_weights(
                     tokens, cell_mask)
@@ -729,6 +737,14 @@ def infer(args: dict,
    
     # Store cell and neighborhood embeddings of all observations across layers  
     for i, emb_layer in enumerate(emb_layers):
+
+        neigh = torch.cat(all_neighborhood_emb_list[i], dim=0)        # (N, D)
+        spatial = torch.cat(all_spatial_cell_emb_list[i], dim=0)      # (N, D)
+
+        cos = F.cosine_similarity(neigh, spatial, dim=1)              # (N,)
+        print(f"Layer {emb_layer} cosine:")
+        print(cos)
+        
         adata.obsm[f"cell_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_cell_emb_list[i],
             dim=0))
@@ -1145,7 +1161,8 @@ def embed_dataset(dataset: Dataset,
         sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'],
         predict_gene=model_config['meta']['predict_gene'],
         pos_learnable=model_config['meta']['pos_learnable'],
-        nz_spc=model_config['data'].get('nz_spc', False))
+        nz_spc=model_config['data'].get('nz_spc', False),
+        mlp_bias=model_config['meta'].get('mlp_bias', True))
 
     if model_config['meta']['api_version'] != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
@@ -1830,7 +1847,12 @@ def gene_embed_dataset(dataset: Dataset,
         mlp_ratio=model_config['meta']['mlp_ratio'],
         use_flash_attention=model_config['meta']['use_flash_attention'],
         api_version=model_config['meta']['api_version'],
-        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'],
+        predict_gene=model_config['meta']['predict_gene'],
+        pos_learnable=model_config['meta']['pos_learnable'],
+        nz_spc=model_config['data'].get('nz_spc', False),
+        mlp_bias=model_config['meta'].get('mlp_bias', True)
+        )
 
     if model_config['meta']['api_version'] != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb

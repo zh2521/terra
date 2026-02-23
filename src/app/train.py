@@ -185,6 +185,10 @@ def train(args: dict,
         target_enc_layer_norm = args['meta']['target_enc_layer_norm']
     else:
         target_enc_layer_norm = False
+    if 'mlp_bias' in args['meta'].keys():
+        mlp_bias = args['meta']['mlp_bias']
+    else:
+        mlp_bias = True
 
     n_contexts = args['mask']['n_contexts']
     n_targets = args['mask']['n_targets']
@@ -347,7 +351,8 @@ def train(args: dict,
         predict_gene=predict_gene,
         pos_learnable=pos_learnable,
         nz_spc=nz_spc,
-        new_spc=new_spc)
+        new_spc=new_spc,
+        mlp_bias=mlp_bias)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator

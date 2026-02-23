@@ -238,9 +238,9 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         if masks is not None:
             x = apply_masks(x, masks)
 
-        print("MASKS:")
-        print(masks)
-        print(x)
+        #print("MASKS:")
+        #print(masks)
+        #print(x)
 
         zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
 
@@ -758,7 +758,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
     def __init__(self,
                  n_special_values: int,
                  count_encoding: Literal['value_bins', 'mlp'] = 'mlp',
-                 mlp_bias: bool = False,
+                 mlp_bias: bool = True,
                  n_value_bins: int | None = 100,
                  **base_encoder_kwargs
                  ):
@@ -1041,7 +1041,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
     def __init__(self,
                  n_special_values: int,
                  count_encoding: Literal['value_bins', 'mlp'] = 'mlp',
-                 mlp_bias: bool = False,
+                 mlp_bias: bool = True,
                  n_value_bins: int | None = 100,
                  pos_learnable: bool = False,
                  **base_encoder_kwargs
