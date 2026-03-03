@@ -41,7 +41,7 @@ export MASTER_ADDR=$(scontrol show hostname $SLURM_NODELIST | head -n 1)
 export MASTER_PORT=$((12000 + RANDOM % 1000)) 
 
 export EXPERIMENT_NAME="hst_corpus_110m"
-export RUN_NAME="full_gtsmall_aws_2"
+export RUN_NAME="train_split_gtsmall_aws_1"
 
 echo "[+] SLURM_JOB_GPUS: $SLURM_JOB_GPUS"
 echo "[+] CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
@@ -64,6 +64,6 @@ srun torchrun \
     --node_rank $SLURM_NODEID \
     --rdzv_endpoint $MASTER_ADDR:$MASTER_PORT \
     --rdzv_backend c10d \
-    /home/ubuntu/sb75/nichejepa/src/app/main_dist.py \
+    /home/ubuntu/sb75/nichejepa/src/app/training/main.py \
     --backend nccl \
-    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_110m/hst_corpus_110m_gtsmall_full_aws.yaml
+    --fname /home/ubuntu/sb75/nichejepa/configs/model/hst_corpus_110m/hst_corpus_110m.yaml

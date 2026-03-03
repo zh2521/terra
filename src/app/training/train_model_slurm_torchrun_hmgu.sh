@@ -14,7 +14,7 @@
 
 # Set experiment identifiers (optional: used in your script)
 export EXPERIMENT_NAME="hst_corpus_70m"
-export RUN_NAME="gtsmall_subsample_combined_2"
+export RUN_NAME="train_split_gtsmall_hmgu_1"
 
 export RDZV_HOST=$(hostname)
 export RDZV_PORT=29400
@@ -35,6 +35,6 @@ srun torchrun \
   --rdzv_id=$SLURM_JOB_ID \
   --rdzv_backend=c10d \
   --rdzv_endpoint="$RDZV_HOST:$RDZV_PORT" \
-  /home/aih/sebastian.birk/workspace/projects/nichejepa/src/app/main_dist.py \
+  /home/aih/sebastian.birk/workspace/projects/nichejepa/src/app/training/main.py \
   --backend nccl \
-  --fname /home/aih/sebastian.birk/workspace/projects/nichejepa/configs/model/hst_corpus_70m_gt_small.yaml
+  --fname /home/aih/sebastian.birk/workspace/projects/nichejepa/configs/model/hst_corpus_70m.yaml

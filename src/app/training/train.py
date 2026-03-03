@@ -38,7 +38,7 @@ from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
-from app.helper import init_model, init_opt, load_checkpoint
+from app.utils import init_model, init_opt, load_checkpoint
 from nichejepa.datasets.cell_datasets import init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator

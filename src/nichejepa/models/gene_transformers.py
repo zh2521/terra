@@ -22,6 +22,8 @@ from .utils import (get_1d_sincos_pos_embed,
                     trunc_normal_)
 from ..masks.utils import apply_masks
 
+DEBUG = True
+
 
 class GeneTransformerBaseEncoder(ABC, nn.Module):
     """
@@ -242,11 +244,10 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         #print(masks)
         #print(x)
 
-        zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
-
-        percentage_zero_rows = zero_rows.float().mean()
-
-        print("Fraction of preblock X all-zero rows:", percentage_zero_rows)
+        if DEBUG:
+            zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
+            percentage_zero_rows = zero_rows.float().mean()
+            print("Fraction of preblock X all-zero rows:", percentage_zero_rows)
 
         # Run forward prop and store embeddings for each specified layer
         out: dict[int, torch.Tensor] = {}
@@ -256,11 +257,12 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             if i == len(self.blocks) and (self.norm is not None):
                 # Apply norm only for last layer as in training
                 x = self.norm(x)
-                x = x * valid_mask.unsqueeze(-1)
-                zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
+                if DEBUG:
+                    x = x * valid_mask.unsqueeze(-1)
+                    zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
 
-                percentage_zero_rows = zero_rows.float().mean()
-                print("Fraction of afterblock X all-zero rows:", percentage_zero_rows)                
+                    percentage_zero_rows = zero_rows.float().mean()
+                    print("Fraction of afterblock X all-zero rows:", percentage_zero_rows)                
             if i in layers:
                 # Remove special tokens from output
                 out[i] = x[:, self.n_special_tokens:, :]
@@ -1260,10 +1262,10 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         token_emb = self.token_embed(batch['tokens'])
         pos_emb = self.pos_embed(batch['positions'])
         seg_emb = self._get_seg_emb(batch)
-
-        proportion_zero = (batch['tokens'] == 0).float().mean()
-
-        print("Proportion of zero tokens:", proportion_zero)
+        
+        if DEBUG:
+            proportion_zero = (batch['tokens'] == 0).float().mean()
+            print("Proportion of zero tokens:", proportion_zero)
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
@@ -1309,15 +1311,17 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         # Add segment, positional, and gene embeddings to value embeddings
         x = seg_emb + pos_emb + token_emb + value_emb # [B, L, D]
 
-        def zero_row_percentage(t):
-            # t: (B, L, D)
-            zero_rows = t.eq(0).all(dim=-1)   # (B, L)
-            return zero_rows.float().mean()   # scalar        
+        if DEBUG:
 
-        print("seg_emb zero rows:", zero_row_percentage(seg_emb))
-        print("pos_emb zero rows:", zero_row_percentage(pos_emb))
-        print("token_emb zero rows:", zero_row_percentage(token_emb))
-        print("value_emb zero rows:", zero_row_percentage(value_emb))
+            def zero_row_percentage(t):
+                # t: (B, L, D)
+                zero_rows = t.eq(0).all(dim=-1)   # (B, L)
+                return zero_rows.float().mean()   # scalar        
+
+            print("seg_emb zero rows:", zero_row_percentage(seg_emb))
+            print("pos_emb zero rows:", zero_row_percentage(pos_emb))
+            print("token_emb zero rows:", zero_row_percentage(token_emb))
+            print("value_emb zero rows:", zero_row_percentage(value_emb))
 
         # Remove special token contents
         #if ignore_spc_tokens:

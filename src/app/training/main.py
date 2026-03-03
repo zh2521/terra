@@ -5,7 +5,7 @@ import logging
 
 #import torch.multiprocessing as mp
 import torch.distributed as dist
-from app.train import train
+from app.training import train
 from nichejepa.datasets.utils import prepare_dataset
 from nichejepa.utils.config import create_params_from_YAML_wandb_config
 import wandb
