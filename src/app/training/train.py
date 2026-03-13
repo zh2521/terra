@@ -451,6 +451,7 @@ def train(args: dict,
             persistent_workers=False,
             mega_batch_mult_max=mega_batch_mult_max)
 
+    print(f"Length of train loader: {len(train_loader)}.")
     ipe = len(train_loader)
 
     # Initialize optimizer and scheduler

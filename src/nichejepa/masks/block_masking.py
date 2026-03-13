@@ -68,7 +68,7 @@ class BlockMaskCollator:
         self.restrict_special_attention = restrict_special_attention
         self.cell_segment_sampling_ratio = cell_segment_sampling_ratio
         self.special_token_pad_ratio = special_token_pad_ratio
-        print("Special token pad ratio", self.special_token_pad_ratio)
+        print("Special token pad ratio:", self.special_token_pad_ratio)
 
     def _sample_gene_mask(
         self,

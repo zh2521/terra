@@ -44,6 +44,7 @@ def harmonize_adata(adata: ad.AnnData,
                     gene_occurrence_count_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_occurence_count_dict.pkl',
                     gene_occurrence_count_filter_value: int = 10,
                     ensembl_release: int = 111,
+                    species: str = 'human',
                     min_genes_per_cell: int = 10,
                     min_cells_per_gene: int = 10,
                     ) -> ad.AnnData:
@@ -90,7 +91,7 @@ def harmonize_adata(adata: ad.AnnData,
         print(f'Make sure this ensembl release is aligned with pretraining.')
         print(f'Current ensembl release used for pretraining is 111.')
         # Extract ensembl IDs of protein coding and miRNA mouse genes
-        ensembl = EnsemblRelease(release=ensembl_release, species='human')
+        ensembl = EnsemblRelease(release=ensembl_release, species=species)
         ensembl.download()
         ensembl.index()
         all_genes = ensembl.genes()
@@ -125,19 +126,20 @@ def harmonize_adata(adata: ad.AnnData,
         index=pd.Index(harmonized_gene_names, name='gene_name'),
         data={'ensembl_id': matching_ensembl_ids})
 
-    print(f'Filtering genes that have not occurred enough during pretraining...')
-    with open(gene_occurrence_count_file_path, 'rb') as f:
-        gene_occurrence_count_dict = pickle.load(f)
+    if gene_occurrence_count_file_path:
+        print(f'Filtering genes that have not occurred enough during pretraining...')
+        with open(gene_occurrence_count_file_path, 'rb') as f:
+            gene_occurrence_count_dict = pickle.load(f)
 
-    all_ensembl_ids = adata.var['ensembl_id'].tolist()
-    keep_ensembl_ids = [
-        ensembl_id for ensembl_id in all_ensembl_ids if gene_occurrence_count_dict[
-                ensembl_id] > gene_occurrence_count_filter_value]
+        all_ensembl_ids = adata.var['ensembl_id'].tolist()
+        keep_ensembl_ids = [
+            ensembl_id for ensembl_id in all_ensembl_ids if gene_occurrence_count_dict[
+                    ensembl_id] > gene_occurrence_count_filter_value]
 
-    print(f'Number of genes skipped due to not enough pretraining occurrences: {len(all_ensembl_ids) - len(keep_ensembl_ids)}.')
-    if len(all_ensembl_ids) - len(keep_ensembl_ids) > 0:
-        print(f'Genes excluded due to not enough pretraining occurrences: {set(all_ensembl_ids) - set(keep_ensembl_ids)}.')
-    adata = adata[:, adata.var['ensembl_id'].isin(keep_ensembl_ids)].copy()
+        print(f'Number of genes skipped due to not enough pretraining occurrences: {len(all_ensembl_ids) - len(keep_ensembl_ids)}.')
+        if len(all_ensembl_ids) - len(keep_ensembl_ids) > 0:
+            print(f'Genes excluded due to not enough pretraining occurrences: {set(all_ensembl_ids) - set(keep_ensembl_ids)}.')
+        adata = adata[:, adata.var['ensembl_id'].isin(keep_ensembl_ids)].copy()
 
     print('==================================================')
     print('STEP 3: BASIC QUALITY CONTROL...')

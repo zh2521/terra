@@ -159,10 +159,9 @@ def main():
     dist.barrier()
     setup_for_distributed(LOCAL_RANK == 0)
 
-    train_dataset, val_dataset, test_dataset = prepare_dataset(params, train_mode=True)
+    train_dataset, _, _ = prepare_dataset(params, train_mode=True)
     train(params,
           train_dataset,
-          test_dataset,
           save_folder_path=folder_path,
           LOCAL_RANK=LOCAL_RANK,
           WORLD_RANK=WORLD_RANK)

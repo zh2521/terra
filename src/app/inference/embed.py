@@ -186,7 +186,8 @@ def embed_dataset(dataset: Dataset,
         per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
         sample_segments=False,
         sample_gene_masks=False,
-        restrict_special_attention=model_config['meta']['restrict_special_attention'])
+        restrict_special_attention=model_config['meta']['restrict_special_attention'],
+        special_token_pad_ratio=1.0)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
@@ -334,6 +335,7 @@ def harmonize_tokenize_embed_pipeline(
         gene_occurrence_count_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_occurence_count_dict.pkl',
         gene_occurrence_count_filter_value: int = 10,
         ensembl_release: int = 111,
+        species: str = 'human',
         min_cells_per_gene: int = 0,
         min_genes_per_cell: int = 0,
         gene_perturb_df: pd.DataFrame | None = None,               
@@ -410,6 +412,17 @@ def harmonize_tokenize_embed_pipeline(
     datasets = []
     adata.obs_names_make_unique()
     if sample_key:
+        print(f"Harmonizing AnnData...")
+        adata = harmonize_adata(
+            adata,
+            gene_mapping_dict_file_path=gene_mapping_dict_file_path,
+            gene_occurrence_count_file_path=gene_occurrence_count_file_path,
+            gene_occurrence_count_filter_value=gene_occurrence_count_filter_value,
+            ensembl_release=ensembl_release,
+            species=species,
+            min_cells_per_gene=0,
+            min_genes_per_cell=0)
+            
         samples = adata.obs[sample_key].unique().tolist()
         idx_list = []
         gene_list = []
@@ -420,6 +433,11 @@ def harmonize_tokenize_embed_pipeline(
             print(f"Harmonizing sample {sample}...")
             adata_sample = harmonize_adata(
                 adata_sample,
+                gene_mapping_dict_file_path=gene_mapping_dict_file_path,
+                gene_occurrence_count_file_path=gene_occurrence_count_file_path,
+                gene_occurrence_count_filter_value=gene_occurrence_count_filter_value,
+                ensembl_release=ensembl_release,
+                species=species,
                 min_cells_per_gene=min_cells_per_gene,
                 min_genes_per_cell=min_genes_per_cell)
             idx_list.extend(adata_sample.obs.index.tolist())
@@ -451,6 +469,11 @@ def harmonize_tokenize_embed_pipeline(
         print(f"Harmonizing AnnData...")
         adata = harmonize_adata(
             adata,
+            gene_mapping_dict_file_path=gene_mapping_dict_file_path,
+            gene_occurrence_count_file_path=gene_occurrence_count_file_path,
+            gene_occurrence_count_filter_value=gene_occurrence_count_filter_value,
+            ensembl_release=ensembl_release,
+            species=species,
             min_cells_per_gene=min_cells_per_gene,
             min_genes_per_cell=min_genes_per_cell)
         print(f"Harmonized AnnData.")
@@ -638,7 +661,8 @@ def gene_embed_dataset(dataset: Dataset,
         n_special_tokens=n_special_tokens,
         per_block_mask_ratio=model_config['mask']['per_block_mask_ratio'],
         sample_segments=False,
-        sample_gene_masks=False)
+        sample_gene_masks=False,
+        special_token_pad_ratio=1.0)
         
     # Create torch dataset
     cell_dataset = init_cell_dataset(
