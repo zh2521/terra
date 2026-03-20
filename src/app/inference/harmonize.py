@@ -69,19 +69,32 @@ def harmonize_adata(adata: ad.AnnData,
     print('STEP 1: DATA VALIDATION...')
     print('==================================================')
     print('Checking that adata.X contains raw counts...')
-    if issparse(adata.X):
-        data = adata.X.data
+    use_counts_from_layers = False
+    while True:
+        if issparse(adata.X):
+            data = adata.X.data
+        else:
+            data = np.asarray(adata.X)
+        all_integers = np.allclose(data, data.astype(int))
+
+        if not all_integers:
+            if 'counts' in adata.layers.keys():
+                adata.X = adata.layers['counts']
+                use_counts_from_layers = True
+                continue
+            else:
+                raise ValueError(
+                    "adata.X does not contain raw counts. "
+                    "Found non-integer values in the count matrix."
+                )
+        else:
+            break
+
+    if use_counts_from_layers:
+        print("Using counts from adata.layers['counts'] as adata.X"
+              " did not contain raw counts (integer values).")
     else:
-        data = np.asarray(adata.X)
-    all_integers = np.allclose(data, data.astype(int))
-
-    if not all_integers:
-        raise ValueError(
-            "adata.X does not contain raw counts. "
-            "Found non-integer values in the count matrix."
-        )
-
-    print("✓ adata.X contains raw counts (integer values).")
+        print("✓ adata.X contains raw counts (integer values).")
 
     print('==================================================')
     print('STEP 2: ADDING ENSEMBL IDS...')

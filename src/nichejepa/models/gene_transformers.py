@@ -22,7 +22,7 @@ from .utils import (get_1d_sincos_pos_embed,
                     trunc_normal_)
 from ..masks.utils import apply_masks
 
-DEBUG = True
+DEBUG = False
 
 
 class GeneTransformerBaseEncoder(ABC, nn.Module):
