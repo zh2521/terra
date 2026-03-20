@@ -24,7 +24,7 @@ data:
   seq_len_neighborhood: 640 # 2560, 640, 10240
   n_segments: 11
   sampling_strategy: null
-  batch_size: 64 # 32
+  batch_size: 32 # 32
   num_workers: 16 
   pin_memory: True
   sep_gene_tokens_neb: False

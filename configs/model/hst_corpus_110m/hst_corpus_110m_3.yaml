@@ -41,11 +41,11 @@ meta:
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
   cell_pos_enc: 'segment' # 'segment', 'coord'
-  enc_depth: 3
-  enc_emb_dim: 768 # 768, 384, 192
-  pred_depth: 1 # 12
-  pred_emb_dim: 768 # 768, 384, 192
-  num_heads: 8 # 12, 6
+  enc_depth: 12
+  enc_emb_dim: 384 # 768, 384, 192
+  pred_depth: 12 # 12
+  pred_emb_dim: 192 # 768, 384, 192
+  num_heads: 6 # 12, 6
   mlp_ratio: 4
   special_tokens: ['assay', 'batch'] # ['batch'], ['assay', 'batch'],['assay', 'gene_panel', 'batch'], ['tissue', 'assay', 'gene_panel', 'batch']
   pos_learnable: False
@@ -77,7 +77,7 @@ optimization:
   - 0.995 # 0.998, 0.9995
   - 1.0
   start_lr: 2.0e-05 # 1.0e-06, 2.0e-05
-  lr: 6.0e-05 # 6.0e-05, 0.000625
+  lr: 1.0e-04 # 6.0e-05, 0.000625
   final_lr: 2.0e-05 # 1.0e-06
   weight_decay: 0.04
   final_weight_decay: 0.4
