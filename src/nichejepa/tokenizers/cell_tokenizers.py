@@ -680,51 +680,41 @@ class CellGraphTokenizer(CellBaseTokenizer):
         # Divide cells into chunks and loop through chunks
         print('Ranking gene tokens based on normalized counts.')
         for i in range(0, len(adata), self.chunk_size):
-            if self.include_zero_expr_genes:
-                norm_counts_cell_rank = adata[
-                    i : i + self.chunk_size, coding_miRNA_idx].layers[
-                        'X_rank'].toarray()
-                norm_counts_cell_count = adata[
-                    i : i + self.chunk_size, coding_miRNA_idx].layers[
-                        'X_count'].toarray()
+            rank_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_rank']
+            count_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_count']
 
-                # Rank gene tokens and append across chunks
-                adata_dict['gene_tokens_cell'] += [
-                    rank_gene_tokens(norm_counts_cell_rank[j],
-                    coding_miRNA_tokens_cell)
-                    for j in range(norm_counts_cell_rank.shape[0])]
-
-                # Rank gene expression and append across chunks
-                adata_dict['gene_expr_cell'] += [
-                    norm_counts_cell_count[j][
-                        np.argsort(-norm_counts_cell_rank[j])]
-                    for j in range(norm_counts_cell_count.shape[0])]
-
+            if sp.issparse(rank_block):
+                rank_block = rank_block.toarray()
             else:
-                norm_counts_cell_rank = sp.csr_matrix(adata[
-                    i : i + self.chunk_size, coding_miRNA_idx].layers[
-                        'X_rank'])
-                norm_counts_cell_count = sp.csr_matrix(adata[
-                    i : i + self.chunk_size, coding_miRNA_idx].layers[
-                        'X_count'])              
+                rank_block = np.asarray(rank_block)
 
-                # Rank gene tokens and append across chunks
-                adata_dict['gene_tokens_cell'] += [
-                    rank_gene_tokens(
-                        norm_counts_cell_rank[j].data,
-                        coding_miRNA_tokens_cell[norm_counts_cell_rank[j].indices])
-                    for j in range(norm_counts_cell_rank.shape[0])]
+            if sp.issparse(count_block):
+                count_block = count_block.toarray()
+            else:
+                count_block = np.asarray(count_block)
 
-                # Rank gene expression and append across chunks
-                adata_dict['gene_expr_cell'] += [
-                    norm_counts_cell_count[j].data[
-                        np.argsort(-norm_counts_cell_rank[j].data)]
-                    for j in range(norm_counts_cell_count.shape[0])]
+            for j in range(rank_block.shape[0]):
+                rank_row = rank_block[j]
+                count_row = count_block[j]
 
-        adata_dict['gene_tokens_cell_neigh'] = adata_dict[
-            'gene_tokens_cell']
-        adata_dict['gene_expr_cell_neigh'] = adata_dict[
-            'gene_expr_cell']
+                # Primary sort: rank_row descending
+                # Tie-breaker: count_row descending
+                order = np.lexsort((-count_row, -rank_row))
+
+                sorted_tokens = coding_miRNA_tokens_cell[order].copy()
+                sorted_rank = rank_row[order]
+                sorted_expr = count_row[order].astype(np.float64, copy=True)
+
+                if not self.include_zero_expr_genes:
+                    zero_mask = (sorted_rank == 0)
+                    sorted_tokens[zero_mask] = 0
+                    sorted_expr[zero_mask] = 0.0
+
+                adata_dict['gene_tokens_cell'].append(sorted_tokens.tolist())
+                adata_dict['gene_expr_cell'].append(sorted_expr.tolist())
+
+        adata_dict['gene_tokens_cell_neigh'] = adata_dict['gene_tokens_cell']
+        adata_dict['gene_expr_cell_neigh'] = adata_dict['gene_expr_cell']
 
         print('Retrieving tokens for neighborhood cells.')
         adata_dict['gene_tokens_neighborhood'] = [
