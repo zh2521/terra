@@ -693,7 +693,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict['gene_expr_neighborhood'] = []
             
         if not self.rank_differs_from_count: # save memory by working with sparse arrays
-            print('Ranking gene tokens based on normalized counts.')
+            print('Ranking gene tokens based on normalized counts (sparse version).')
             for i in range(0, len(adata), self.chunk_size):
                 if self.include_zero_expr_genes:
                     norm_counts_cell_rank = adata[
@@ -737,6 +737,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                         for j in range(norm_counts_cell_count.shape[0])]
 
         else: # conversion to dense arrays which requires higher memory
+            print('Ranking gene tokens based on normalized counts (dense version).')
             for i in range(0, len(adata), self.chunk_size):
                 rank_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_rank']
                 count_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_count']

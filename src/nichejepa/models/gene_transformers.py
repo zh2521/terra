@@ -196,11 +196,11 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             attn_base: torch.Tensor | None,
             layers: Sequence[int],
             masks: list[torch.Tensor] | torch.Tensor | None,
-            n_included_cells: int,
+            cell_only: bool,
             ignore_spc_tokens: bool = False) -> dict[int, torch.Tensor]:
         """
         Helper function to return embeddings for either full context or
-        masked cell context.
+        cell only context.
         """
         layers: list[int] = sorted({int(l) for l in layers})
         max_layer: int = max(layers)
@@ -208,8 +208,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # Format masks
         if masks is not None and not isinstance(masks, list):
             masks = [masks]
-
-        x = x.clone()
 
         attn = None
         if attn_base is not None:
@@ -221,16 +219,22 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             #    # Never attend to special tokens
             #    if self.n_special_tokens > 0:
             #        attn[:, :, :, :self.n_special_tokens] = False
-            # Block attention from included cell queries to excluded cell keys
-            if n_included_cells:
+            # Optionally block cross-attention from cell queries to
+            # neighborhood keys
+            if cell_only:
                 attn[
                     :,
                     :,
-                    self.n_special_tokens: (self.n_special_tokens + self.seq_len_cell * n_included_cells),
-                    (self.n_special_tokens + self.seq_len_cell * n_included_cells):] = False
+                    self.n_special_tokens:(self.n_special_tokens+self.seq_len_cell),
+                    (self.n_special_tokens+self.seq_len_cell):] = False
 
-        if n_included_cells:
-            x[:, (self.n_special_tokens + self.seq_len_cell * n_included_cells):, :] = 0
+        if cell_only:
+            x[:, (self.n_special_tokens+self.seq_len_cell):, :] = 0
+
+            #torch.set_printoptions(profile="full")
+            #print(attn.shape)
+            #print(attn[0, :, 1, :])
+            #print(attn[0, :, 513, :])
 
         # Mask token embeddings if masks are provided
         if masks is not None:
@@ -1208,9 +1212,10 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
             batch: Mapping[str, torch.Tensor],
             masks: list[torch.Tensor] | torch.Tensor | None = None,
             masks_attention: torch.Tensor | None = None,
-            n_included_cells_list: list[int] = [],
+            need_cell_only_context: bool = True,
             ignore_spc_tokens: bool = True,
-            ) -> dict[int, dict[int, torch.Tensor]]:
+            ) -> tuple[
+                dict[int, torch.Tensor], dict[int, torch.Tensor] | None]:
         """
         Run encoder forward pass on a batch of cell graph sequences,
         applying masks if provided, and return the embeddings for
@@ -1323,18 +1328,22 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         #    if self.n_special_tokens:
         #        x[:, :self.n_special_tokens, :] = 0
 
-        ctx_layer_gene_emb = {}
-        for n_included_cells in n_included_cells_list:
-            layer_gene_emb: dict[int, torch.Tensor] = self._compute_layer_emb(
-                x,
-                masks_attention,
-                layers,
-                masks,
-                n_included_cells=n_included_cells,
-                ignore_spc_tokens=ignore_spc_tokens)
-            ctx_layer_gene_emb[n_included_cells] = layer_gene_emb
+        full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
+            x,
+            masks_attention,
+            layers,
+            masks,
+            cell_only=False,
+            ignore_spc_tokens=ignore_spc_tokens)
+        cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
+            x,
+            masks_attention,
+            layers,
+            masks,
+            cell_only=True,
+            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
 
-        return ctx_layer_gene_emb
+        return full_ctx, cell_only_ctx
 
 
 class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
