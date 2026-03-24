@@ -342,6 +342,7 @@ def harmonize_tokenize_embed_pipeline(
         nproc: int = 4,
         processing_mode: Literal['sequential',
                                  'parallel'] = 'parallel',
+        harmonized_adata_save_path: Path | str | None = None,
         save_dataset_path: Path | str | None = None,
         num_shards: int = 32,
         emb_layer: int | None = None,
@@ -382,6 +383,8 @@ def harmonize_tokenize_embed_pipeline(
         Number of processes used for tokenization.
     processing_mode:
         Mode of processing used for tokenization.
+    harmonized_adata_save_path:
+        If specified, harmonized AnnData is written to disk at this path.
     save_dataset_path:
         If specified, huggingface dataset is written to disk at this path.
     num_shards:
@@ -486,7 +489,13 @@ def harmonize_tokenize_embed_pipeline(
             nproc=nproc,
             processing_mode=processing_mode,
             add_neigh_cell_ids=add_neigh_cell_ids,
-            use_generator=use_generator)        
+            use_generator=use_generator)       
+
+    if harmonized_adata_save_path:
+        print('==================================================')
+        print(f"Saving harmonized data...")
+        adata.write(harmonized_adata_save_path)
+        print(f"Saved harmonized data.")
 
     if save_dataset_path:
         print('==================================================')
