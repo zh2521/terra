@@ -205,7 +205,8 @@ def embed_dataset(dataset: Dataset,
         sampling_strategy=None,
         n_nonzero_tokens_list=[],
         include_cell_id=True,
-        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'],
+        pad_special_tokens=True,)
 
     # Initialize dataloader
     loader, _ = init_dataloader_and_sampler(
@@ -486,7 +487,8 @@ def harmonize_tokenize_embed_pipeline(
                 model_folder_path=model_folder_path,
                 cache_directory_path=cache_directory_path,             
                 nproc=nproc,
-                processing_mode=processing_mode)
+                processing_mode=processing_mode,
+                include_special_tokens=False)
             datasets.append(dataset_sample)
             print(f"Tokenized sample {sample}.")
             print('==================================================')
@@ -513,7 +515,10 @@ def harmonize_tokenize_embed_pipeline(
             species=species,
             min_cells_per_gene=min_cells_per_gene,
             min_genes_per_cell=min_genes_per_cell)
-        adata.obs[batch_key] = harmonized_adata_save_path.split('.')[0].split('/')[-1]
+        if harmonized_adata_save_path:
+            adata.obs[batch_key] = harmonized_adata_save_path.split('.')[0].split('/')[-1]
+        else:
+            adata.obs[batch_key] = adata.uns['batch']
         print(f"Harmonized AnnData.")
         print('==================================================')
         print(f"Tokenizing AnnData.")
@@ -721,7 +726,8 @@ def gene_embed_dataset(dataset: Dataset,
         sampling_strategy=None,
         n_nonzero_tokens_list=[],
         include_cell_id=True,
-        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'])
+        sep_gene_tokens_neb=model_config['data']['sep_gene_tokens_neb'],
+        pad_special_tokens=True,)
 
     # Initialize dataloader
     loader, _ = init_dataloader_and_sampler(

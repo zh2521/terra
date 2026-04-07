@@ -24,6 +24,7 @@ class CellBaseDataset(Dataset):
                  include_cell_id: bool = False,
                  sep_gene_tokens_neb: bool = False,
                  nz_spc: bool = True,
+                 pad_special_tokens: bool = False,
                  ):
         """
         Torch CellBaseDataset class.
@@ -97,6 +98,7 @@ class CellBaseDataset(Dataset):
         self.include_cell_id = include_cell_id
         self.sep_gene_tokens_neb = sep_gene_tokens_neb
         self.nz_spc = nz_spc
+        self.pad_special_tokens = pad_special_tokens
 
     def __len__(self) -> int:
         return self.len
@@ -548,6 +550,10 @@ class CellGraphDataset(CellBaseDataset):
 
         # Add special tokens
         if self.n_special_tokens > 0:
+            if self.pad_special_tokens:
+                for spc_tk in self.special_tokens:
+                    item[f'{spc_tk}_token'] = torch.tensor([0] * self.n_special_tokens)
+                    item[f'{spc_tk}_value'] = torch.tensor([0] * self.n_special_tokens)
             item_dict = self._add_special_seq(item=item,
                                               item_dict=item_dict)
 
@@ -623,17 +629,21 @@ class CellNeighborhoodDataset(CellBaseDataset):
             item_dict['rel_y_coords'] = torch.cat(
                 [rel_y_coords_cell, rel_y_coords_neigh], dim=0)
 
-        if self.gt_type != 'count':
+        if self.gt_type != 'counts':
             item_dict['positions'] = torch.cat([
                 torch.arange(1, gene_tokens_cell.size(0) + 1),
                 torch.arange(1, gene_tokens_neigh.size(0) + 1)])
             item_dict['positions'] = item_dict['positions'] * (
-                item_dict['tokens'] != 0).to(positions.dtype)
+                item_dict['tokens'] != 0).to(item_dict['positions'].dtype)
 
         if self.gt_type != 'rank':
             item_dict['values'] = torch.cat([values_cell, values_neigh], dim=0)
 
         # Add special tokens
+        if self.pad_special_tokens:
+            for spc_tk in self.special_tokens:
+                item[f'{spc_tk}_token'] = torch.tensor([0] * self.n_special_tokens)
+                item[f'{spc_tk}_value'] = torch.tensor([0] * self.n_special_tokens)
         item_dict = self._add_special_seq(item=item,
                                           item_dict=item_dict)
 
