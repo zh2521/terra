@@ -38,8 +38,8 @@ meta:
   add_cls: False
   n_cls: 1
   gt_type: 'combined' # 'rank', 'counts', 'combined'
-  count_encoding: 'value_bins' # 'value_bins', 'mlp'
-  n_value_bins: 50
+  count_encoding: 'mlp' # 'value_bins', 'mlp'
+  n_value_bins: 20
   cell_pos_enc: 'segment'
   enc_depth: 3
   enc_emb_dim: 768
@@ -47,7 +47,7 @@ meta:
   pred_emb_dim: 768 # 384
   num_heads: 8
   mlp_ratio: 4
-  special_tokens: ['batch'] # ['batch'] # ['batch', 'assay'] # ['batch'] []
+  special_tokens: [] # ['batch'] # ['batch', 'assay'] # ['batch'] []
   pos_learnable: False
   seg_learnable: False
   use_bfloat16: True
@@ -87,7 +87,7 @@ optimization:
   lambda_cov: 0.
 state:
   log_freq: 20
-  checkpoint_freq: 5
+  checkpoint_freq: 100
   write_tag: nichejepa
   read_timestamp: ''
   folder_path: null

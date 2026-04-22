@@ -339,8 +339,6 @@ class CellBaseDataset(Dataset):
             self.sampling_strategy):
                 pass
             else:
-                print("ayee", segment_tokens.size(0))
-                print("byee", segment_seq_len)
                 if segment_tokens.size(0) < segment_seq_len:
                     torch.set_printoptions(threshold=float('inf'))
                     print(segment_tokens.size(0))
