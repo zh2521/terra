@@ -8,7 +8,7 @@ data:
   count_cell_norm_method: null
   count_gene_norm_method: null
   count_count_norm_method: null
-  raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/mmb0-1b_smb1-1b_2p_coord_aligned'
+  raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/mmb0-1b_smb1-1b_2p'
   token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_mus_musculus.pkl'
   tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_2p_coord_aligned/mmb0-1b_smb1-1b_2p_coord_aligned_32_None_None_None_None_None_None_knn_10_704.dataset'
   precomputed_split: null
@@ -40,7 +40,7 @@ meta:
   gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
-  cell_pos_enc: 'segment' # 'rope'
+  cell_pos_enc: 'segment'
   enc_depth: 3
   enc_emb_dim: 768
   pred_depth: 1
@@ -58,9 +58,6 @@ meta:
   excl_spc_from_loss: True # True, False
   target_enc_layer_norm: True
   restrict_special_attention: False
-  rope_freq_scale: 3.141592653589793  # π — the default, keep it
-  rope_rotation_augment: True
-  rope_coord_normalization: 'none'
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -91,14 +88,9 @@ optimization:
 state:
   log_freq: 20
   checkpoint_freq: 5
-  write_tag: stjepa
+  write_tag: nichejepa
   read_timestamp: ''
   folder_path: null
   load_checkpoint: False # true, false
-  read_checkpoint: null # null, 'stjepa-ep5.pth.tar'
+  read_checkpoint: null # null, 'nichejepa-ep5.pth.tar'
   checkpoint_freq_iter: 50000
-protein_init:
-  enabled: True
-  embedding_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.pt
-  mapping_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.json
-  proj_bias: False

@@ -32,6 +32,52 @@ def apply_peft(model, peft_method='lora', rank=8):
     return model
 """
 
+def parse_protein_init_kwargs(args: dict,
+                              token_dict: dict | None = None,
+                              ) -> dict | None:
+    """Resolve the optional ``protein_init`` config block into encoder kwargs.
+
+    Mirrors the parsing used by ``train.py`` so other entry points
+    (``finetune.py``, every script under ``app/inference/``) can rebuild
+    a protein-init-trained encoder with one call.
+
+    Returns ``None`` if the ``protein_init`` section is absent or
+    ``enabled: false``, in which case the encoder falls back to the
+    default learnable ``nn.Embedding`` (existing behavior).
+    """
+    cfg = args.get('protein_init', None)
+    if not (cfg and cfg.get('enabled', False)):
+        logger.info(
+            "Protein-init: DISABLED -- using the default learnable "
+            "nn.Embedding for gene tokens.")
+        return None
+    kwargs = {
+        'embedding_path': cfg['embedding_path'],
+        'mapping_path':   cfg['mapping_path'],
+        'proj_bias':      cfg.get('proj_bias', False),
+    }
+    # Optional: override which Ensembl gene-ID prefixes count as gene
+    # tokens (default in protein_init covers human ENSG + mouse ENSMUSG).
+    # YAML can pass a single string or a list.
+    if 'gene_id_prefixes' in cfg:
+        prefixes = cfg['gene_id_prefixes']
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        kwargs['gene_id_prefixes'] = list(prefixes)
+    logger.info(
+        "Protein-init: ENABLED -- frozen ESM + learnable projection "
+        "(UCE-style). embedding=%s | mapping=%s | proj_bias=%s%s",
+        kwargs['embedding_path'],
+        kwargs['mapping_path'],
+        kwargs['proj_bias'],
+        f" | gene_id_prefixes={kwargs['gene_id_prefixes']}"
+        if 'gene_id_prefixes' in kwargs else "",
+    )
+    if token_dict is not None:
+        kwargs['token_dict'] = token_dict
+    return kwargs
+
+
 def load_checkpoint(device: str,
                     r_path: str,
                     encoder: gt.GeneTransformerBaseEncoder,
@@ -174,6 +220,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                nz_spc: bool = False,
                new_spc: bool = False,
                mlp_bias: bool = False,
+               protein_init_kwargs: dict | None = None,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -246,7 +293,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         sep_gene_tokens_neb=sep_gene_tokens_neb,
         pos_learnable=pos_learnable,
         nz_spc=nz_spc,
-        mlp_bias=mlp_bias)
+        mlp_bias=mlp_bias,
+        protein_init_kwargs=protein_init_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
