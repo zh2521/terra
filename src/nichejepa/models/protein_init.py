@@ -243,12 +243,16 @@ class ProteinInitTokenEmbedding(nn.Module):
 
         self.protein_proj = nn.Linear(esm_dim, embed_dim, bias=proj_bias)
 
+        # Use nn.Embedding's *default* init — N(0, 1) per element, with
+        # row `padding_idx` zeroed. That matches the baseline encoder
+        # (which is a plain nn.Embedding for the whole vocab and isn't
+        # touched by the codebase's trunc_normal_(0.02) Linear init).
+        # IMPORTANT: do NOT trunc_normal_(0.02) here -- it makes
+        # special tokens (CLS / batch / spv_* / spt_*) start ~50x
+        # smaller than the segment/value embeddings they're summed with,
+        # which silently destroys early training for protein-init runs
+        # that have many special tokens in the vocab.
         self.special_emb = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
-        trunc_normal_(self.special_emb.weight, std=init_std)
-        with torch.no_grad():
-            # nn.Embedding(..., padding_idx=p) zeros row p on construction,
-            # but trunc_normal_ overwrote it. Re-zero explicitly.
-            self.special_emb.weight[padding_idx].zero_()
 
         self.register_buffer("gene_mask", gene_mask.to(torch.bool), persistent=True)
 
