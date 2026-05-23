@@ -222,6 +222,7 @@ class ProteinInitTokenEmbedding(nn.Module):
                  padding_idx: int = 0,
                  init_std: float = 0.02,
                  proj_bias: bool = False,
+                 use_layer_norm: bool = True,
                  ):
         super().__init__()
         if protein_matrix.shape[0] != vocab_size:
@@ -241,17 +242,30 @@ class ProteinInitTokenEmbedding(nn.Module):
             padding_idx=padding_idx,
         )
 
+        # LayerNorm on the ESM input before projection. Without this,
+        # the projection has to absorb per-gene magnitude variation in
+        # the (raw) ESM-C output -- short / disordered / domain-rich
+        # proteins have wildly different vector norms, so the projection
+        # output scale ends up gene-dependent, which the rest of the
+        # encoder can't easily compensate for. This matches UCE's
+        # standard pattern of feeding ESM through a LayerNorm before
+        # the downstream model.
+        self.use_layer_norm = use_layer_norm
+        if use_layer_norm:
+            self.protein_norm = nn.LayerNorm(esm_dim)
+        else:
+            self.protein_norm = nn.Identity()
+
         self.protein_proj = nn.Linear(esm_dim, embed_dim, bias=proj_bias)
 
-        # Use nn.Embedding's *default* init — N(0, 1) per element, with
+        # Use nn.Embedding's *default* init -- N(0, 1) per element, with
         # row `padding_idx` zeroed. That matches the baseline encoder
         # (which is a plain nn.Embedding for the whole vocab and isn't
         # touched by the codebase's trunc_normal_(0.02) Linear init).
-        # IMPORTANT: do NOT trunc_normal_(0.02) here -- it makes
-        # special tokens (CLS / batch / spv_* / spt_*) start ~50x
-        # smaller than the segment/value embeddings they're summed with,
-        # which silently destroys early training for protein-init runs
-        # that have many special tokens in the vocab.
+        # IMPORTANT: do NOT trunc_normal_(0.02) here -- it makes special
+        # tokens (CLS / batch / spv_* / spt_*) start ~50x smaller than
+        # the segment / value embeddings they're summed with, which
+        # silently destroys early training.
         self.special_emb = nn.Embedding(vocab_size, embed_dim, padding_idx=padding_idx)
 
         self.register_buffer("gene_mask", gene_mask.to(torch.bool), persistent=True)
@@ -262,7 +276,7 @@ class ProteinInitTokenEmbedding(nn.Module):
         self.padding_idx = padding_idx
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
-        proj_emb = self.protein_proj(self.protein_emb(tokens))
+        proj_emb = self.protein_proj(self.protein_norm(self.protein_emb(tokens)))
         spec_emb = self.special_emb(tokens)
         route = self.gene_mask[tokens].unsqueeze(-1)
         return torch.where(route, proj_emb, spec_emb)
@@ -270,6 +284,7 @@ class ProteinInitTokenEmbedding(nn.Module):
     def extra_repr(self) -> str:
         return (f"vocab_size={self.vocab_size}, embed_dim={self.embed_dim}, "
                 f"esm_dim={self.esm_dim}, padding_idx={self.padding_idx}, "
+                f"use_layer_norm={self.use_layer_norm}, "
                 f"n_gene_tokens={int(self.gene_mask.sum().item())}")
 
 
@@ -283,6 +298,7 @@ def build_protein_init_token_embedding(
         padding_idx: int = 0,
         init_std: float = 0.02,
         proj_bias: bool = False,
+        use_layer_norm: bool = True,
         gene_id_prefixes: Sequence[str] = DEFAULT_ENSEMBL_GENE_ID_PREFIXES,
         log: bool = True,
         ) -> ProteinInitTokenEmbedding:
@@ -309,6 +325,7 @@ def build_protein_init_token_embedding(
         padding_idx=padding_idx,
         init_std=init_std,
         proj_bias=proj_bias,
+        use_layer_norm=use_layer_norm,
     )
     if log:
         # Multi-line banner so it's obvious in the training logs that
@@ -320,10 +337,42 @@ def build_protein_init_token_embedding(
         if module.protein_proj.bias is not None:
             n_trainable_proj += int(module.protein_proj.bias.numel())
         n_trainable_special = int(module.special_emb.weight.numel())
+        n_trainable_ln = (sum(p.numel() for p in module.protein_norm.parameters())
+                          if use_layer_norm else 0)
         missing_preview = (
             ", ".join(stats["missing_gene_examples"])
             if stats["missing_gene_examples"] else "<none>"
         )
+
+        # Scale diagnostic: compare init-time magnitudes of the gene-
+        # token branch vs the special-token branch. If these differ by
+        # more than ~5x, the additive `seg + token + value` sum is
+        # dominated by one branch and training will struggle.
+        with torch.no_grad():
+            gene_token_ids = torch.nonzero(gene_mask, as_tuple=False).squeeze(-1)
+            spec_token_ids = torch.nonzero(~gene_mask, as_tuple=False).squeeze(-1)
+            # Sample up to 256 of each to keep the diagnostic cheap.
+            if gene_token_ids.numel() > 256:
+                gene_token_ids = gene_token_ids[
+                    torch.randperm(gene_token_ids.numel())[:256]]
+            if spec_token_ids.numel() > 256:
+                # Skip row padding_idx since it's zero by design.
+                spec_token_ids = spec_token_ids[spec_token_ids != padding_idx]
+                if spec_token_ids.numel() > 256:
+                    spec_token_ids = spec_token_ids[
+                        torch.randperm(spec_token_ids.numel())[:256]]
+            gene_out = module.protein_proj(
+                module.protein_norm(module.protein_emb(gene_token_ids)))
+            spec_out = module.special_emb(spec_token_ids)
+            esm_raw = module.protein_emb(gene_token_ids)
+            esm_elem_std = float(esm_raw.std().item())
+            esm_row_norm = float(esm_raw.norm(dim=-1).mean().item())
+            gene_elem_std = float(gene_out.std().item())
+            gene_row_norm = float(gene_out.norm(dim=-1).mean().item())
+            spec_elem_std = float(spec_out.std().item())
+            spec_row_norm = float(spec_out.norm(dim=-1).mean().item())
+            scale_ratio = gene_elem_std / max(spec_elem_std, 1e-8)
+
         banner = (
             "\n"
             "================================================================\n"
@@ -343,11 +392,22 @@ def build_protein_init_token_embedding(
             f"   Effective vocab size         : "
             f"{stats['effective_vocab_size']} "
             f"(sep_gene_tokens_neb={sep_gene_tokens_neb})\n"
+            f"   LayerNorm before projection  : {use_layer_norm}\n"
             f"   Frozen params (ESM matrix)   : {n_frozen:,}\n"
             f"   Trainable: projection        : {n_trainable_proj:,} "
             f"({stats['esm_dim']}x{embed_dim}, bias={proj_bias})\n"
+            f"   Trainable: LayerNorm         : {n_trainable_ln:,}\n"
             f"   Trainable: special embedding : {n_trainable_special:,} "
             f"({stats['effective_vocab_size']}x{embed_dim})\n"
+            "   Init-time scale diagnostics --\n"
+            f"     raw ESM       : elem_std={esm_elem_std:.3f}, "
+            f"row_norm={esm_row_norm:.2f}\n"
+            f"     gene branch   : elem_std={gene_elem_std:.3f}, "
+            f"row_norm={gene_row_norm:.2f}  (proj output)\n"
+            f"     special branch: elem_std={spec_elem_std:.3f}, "
+            f"row_norm={spec_row_norm:.2f}  (target ~1.0)\n"
+            f"     gene/special elem_std ratio : {scale_ratio:.2f}x "
+            f"(target ~1.0; >5x or <0.2x means scale mismatch)\n"
             f"   Missing-gene examples        : {missing_preview}\n"
             "================================================================"
         )

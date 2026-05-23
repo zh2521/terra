@@ -144,6 +144,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 padding_idx=0,
                 init_std=init_std,
                 proj_bias=protein_init_kwargs.get("proj_bias", False),
+                use_layer_norm=protein_init_kwargs.get(
+                    "use_layer_norm", True),
                 **_pi_extra,
             )
         else:
