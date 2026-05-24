@@ -7,6 +7,14 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
+# Encoder modes that need per-token rel_x / rel_y coordinates attached
+# to each batch item. 'coord' uses them directly via sincos; 'polar'
+# recomputes (log(1+r), theta) from them at encoder forward time;
+# 'alibi' uses them to build the per-head attention distance bias.
+# 'segment' only needs the segment IDs, so coords are not attached.
+_COORD_BASED_POS_ENCS = ('coord', 'polar', 'alibi')
+
+
 class CellBaseDataset(Dataset):
     def __init__(self,
                  gt_type: Literal['rank', 'counts', 'combined'],
@@ -57,7 +65,13 @@ class CellBaseDataset(Dataset):
         """
         if gt_type not in ['rank', 'counts', 'combined']:
             raise ValueError(f'Invalid "gt_type": {gt_type}.')
-        if cell_pos_enc not in ['segment', 'coord']:
+        # 'polar' and 'alibi' both consume the same per-cell rel_x /
+        # rel_y the dataset already provides in 'coord' mode (polar
+        # recomputes (r, theta) from them at the encoder; alibi uses
+        # them to build the attention distance bias). 'segment' uses
+        # only segment IDs. So at the dataset level, polar/alibi need
+        # exactly the same rel-coord columns as coord.
+        if cell_pos_enc not in ['segment', 'coord', 'polar', 'alibi']:
             raise ValueError(f'Invalid "cell_pos_enc": {cell_pos_enc}.')
         
         self.gt_type = gt_type
@@ -173,7 +187,7 @@ class CellBaseDataset(Dataset):
                 item_dict['segments']])
 
         # Add special token coords
-        if self.cell_pos_enc == 'coord':
+        if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
             item_dict['rel_x_coords'] = torch.cat(
                 [torch.full((self.n_special_tokens,),
                  float('-inf'), dtype=torch.float),
@@ -320,7 +334,7 @@ class CellBaseDataset(Dataset):
                     segment_start_idx: segment_end_idx]
             else:
                 segment_values = None
-            if self.cell_pos_enc == 'coord':
+            if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                 segment_rel_x_coords = item['rel_x_coord'][
                     segment_start_idx: segment_end_idx]
                 segment_rel_y_coords = item['rel_y_coord'][
@@ -354,7 +368,7 @@ class CellBaseDataset(Dataset):
                 segment_tokens = segment_tokens[:segment_seq_len]
                 if self.gt_type != 'rank':
                     segment_values = segment_values[:segment_seq_len]
-                if self.cell_pos_enc == 'coord':
+                if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                     segment_rel_x_coords = segment_rel_x_coords[
                         :segment_seq_len]
                     segment_rel_y_coords = segment_rel_y_coords[
@@ -452,7 +466,7 @@ class CellGraphDataset(CellBaseDataset):
         item_dict['segments'][segment_token_zero_mask] = torch.tensor(
             0, dtype=torch.long)
 
-        if self.cell_pos_enc == 'coord':
+        if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
             item_dict['rel_x_coords'][segment_token_zero_mask] = torch.tensor(
                 float('-inf'), dtype=torch.float)
             item_dict['rel_y_coords'][segment_token_zero_mask] = torch.tensor(
@@ -499,7 +513,7 @@ class CellGraphDataset(CellBaseDataset):
                     torch.tensor(0, dtype=torch.long)).to(dtype=torch.long)
                 item_dict['segments'] = torch.cat(
                     [item_dict['segments'], segment_tensor], dim=0)
-                if self.cell_pos_enc == 'coord':
+                if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                     segment_rel_x_coords[segment_zero_mask] = torch.tensor(
                         float('-inf'), dtype=torch.float)
                     segment_rel_y_coords[segment_zero_mask] = torch.tensor(
@@ -520,7 +534,7 @@ class CellGraphDataset(CellBaseDataset):
                 item_dict['positions'] = item_dict['positions'][:target_len]
             if self.gt_type != 'rank':
                 item_dict['values'] = item_dict['values'][:target_len]
-            if self.cell_pos_enc == 'coord':
+            if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                 item_dict['rel_x_coords'] = item_dict['rel_x_coords'][
                     :target_len]
                 item_dict['rel_y_coords'] = item_dict['rel_y_coords'][
@@ -538,7 +552,7 @@ class CellGraphDataset(CellBaseDataset):
             if self.gt_type != 'rank':
                 item_dict['values'] = F.pad(
                     item_dict['values'], (0, pad_len), value=0.0)
-            if self.cell_pos_enc == 'coord':
+            if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                 item_dict['rel_x_coords'] = F.pad(
                     item_dict['rel_x_coords'],
                     (0, pad_len),
@@ -638,7 +652,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
                 segment_start_idx:segment_end_idx]
         else:
             segment_values = None
-        if self.cell_pos_enc == 'coord':
+        if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
             segment_rel_x_coords = item['rel_x_coord'][
                 segment_start_idx:segment_end_idx]
             segment_rel_y_coords = item['rel_y_coord'][
@@ -667,7 +681,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
             segment_tokens = segment_tokens[:segment_seq_len]
             if self.gt_type != 'rank':
                 segment_values = segment_values[:segment_seq_len]
-            if self.cell_pos_enc == 'coord':
+            if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
                 segment_rel_x_coords = segment_rel_x_coords[
                     :segment_seq_len]
                 segment_rel_y_coords = segment_rel_y_coords[
@@ -744,7 +758,7 @@ class CellNeighborhoodDataset(CellBaseDataset):
                 dtype=torch.long)
         item_dict['segments'] = torch.cat(
             [segments_cell, segments_neigh], dim=0)
-        if self.cell_pos_enc == 'coord':
+        if self.cell_pos_enc in _COORD_BASED_POS_ENCS:
             item_dict['rel_x_coords'] = torch.cat(
                 [rel_x_coords_cell, rel_x_coords_neigh], dim=0)
             item_dict['rel_y_coords'] = torch.cat(
