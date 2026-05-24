@@ -9,7 +9,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transforme
 import math
 from abc import ABC, abstractmethod
 from functools import partial
-from typing import Dict, Literal, Mapping, Sequence, Tuple
+from typing import Dict, Literal, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -42,8 +42,13 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
     n_segments:
         Number of token segments within a token sequence.
     cell_pos_enc:
-        Cell position encoding. Either `segment` if cells are ranked
-        based on distance to index cell or `coords` if relative
+        Cell position encoding. One of:
+        - ``segment``: cells ranked by NN distance, fixed sincos by rank.
+        - ``coord``: relative (x, y) sincos'd independently.
+        - ``polar``: (log(1+r), theta) from (rel_x, rel_y), each sincos'd.
+        - ``alibi``: segment input encoding + per-head distance-decaying
+          attention bias.
+        Older docstring text kept for reference: `segment` if cells are ranked
         positions to index cell are used.
     embed_dim:
         Dimension of the encoder embedding.
@@ -87,7 +92,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 cell_pos_enc: Literal['segment', 'coord'],
+                 cell_pos_enc: Literal['segment', 'coord', 'polar', 'alibi'],
                  embed_dim: int = 768,
                  depth: int = 12,
                  predictor_embed_dim: int = 384,
@@ -180,13 +185,17 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 embed_dim,
                 padding_idx=0)
 
-        # Initialize segment embeddings
-        if self.cell_pos_enc == 'segment':
+        # Initialize segment embeddings. Used by 'segment' mode (the
+        # full positional signal) and also by 'alibi' mode (where it
+        # still carries useful ordinal nearest-neighbor info at the
+        # input; the distance-dependent signal is added at attention
+        # time via the alibi bias).
+        if self.cell_pos_enc in ('segment', 'alibi'):
             self.seg_embed = nn.Embedding(
                 1 + n_segments + (105 if api_version == 'v1' else 0) + (self.n_special_tokens if self.nz_spc else 0), # include <pad>
                 embed_dim,
                 padding_idx=0)
-        
+
             # Prevent gradient updates and initialize with sincos embedding,
             # including special segments
             self.seg_embed.weight.requires_grad = False
@@ -216,12 +225,22 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.apply(self._init_weights)
         self._rescale_blocks()
 
-        # Compute omega for segment embedding: 1 / 10000^{2i/dim}
-        if self.cell_pos_enc == 'coord':
+        # Compute omega for coord-based positional sincos: 1 / 10000^{2i/dim}
+        # Used by both 'coord' (sincos of rel_x, rel_y) and 'polar'
+        # (sincos of log(1+r), theta).
+        if self.cell_pos_enc in ('coord', 'polar'):
             self.coord_omega = torch.arange(
                 embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
                 10000 ** (self.coord_omega / (embed_dim / 4)))
+
+        # ALiBi-style attention bias: per-head slope buffer that scales
+        # the negative pairwise distance into an additive attention
+        # logit term. Computed once at construction and broadcast over
+        # the batch dimension in the forward.
+        if self.cell_pos_enc == 'alibi':
+            slopes = self._get_alibi_slopes(num_heads)
+            self.register_buffer("alibi_slopes", slopes, persistent=False)
 
     def _rescale_blocks(self):
         """
@@ -348,11 +367,160 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        elif self.cell_pos_enc == 'polar':
+            # Reparameterize (rel_x, rel_y) -> (log(1 + r), theta) so
+            # distance (which biology cares about) and angle (which is
+            # naturally periodic and well-suited to sincos) are the
+            # two encoded channels. log1p handles r=0 and r in
+            # [10 um, 1 mm] with even resolution. Special-token
+            # positions (rel_x = -inf) are detected and the resulting
+            # log_r / theta are set back to -inf so that
+            # `get_1d_sincos_pos_embed_from_coord`'s existing -inf
+            # handling zeroes them out -- same behavior as the
+            # 'coord' branch for special tokens.
+            rel_x = batch['rel_x_coords']
+            rel_y = batch['rel_y_coords']
+            special_mask = torch.isneginf(rel_x) | torch.isneginf(rel_y)
+            zero = torch.zeros_like(rel_x)
+            rel_x_safe = torch.where(special_mask, zero, rel_x)
+            rel_y_safe = torch.where(special_mask, zero, rel_y)
+            r = torch.sqrt(rel_x_safe ** 2 + rel_y_safe ** 2)
+            theta = torch.atan2(rel_y_safe, rel_x_safe)
+            log_r = torch.log1p(r)
+            neg_inf = torch.full_like(log_r, float('-inf'))
+            log_r = torch.where(special_mask, neg_inf, log_r)
+            theta = torch.where(special_mask, neg_inf, theta)
+            r_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                omega=self.coord_omega,
+                coord=log_r)
+            theta_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.embed_dim // 2,
+                omega=self.coord_omega,
+                coord=theta)
+            seg_emb = torch.cat([r_emb, theta_emb], dim=-1)
+        elif self.cell_pos_enc == 'alibi':
+            # ALiBi mode: keep the ordinal segment encoding at input
+            # (cheap and helpful) and add a per-head distance bias at
+            # attention time -- see _compute_attention_bias.
+            seg_emb = self.seg_embed(batch['segments'])
         else:
             raise ValueError(
                 f"Unknown cell_pos_enc: {self.cell_pos_enc}.")
 
         return seg_emb
+
+    @staticmethod
+    def _get_alibi_slopes(num_heads: int) -> torch.Tensor:
+        """ALiBi per-head slopes (Press et al. 2022). Geometric
+        progression starting at 2^(-8/H), so different heads attend
+        at different spatial scales: short heads see only nearby
+        cells, long heads see across the whole neighborhood.
+        Handles non-power-of-2 ``num_heads`` by interpolating between
+        the closest powers of 2 (the standard ALiBi recipe).
+        """
+        def _slopes_for_power_of_2(n: int):
+            start = 2 ** (-(2 ** -(math.log2(n) - 3)))
+            return [start * (start ** i) for i in range(n)]
+
+        if math.log2(num_heads).is_integer():
+            slopes = _slopes_for_power_of_2(num_heads)
+        else:
+            closest = 2 ** math.floor(math.log2(num_heads))
+            slopes = (_slopes_for_power_of_2(closest)
+                      + _slopes_for_power_of_2(2 * closest)[0::2]
+                      [: num_heads - closest])
+        return torch.tensor(slopes, dtype=torch.float32)
+
+    def _compute_alibi_bias(self, batch: dict) -> torch.Tensor:
+        """Return per-head additive attention bias of shape
+        ``(B, num_heads, L, L)`` based on pairwise spatial distance
+        between cells. Bias is `-slope[h] * ||cell_i - cell_j||`, so
+        nearby cells stay near 0 and far cells receive a strong
+        negative bias that softmax suppresses. Special tokens
+        (rel_x = -inf) get zero bias to/from everywhere -- they are
+        spatially "anywhere" and should be free to attend globally.
+        """
+        rel_x = batch['rel_x_coords']  # (B, L)
+        rel_y = batch['rel_y_coords']  # (B, L)
+        special_mask = torch.isneginf(rel_x) | torch.isneginf(rel_y)  # (B, L)
+        zero = torch.zeros_like(rel_x)
+        rel_x = torch.where(special_mask, zero, rel_x)
+        rel_y = torch.where(special_mask, zero, rel_y)
+
+        dx = rel_x.unsqueeze(2) - rel_x.unsqueeze(1)  # (B, L, L)
+        dy = rel_y.unsqueeze(2) - rel_y.unsqueeze(1)
+        dist = torch.sqrt(dx * dx + dy * dy + 1e-12)  # (B, L, L)
+
+        # Zero out distance whenever either side is a special token.
+        not_special = (~special_mask).to(dist.dtype)
+        dist = dist * not_special.unsqueeze(2) * not_special.unsqueeze(1)
+
+        # (B, H, L, L)
+        slopes = self.alibi_slopes.to(dist.device, dist.dtype)
+        bias = -slopes.view(1, -1, 1, 1) * dist.unsqueeze(1)
+        return bias
+
+    @staticmethod
+    def _slice_alibi_by_indices(
+            alibi: torch.Tensor, keep_indices: torch.Tensor
+            ) -> torch.Tensor:
+        """Slice a full-sequence alibi bias ``(B, H, L, L)`` down to
+        the ``keep_indices`` positions, returning
+        ``(B, H, M, M)`` where ``M = keep_indices.size(1)``. Used when
+        the encoder applies a JEPA mask to its input -- the bias has
+        to be sliced consistently so the per-token attention scores
+        match the per-token positions in the reduced sequence.
+        """
+        B, H, L, _ = alibi.shape
+        M = keep_indices.size(1)
+        row_idx = keep_indices.unsqueeze(1).unsqueeze(-1).expand(B, H, M, L)
+        alibi = torch.gather(alibi, 2, row_idx)
+        col_idx = keep_indices.unsqueeze(1).unsqueeze(2).expand(B, H, M, M)
+        alibi = torch.gather(alibi, 3, col_idx)
+        return alibi
+
+    def _compute_attention_bias(
+            self,
+            batch: dict,
+            masks_attention: Optional[torch.Tensor] = None,
+            keep_indices: Optional[torch.Tensor] = None,
+            ) -> Optional[torch.Tensor]:
+        """Combine the optional existing attention mask with the ALiBi
+        bias when ``cell_pos_enc == 'alibi'``. For other modes this is
+        a pass-through (returns ``masks_attention`` unchanged), so
+        existing configs are unaffected.
+
+        ``keep_indices`` (the JEPA mask, shape ``(B, M)``) is used to
+        slice the full-sequence ALiBi bias down to the masked
+        sub-sequence. This is needed by the context encoder, which
+        applies ``apply_masks`` before running blocks. The target
+        encoder passes ``keep_indices=None``.
+
+        Handles three input ``masks_attention`` formats:
+        - ``None``  : just return the (possibly sliced) ALiBi bias.
+        - ``bool``  : -inf where False, +alibi everywhere else.
+        - ``float`` : add directly.
+        """
+        if self.cell_pos_enc != 'alibi':
+            return masks_attention
+
+        alibi = self._compute_alibi_bias(batch)  # (B, H, L, L)
+        if keep_indices is not None:
+            alibi = self._slice_alibi_by_indices(alibi, keep_indices)
+
+        if masks_attention is None:
+            return alibi
+        if masks_attention.dtype == torch.bool:
+            ma = masks_attention
+            if keep_indices is not None:
+                # masks_attention is (B, 1, 1, L); slice the key axis.
+                idx = keep_indices.unsqueeze(1).unsqueeze(1)  # (B, 1, 1, M)
+                ma = torch.gather(ma, 3, idx)
+            mask_f = alibi.clone()
+            mask_f = mask_f.masked_fill(~ma, float('-inf'))
+            return mask_f
+        return masks_attention + alibi
 
     @torch.no_grad()
     def return_token_emb(self,
@@ -435,8 +603,13 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
     n_segments:
         Number of token segments within a token sequence.
     cell_pos_enc:
-        Cell position encoding. Either `segment` if cells are ranked
-        based on distance to index cell or `coords` if relative
+        Cell position encoding. One of:
+        - ``segment``: cells ranked by NN distance, fixed sincos by rank.
+        - ``coord``: relative (x, y) sincos'd independently.
+        - ``polar``: (log(1+r), theta) from (rel_x, rel_y), each sincos'd.
+        - ``alibi``: segment input encoding + per-head distance-decaying
+          attention bias.
+        Older docstring text kept for reference: `segment` if cells are ranked
         positions to index cell are used.
     predictor_embed_dim:
         Dimension of the embedding of the predictor.
@@ -474,7 +647,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 cell_pos_enc: Literal['segment', 'coord'],
+                 cell_pos_enc: Literal['segment', 'coord', 'polar', 'alibi'],
                  predictor_embed_dim: int = 768,
                  depth: int = 6,
                  num_heads: int = 12,
@@ -504,13 +677,18 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.nz_spc = nz_spc
         self.new_spc = new_spc
 
-        # Initialize segment embeddings
-        if self.cell_pos_enc == 'segment':
+        # Initialize segment embeddings. Used by 'segment' mode (full
+        # positional signal) and by 'alibi' mode at the predictor side
+        # (the alibi attention bias itself is only applied in the
+        # encoder; on the predictor side we fall back to segment-style
+        # input encoding, which is cheap and carries the ordinal NN
+        # info the predictor needs to slot the target tokens in).
+        if self.cell_pos_enc in ('segment', 'alibi'):
             self.seg_embed = nn.Embedding(
                 1 + n_segments + (105 if api_version == 'v1' else 0) + (1 if self.nz_spc else 0), # include <pad>
                 predictor_embed_dim,
                 padding_idx=0)
-            
+
             # Prevent gradient updates and initialize with sincos embedding,
             # including special segments
             self.seg_embed.weight.requires_grad = False
@@ -557,8 +735,10 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.apply(self._init_weights)
         self._rescale_blocks()
 
-        # Compute omega for segment embedding: 1 / 10000^{2i/dim}
-        if self.cell_pos_enc == 'coord':
+        # Compute omega for coord-based positional sincos. Used by
+        # 'coord' (sincos of rel_x, rel_y) and 'polar' (sincos of
+        # log(1+r), theta).
+        if self.cell_pos_enc in ('coord', 'polar'):
             self.coord_omega = torch.arange(
                 predictor_embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
@@ -606,6 +786,34 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
+        elif self.cell_pos_enc == 'polar':
+            rel_x = batch['rel_x_coords']
+            rel_y = batch['rel_y_coords']
+            special_mask = torch.isneginf(rel_x) | torch.isneginf(rel_y)
+            zero = torch.zeros_like(rel_x)
+            rel_x_safe = torch.where(special_mask, zero, rel_x)
+            rel_y_safe = torch.where(special_mask, zero, rel_y)
+            r = torch.sqrt(rel_x_safe ** 2 + rel_y_safe ** 2)
+            theta = torch.atan2(rel_y_safe, rel_x_safe)
+            log_r = torch.log1p(r)
+            neg_inf = torch.full_like(log_r, float('-inf'))
+            log_r = torch.where(special_mask, neg_inf, log_r)
+            theta = torch.where(special_mask, neg_inf, theta)
+            r_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.predictor_embed_dim // 2,
+                omega=self.coord_omega,
+                coord=log_r)
+            theta_emb = get_1d_sincos_pos_embed_from_coord(
+                embed_dim=self.predictor_embed_dim // 2,
+                omega=self.coord_omega,
+                coord=theta)
+            seg_emb = torch.cat([r_emb, theta_emb], dim=-1)
+        elif self.cell_pos_enc == 'alibi':
+            # On the predictor side, alibi mode falls back to
+            # segment-style input encoding (the alibi attention bias
+            # is applied only in the encoder, which is where it
+            # affects the embeddings used for downstream tasks).
+            seg_emb = self.seg_embed(batch['segments'])
         else:
             raise ValueError(
                 f"Unknown cell_pos_enc: {self.cell_pos_enc}.")
@@ -708,13 +916,26 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN,
             # D: EMBED_DIM
 
+            # Compute the per-batch attention bias (ALiBi if enabled,
+            # otherwise just passes ``masks_attention`` through). When
+            # ``masks`` is provided we slice the bias to match the
+            # reduced sequence length post-apply_masks.
+            _keep_idx = (
+                masks[0] if (masks is not None and len(masks) == 1) else None
+            )
+            attn_bias = self._compute_attention_bias(
+                batch,
+                masks_attention=masks_attention,
+                keep_indices=_keep_idx,
+            )
+
             # Mask token embeddings if masks are provided
             if masks is not None:
                 x = apply_masks(x, masks)
-            
+
             # Run forward prop
             for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=masks_attention)
+                x = blk(x, masks=attn_bias)
             if self.norm is not None:
                 x = self.norm(x)
 
@@ -947,13 +1168,23 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         x = seg_emb + token_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
+        # Compute attention bias (passes through unless ALiBi is on).
+        _keep_idx = (
+            masks[0] if (masks is not None and len(masks) == 1) else None
+        )
+        attn_bias = self._compute_attention_bias(
+            batch,
+            masks_attention=masks_attention,
+            keep_indices=_keep_idx,
+        )
+
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
-        
+
         # Run forward prop
         for i, blk in enumerate(self.blocks):
-            x = blk(x, masks=masks_attention)
+            x = blk(x, masks=attn_bias)
         if self.norm is not None:
             x = self.norm(x)
 
@@ -1251,13 +1482,23 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         x = seg_emb + pos_emb + token_emb + value_emb
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
+        # Compute attention bias (passes through unless ALiBi is on).
+        _keep_idx = (
+            masks[0] if (masks is not None and len(masks) == 1) else None
+        )
+        attn_bias = self._compute_attention_bias(
+            batch,
+            masks_attention=masks_attention,
+            keep_indices=_keep_idx,
+        )
+
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
-        
+
         # Run forward prop
         for i, blk in enumerate(self.blocks):
-            x = blk(x, masks=masks_attention)
+            x = blk(x, masks=attn_bias)
         if self.norm is not None:
             x = self.norm(x)
 

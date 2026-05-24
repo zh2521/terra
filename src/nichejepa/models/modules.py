@@ -87,6 +87,8 @@ class Attention(nn.Module):
 
         if self.use_flash_attention:
             if masks is not None:
+                # SDPA accepts both bool masks (True = attend) and
+                # float additive masks (e.g. ALiBi bias). Pass through.
                 x = nn.functional.scaled_dot_product_attention(
                     q, k, v, attn_mask=masks, scale=self.scale)
                 attn=None
@@ -96,8 +98,14 @@ class Attention(nn.Module):
                 attn=None
         else:
             attn = (q @ k.transpose(-2, -1)) * self.scale
-            if (masks is not None):
-                attn = attn.masked_fill(masks == 0, float('-inf'))
+            if masks is not None:
+                if masks.dtype in (torch.bool, torch.uint8):
+                    # Boolean / 0-1 mask: -inf wherever entry is False/0.
+                    attn = attn.masked_fill(masks == 0, float('-inf'))
+                else:
+                    # Float additive bias (ALiBi). Add directly to
+                    # pre-softmax logits.
+                    attn = attn + masks
             attn = attn.softmax(dim=-1)
             attn = self.attn_drop(attn)
             x = (attn @ v)
