@@ -337,34 +337,49 @@ def _warm_start_init_tensor(
 
     gene_rows = aligned[gene_mask]
     if gene_rows.shape[0] > 0:
-        # Center and PCA-reduce. SVD on (n_genes, esm_dim).
-        centered = gene_rows - gene_rows.mean(dim=0, keepdim=True)
-        # full_matrices=False -> Vt has shape (min(n_genes, esm_dim), esm_dim)
-        _, S, Vt = torch.linalg.svd(centered, full_matrices=False)
-        k = min(embed_dim, Vt.shape[0])
-        reduced = centered @ Vt[:k].T  # (n_genes, k)
-        if k < embed_dim:
-            # esm_dim < embed_dim: pad the extra dims with N(0, target_std)
-            # so the gene rows don't have a structurally-zero subspace.
-            pad = torch.randn(
-                reduced.shape[0], embed_dim - k, generator=g
-            ) * target_std
-            reduced = torch.cat([reduced, pad], dim=1)
-        # Rescale so per-element std matches target. Each PCA dim has
-        # a different natural variance (decreasing with k); a uniform
-        # rescale to target_std keeps the relative variances intact
-        # while matching baseline magnitude overall.
+        if esm_dim == embed_dim:
+            # Direct copy -- ESM dim already matches the encoder's
+            # embed_dim, so PCA would just be a rotation+rescale with
+            # no information loss. Skip it; preserve the raw ESM rows
+            # as-is so users can reason about gene-token embeddings
+            # in protein space directly. We still rescale to
+            # ``target_std`` so gene-token magnitude matches the
+            # special-token branch (avoiding the magnitude-mismatch
+            # failure mode the routing module hit).
+            reduced = gene_rows.clone()
+            stats["pca_skipped_dim_match"] = True
+            stats["pca_components_used"] = int(embed_dim)
+            stats["pca_target_components"] = int(embed_dim)
+            stats["pca_variance_retained"] = 1.0  # no reduction
+        else:
+            # Center and PCA-reduce. SVD on (n_genes, esm_dim).
+            centered = gene_rows - gene_rows.mean(dim=0, keepdim=True)
+            # full_matrices=False -> Vt has shape (min(n_genes, esm_dim), esm_dim)
+            _, S, Vt = torch.linalg.svd(centered, full_matrices=False)
+            k = min(embed_dim, Vt.shape[0])
+            reduced = centered @ Vt[:k].T  # (n_genes, k)
+            if k < embed_dim:
+                # esm_dim < embed_dim: pad the extra dims with N(0, target_std)
+                # so the gene rows don't have a structurally-zero subspace.
+                pad = torch.randn(
+                    reduced.shape[0], embed_dim - k, generator=g
+                ) * target_std
+                reduced = torch.cat([reduced, pad], dim=1)
+            # Variance retained by the top-`k` components.
+            total_var = float((S ** 2).sum().item())
+            kept_var = float((S[:k] ** 2).sum().item())
+            stats["pca_skipped_dim_match"] = False
+            stats["pca_variance_retained"] = kept_var / max(total_var, 1e-12)
+            stats["pca_components_used"] = int(k)
+            stats["pca_target_components"] = int(embed_dim)
+        # Rescale so per-element std matches target. Keeps gene-token
+        # magnitude comparable to baseline / special tokens.
         current_std = float(reduced.std().item())
         if current_std > 1e-8:
             reduced = reduced * (target_std / current_std)
         init[gene_mask] = reduced.to(init.dtype)
-        # Variance retained by the top-`k` components.
-        total_var = float((S ** 2).sum().item())
-        kept_var = float((S[:k] ** 2).sum().item())
-        stats["pca_variance_retained"] = kept_var / max(total_var, 1e-12)
-        stats["pca_components_used"] = int(k)
-        stats["pca_target_components"] = int(embed_dim)
     else:
+        stats["pca_skipped_dim_match"] = False
         stats["pca_variance_retained"] = 0.0
         stats["pca_components_used"] = 0
         stats["pca_target_components"] = int(embed_dim)
@@ -424,25 +439,42 @@ def build_warm_start_token_embedding(
         emb.weight.copy_(init_tensor)
 
     if log:
+        if init_stats.get("pca_skipped_dim_match", False):
+            dim_line = (
+                f"   ESM dim -> encoder embed_dim : "
+                f"{align_stats['esm_dim']} -> {embed_dim} "
+                f"(direct copy, PCA skipped because dims match)\n"
+            )
+            pca_line = (
+                f"   PCA components used          : N/A "
+                f"(direct copy of ESM rows; no information loss)\n"
+            )
+        else:
+            dim_line = (
+                f"   ESM dim -> encoder embed_dim : "
+                f"{align_stats['esm_dim']} -> {embed_dim} via PCA\n"
+            )
+            pca_line = (
+                f"   PCA components used          : "
+                f"{init_stats['pca_components_used']}/"
+                f"{init_stats['pca_target_components']} "
+                f"(variance retained "
+                f"{100.0 * init_stats['pca_variance_retained']:.2f}%)\n"
+            )
         banner = (
             "\n"
             "================================================================\n"
             " PROTEIN-INIT TOKEN EMBEDDING -- WARM-START MODE\n"
             "----------------------------------------------------------------\n"
-            "   (PCA-reduced ESM written into a plain nn.Embedding; "
+            "   (ESM-derived init written into a plain nn.Embedding; "
             "architecture identical to baseline.)\n"
             f"   Prefixes recognized as genes : {align_stats['gene_id_prefixes']}\n"
-            f"   ESM dim -> encoder embed_dim : "
-            f"{align_stats['esm_dim']} -> {embed_dim} via PCA\n"
-            f"   Gene tokens covered by ESM   : "
+            + dim_line
+            + f"   Gene tokens covered by ESM   : "
             f"{align_stats['n_gene_tokens_covered']}/{align_stats['n_gene_tokens_in_dict']} "
             f"({100.0 * align_stats['coverage_fraction']:.2f}%)\n"
-            f"   PCA components used          : "
-            f"{init_stats['pca_components_used']}/"
-            f"{init_stats['pca_target_components']} "
-            f"(variance retained "
-            f"{100.0 * init_stats['pca_variance_retained']:.2f}%)\n"
-            f"   target per-elem std          : {target_std:.3f}\n"
+            + pca_line
+            + f"   target per-elem std          : {target_std:.3f}\n"
             f"   init elem_std (overall)      : "
             f"{init_stats['init_elem_std_overall']:.3f}\n"
             f"   init elem_std (gene rows)    : "

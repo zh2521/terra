@@ -11,10 +11,13 @@ import torch
 
 from nichejepa.models.protein_init import (
     ProteinInitTokenEmbedding,
+    _warm_start_init_tensor,
     build_aligned_protein_matrix,
     build_protein_init_token_embedding,
+    build_warm_start_token_embedding,
     load_protein_embeddings,
 )
+import torch.nn as nn
 
 
 def _make_synthetic_token_dict():
@@ -410,3 +413,119 @@ def test_encoder_with_protein_init_swaps_token_embed(tmp_path: Path):
     )
     assert isinstance(encoder.token_embed, ProteinInitTokenEmbedding)
     assert encoder.token_embed.protein_emb.weight.requires_grad is False
+
+
+# ---------------------------------------------------------------------------
+# Warm-start mode tests
+# ---------------------------------------------------------------------------
+
+def test_warm_start_skips_pca_when_dims_match():
+    """When ``embed_dim == esm_dim``, the warm-start path should copy
+    ESM rows directly (no centering, no SVD rotation) so users can
+    reason about gene-token embeddings in protein space."""
+    token_dict = _make_synthetic_token_dict()
+    esm_dim = 16
+    protein_matrix = _make_synthetic_protein_matrix(esm_dim=esm_dim)
+    mapping = _make_synthetic_mapping()
+    aligned, gene_mask, _ = build_aligned_protein_matrix(
+        token_dict=token_dict,
+        protein_matrix=protein_matrix,
+        ensembl_to_row=mapping,
+        effective_vocab_size=len(token_dict),
+    )
+    init, stats = _warm_start_init_tensor(
+        aligned=aligned,
+        gene_mask=gene_mask,
+        embed_dim=esm_dim,  # match
+        target_std=1.0,
+        seed=0,
+    )
+    assert stats["pca_skipped_dim_match"] is True
+    assert stats["pca_variance_retained"] == 1.0
+    # Direct-copy path preserves the direction of each gene row.
+    # Rescaling is a single positive scalar applied uniformly, so the
+    # cosine similarity between any two gene rows must match the cosine
+    # similarity between the source ESM rows for those tokens.
+    gene_token_ids = [tid for k, tid in token_dict.items()
+                      if k.startswith("ENSG") and k in mapping]
+    a, b = gene_token_ids[0], gene_token_ids[1]
+    src_a = protein_matrix[mapping[
+        next(k for k, v in token_dict.items() if v == a)]]
+    src_b = protein_matrix[mapping[
+        next(k for k, v in token_dict.items() if v == b)]]
+    cos_src = float(torch.nn.functional.cosine_similarity(
+        src_a.unsqueeze(0), src_b.unsqueeze(0)).item())
+    cos_init = float(torch.nn.functional.cosine_similarity(
+        init[a].unsqueeze(0), init[b].unsqueeze(0)).item())
+    assert abs(cos_src - cos_init) < 1e-5, (
+        f"Direct-copy mode must preserve angles between gene rows "
+        f"(got cos {cos_init} vs source {cos_src}).")
+
+
+def test_warm_start_uses_pca_when_dims_differ():
+    """When dims differ, PCA-reduce and report variance retained."""
+    token_dict = _make_synthetic_token_dict()
+    esm_dim = 16
+    embed_dim = 8
+    protein_matrix = _make_synthetic_protein_matrix(esm_dim=esm_dim)
+    mapping = _make_synthetic_mapping()
+    aligned, gene_mask, _ = build_aligned_protein_matrix(
+        token_dict=token_dict,
+        protein_matrix=protein_matrix,
+        ensembl_to_row=mapping,
+        effective_vocab_size=len(token_dict),
+    )
+    init, stats = _warm_start_init_tensor(
+        aligned=aligned,
+        gene_mask=gene_mask,
+        embed_dim=embed_dim,
+        target_std=1.0,
+        seed=0,
+    )
+    assert stats["pca_skipped_dim_match"] is False
+    assert stats["pca_components_used"] == embed_dim
+    assert init.shape == (len(token_dict), embed_dim)
+
+
+def test_warm_start_padding_row_is_zero():
+    token_dict = _make_synthetic_token_dict()
+    protein_matrix = _make_synthetic_protein_matrix(esm_dim=16)
+    mapping = _make_synthetic_mapping()
+    aligned, gene_mask, _ = build_aligned_protein_matrix(
+        token_dict=token_dict,
+        protein_matrix=protein_matrix,
+        ensembl_to_row=mapping,
+        effective_vocab_size=len(token_dict),
+    )
+    init, _ = _warm_start_init_tensor(
+        aligned=aligned, gene_mask=gene_mask, embed_dim=8,
+        padding_idx=0, target_std=1.0, seed=0,
+    )
+    assert torch.all(init[0] == 0.0)
+
+
+def test_warm_start_builder_returns_plain_nn_embedding(tmp_path: Path):
+    """The whole point of warm-start mode is that the encoder ends up
+    with the same module type as baseline. Confirm that the builder
+    returns a vanilla nn.Embedding, not a ProteinInitTokenEmbedding."""
+    token_dict = _make_synthetic_token_dict()
+    matrix = _make_synthetic_protein_matrix(esm_dim=16)
+    mapping = _make_synthetic_mapping()
+    emb_path = tmp_path / "esm.pt"
+    map_path = tmp_path / "esm.json"
+    torch.save(matrix, str(emb_path))
+    with open(map_path, "w") as f:
+        json.dump(mapping, f)
+
+    emb = build_warm_start_token_embedding(
+        token_dict=token_dict,
+        embedding_path=emb_path,
+        mapping_path=map_path,
+        effective_vocab_size=len(token_dict),
+        embed_dim=8,
+        log=False,
+    )
+    assert type(emb) is nn.Embedding
+    assert emb.weight.shape == (len(token_dict), 8)
+    assert emb.weight.requires_grad is True
+    assert torch.all(emb.weight[0] == 0.0)  # pad row stays zero
