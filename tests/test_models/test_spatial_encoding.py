@@ -222,3 +222,155 @@ def test_unknown_cell_pos_enc_still_raises():
         enc._get_seg_emb({"segments": torch.zeros(1, 4, dtype=torch.long),
                           "rel_x_coords": torch.zeros(1, 4),
                           "rel_y_coords": torch.zeros(1, 4)})
+
+
+# ---------------------------------------------------------------------------
+# 'polar+alibi' combined mode
+# ---------------------------------------------------------------------------
+
+def test_polar_alibi_input_encoding_matches_polar():
+    """polar+alibi must produce the same input encoding as polar
+    alone -- the only addition is the attention bias side."""
+    enc_p = _make_rank_encoder("polar", embed_dim=32)
+    enc_pa = _make_rank_encoder("polar+alibi", embed_dim=32, num_heads=4)
+    rel_x = torch.randn(2, 12)
+    rel_y = torch.randn(2, 12)
+    batch = {"rel_x_coords": rel_x, "rel_y_coords": rel_y}
+    a = enc_p._get_seg_emb(batch)
+    b = enc_pa._get_seg_emb(batch)
+    torch.testing.assert_close(a, b, atol=1e-6, rtol=0)
+
+
+def test_polar_alibi_attention_bias_matches_alibi():
+    """polar+alibi must produce the same ALiBi attention bias as
+    pure 'alibi' mode (input encoding differs; bias path is identical)."""
+    enc_a = _make_rank_encoder("alibi", embed_dim=32, num_heads=4)
+    enc_pa = _make_rank_encoder("polar+alibi", embed_dim=32, num_heads=4)
+    # ALiBi slopes are deterministic given num_heads, so both encoders
+    # produce identical biases on the same input.
+    rel_x = torch.tensor([[0.0, 1.0, 2.0, 5.0]])
+    rel_y = torch.tensor([[0.0, 0.0, 0.0, 0.0]])
+    batch = {"rel_x_coords": rel_x, "rel_y_coords": rel_y}
+    bias_a = enc_a._compute_alibi_bias(batch)
+    bias_pa = enc_pa._compute_alibi_bias(batch)
+    torch.testing.assert_close(bias_a, bias_pa, atol=1e-6, rtol=0)
+
+
+def test_polar_alibi_compute_attention_bias_returns_alibi():
+    """In polar+alibi mode the helper must produce the (B, H, L, L)
+    alibi bias rather than passing masks_attention through."""
+    enc = _make_rank_encoder("polar+alibi", embed_dim=32, num_heads=4)
+    rel_x = torch.tensor([[0.0, 1.0, 2.0, 5.0]])
+    rel_y = torch.tensor([[0.0, 0.0, 0.0, 0.0]])
+    batch = {"rel_x_coords": rel_x, "rel_y_coords": rel_y}
+    out = enc._compute_attention_bias(batch, masks_attention=None)
+    assert out is not None
+    assert out.shape == (1, 4, 4, 4)
+
+
+# ---------------------------------------------------------------------------
+# 'laplacian' mode
+# ---------------------------------------------------------------------------
+
+def _make_laplacian_batch(B: int, encoder):
+    """Build a fake batch that obeys the standard sequence layout:
+    [n_special tokens][cell_1 tokens][cell_2 tokens]... in n_segments
+    blocks of seq_len_cell each.
+    """
+    L = encoder.seq_len
+    n_special = encoder.n_special_tokens
+    n_cells = encoder.n_segments
+    seq_len_cell = encoder.seq_len_cell
+
+    # Random cell positions in 2D
+    cell_positions = torch.randn(B, n_cells, 2)
+
+    # Per-token rel_x / rel_y: broadcast cell position to every token
+    # of that cell; special tokens get -inf.
+    rel_x = torch.full((B, L), float("-inf"))
+    rel_y = torch.full((B, L), float("-inf"))
+    segments = torch.zeros(B, L, dtype=torch.long)
+    for c in range(n_cells):
+        start = n_special + c * seq_len_cell
+        end = start + seq_len_cell
+        rel_x[:, start:end] = cell_positions[:, c, 0:1]
+        rel_y[:, start:end] = cell_positions[:, c, 1:2]
+        segments[:, start:end] = c + 1  # 1-indexed
+    return {
+        "rel_x_coords": rel_x,
+        "rel_y_coords": rel_y,
+        "segments": segments,
+    }, cell_positions
+
+
+def test_laplacian_pe_shape_and_special_tokens_zero():
+    enc = _make_rank_encoder("laplacian", embed_dim=32)
+    batch, _ = _make_laplacian_batch(B=2, encoder=enc)
+    seg_emb = enc._get_seg_emb(batch)
+    assert seg_emb.shape == (2, enc.seq_len, 32)
+    # Special-token positions (segment == 0) must be exactly zero.
+    special_mask = batch["segments"] == 0
+    assert torch.all(seg_emb[special_mask] == 0.0)
+
+
+def test_laplacian_pe_constant_within_cell():
+    """Every token of the same cell shares the same per-cell PE,
+    because the per-cell eigenvector is broadcast via segments."""
+    enc = _make_rank_encoder("laplacian", embed_dim=32)
+    batch, _ = _make_laplacian_batch(B=1, encoder=enc)
+    seg_emb = enc._get_seg_emb(batch)
+    # Pick cell 1 (segment == 1) and check all its rows are identical.
+    mask = batch["segments"][0] == 1
+    cell_rows = seg_emb[0][mask]
+    assert cell_rows.shape[0] > 1
+    torch.testing.assert_close(
+        cell_rows, cell_rows[0:1].expand_as(cell_rows),
+        atol=1e-5, rtol=1e-5)
+
+
+def test_laplacian_pe_sign_is_deterministic():
+    """The sign-fix convention (first non-zero entry positive) must
+    make the PE deterministic across reruns with the same input."""
+    enc = _make_rank_encoder("laplacian", embed_dim=32)
+    batch, _ = _make_laplacian_batch(B=2, encoder=enc)
+    a = enc._get_seg_emb(batch)
+    b = enc._get_seg_emb(batch)
+    torch.testing.assert_close(a, b, atol=1e-6, rtol=0)
+
+
+def test_laplacian_pe_changes_with_geometry():
+    """Different cell geometries must produce different PE -- if not,
+    the encoding carries no spatial info."""
+    enc = _make_rank_encoder("laplacian", embed_dim=32)
+    b1, _ = _make_laplacian_batch(B=1, encoder=enc)
+    # Rebuild with a different random geometry
+    torch.manual_seed(42)
+    b2, _ = _make_laplacian_batch(B=1, encoder=enc)
+    a = enc._get_seg_emb(b1)
+    b = enc._get_seg_emb(b2)
+    assert not torch.allclose(a, b, atol=1e-3)
+
+
+def test_laplacian_k_caps_at_n_segments_minus_one():
+    """laplacian_k > n_segments - 1 must be silently capped so the
+    eigendecomposition stays well-defined."""
+    from nichejepa.models.gene_transformers import GeneTransformerRankEncoder
+    enc = GeneTransformerRankEncoder(
+        vocab_size=16, seq_len=12, n_special_tokens=2, n_segments=2,
+        cell_pos_enc="laplacian", embed_dim=32, depth=1, num_heads=4,
+        use_flash_attention=False,
+        laplacian_k=99,
+    )
+    # n_segments == 2 -> max usable k is 1
+    assert enc.laplacian_k == 1
+
+
+def test_laplacian_k_zero_raises():
+    from nichejepa.models.gene_transformers import GeneTransformerRankEncoder
+    with pytest.raises(ValueError, match="laplacian_k"):
+        GeneTransformerRankEncoder(
+            vocab_size=16, seq_len=12, n_special_tokens=2, n_segments=1,
+            cell_pos_enc="laplacian", embed_dim=32, depth=1, num_heads=4,
+            use_flash_attention=False,
+            laplacian_k=1,
+        )

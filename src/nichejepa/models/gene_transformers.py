@@ -92,7 +92,9 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 cell_pos_enc: Literal['segment', 'coord', 'polar', 'alibi'],
+                 cell_pos_enc: Literal[
+                     'segment', 'coord', 'polar', 'alibi',
+                     'polar+alibi', 'laplacian'],
                  embed_dim: int = 768,
                  depth: int = 12,
                  predictor_embed_dim: int = 384,
@@ -111,6 +113,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  sep_gene_tokens_neb: bool = False,
                  nz_spc: bool = False,
                  protein_init_kwargs: dict | None = None,
+                 laplacian_k: int = 8,
+                 laplacian_sigma: float = 1.0,
                  **kwargs
                  ):
         super().__init__()
@@ -189,7 +193,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # full positional signal) and also by 'alibi' mode (where it
         # still carries useful ordinal nearest-neighbor info at the
         # input; the distance-dependent signal is added at attention
-        # time via the alibi bias).
+        # time via the alibi bias). 'polar+alibi' uses polar input
+        # encoding instead, so no segment table is needed there.
         if self.cell_pos_enc in ('segment', 'alibi'):
             self.seg_embed = nn.Embedding(
                 1 + n_segments + (105 if api_version == 'v1' else 0) + (self.n_special_tokens if self.nz_spc else 0), # include <pad>
@@ -226,9 +231,9 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self._rescale_blocks()
 
         # Compute omega for coord-based positional sincos: 1 / 10000^{2i/dim}
-        # Used by both 'coord' (sincos of rel_x, rel_y) and 'polar'
-        # (sincos of log(1+r), theta).
-        if self.cell_pos_enc in ('coord', 'polar'):
+        # Used by 'coord' (sincos of rel_x, rel_y), 'polar' (sincos of
+        # log(1+r), theta), and 'polar+alibi' (polar input + alibi bias).
+        if self.cell_pos_enc in ('coord', 'polar', 'polar+alibi'):
             self.coord_omega = torch.arange(
                 embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
@@ -237,10 +242,29 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # ALiBi-style attention bias: per-head slope buffer that scales
         # the negative pairwise distance into an additive attention
         # logit term. Computed once at construction and broadcast over
-        # the batch dimension in the forward.
-        if self.cell_pos_enc == 'alibi':
+        # the batch dimension in the forward. Used by 'alibi' (with
+        # segment input) and 'polar+alibi' (with polar input).
+        if self.cell_pos_enc in ('alibi', 'polar+alibi'):
             slopes = self._get_alibi_slopes(num_heads)
             self.register_buffer("alibi_slopes", slopes, persistent=False)
+
+        # Laplacian PE: per-batch eigendecomposition of the spatial-
+        # graph Laplacian over the n_segments cells, with the bottom-k
+        # non-trivial eigenvectors projected to embed_dim.
+        if self.cell_pos_enc == 'laplacian':
+            # Cap k at n_segments - 1 since the trivial zero
+            # eigenvector is skipped and there are at most n_segments
+            # eigenvectors total.
+            self.laplacian_k = min(int(laplacian_k), n_segments - 1)
+            if self.laplacian_k < 1:
+                raise ValueError(
+                    f"laplacian_k must be >= 1 (got {laplacian_k}). "
+                    f"With n_segments={n_segments}, the max usable k is "
+                    f"{n_segments - 1}.")
+            self.laplacian_sigma = float(laplacian_sigma)
+            # Learnable projection from eigenvector space to embed_dim.
+            self.laplacian_proj = nn.Linear(
+                self.laplacian_k, embed_dim, bias=False)
 
     def _rescale_blocks(self):
         """
@@ -367,7 +391,11 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
-        elif self.cell_pos_enc == 'polar':
+        elif self.cell_pos_enc in ('polar', 'polar+alibi'):
+            # 'polar+alibi' reuses the polar input branch -- the only
+            # additional behavior is in _compute_attention_bias which
+            # also computes the per-head ALiBi distance bias for the
+            # attention layers.
             # Reparameterize (rel_x, rel_y) -> (log(1 + r), theta) so
             # distance (which biology cares about) and angle (which is
             # naturally periodic and well-suited to sincos) are the
@@ -404,11 +432,119 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             # (cheap and helpful) and add a per-head distance bias at
             # attention time -- see _compute_attention_bias.
             seg_emb = self.seg_embed(batch['segments'])
+        elif self.cell_pos_enc == 'laplacian':
+            seg_emb = self._compute_laplacian_pe(batch)
         else:
             raise ValueError(
                 f"Unknown cell_pos_enc: {self.cell_pos_enc}.")
 
         return seg_emb
+
+    def _compute_laplacian_pe(self, batch: dict) -> torch.Tensor:
+        """Per-token Laplacian positional encoding.
+
+        Builds a per-batch-element Gaussian-kernel adjacency over the
+        ``n_segments`` cells in the neighborhood, computes the
+        normalized Laplacian, takes the bottom ``laplacian_k``
+        non-trivial eigenvectors, and projects them to ``embed_dim``
+        via a learnable linear layer. The resulting per-cell PE is
+        then broadcast to every token of that cell via the
+        ``segments`` tensor. Special-token positions get zero PE.
+
+        Assumes the standard sequence layout used by the cell-graph /
+        cell-neighborhood tokenizers: ``n_special_tokens`` special
+        tokens followed by ``n_segments`` cells of ``seq_len_cell``
+        tokens each, with segment IDs in ``1 .. n_segments`` (zero
+        reserved for special / padding).
+        """
+        rel_x = batch['rel_x_coords']   # (B, L)
+        rel_y = batch['rel_y_coords']
+        segments = batch['segments']    # (B, L) long
+        B, L = rel_x.shape
+        device = rel_x.device
+        n_cells = self.n_segments
+
+        # 1. Pull one (rel_x, rel_y) per cell from the first token of
+        #    each cell's contiguous block.
+        first_token_idx = (
+            self.n_special_tokens
+            + torch.arange(n_cells, device=device) * self.seq_len_cell
+        )  # (n_cells,)
+        if first_token_idx.max().item() >= L:
+            raise RuntimeError(
+                "Laplacian PE: computed first-token indices exceed "
+                f"sequence length (max={first_token_idx.max().item()}, "
+                f"L={L}). Check that n_special_tokens + n_segments * "
+                "seq_len_cell == seq_len.")
+        cell_x = rel_x[:, first_token_idx]  # (B, n_cells)
+        cell_y = rel_y[:, first_token_idx]
+
+        # Cells whose representative token is a "missing" segment
+        # (rel = -inf, e.g. dropped via masking) are excluded from
+        # the graph by zeroing their adjacency rows/cols.
+        cell_missing = (
+            torch.isneginf(cell_x) | torch.isneginf(cell_y)
+        )  # (B, n_cells)
+        cell_x = torch.where(cell_missing, torch.zeros_like(cell_x), cell_x)
+        cell_y = torch.where(cell_missing, torch.zeros_like(cell_y), cell_y)
+
+        # 2. Gaussian-kernel adjacency. Zero diagonal (no self-edge);
+        #    zero rows/cols for missing cells.
+        positions = torch.stack([cell_x, cell_y], dim=-1)   # (B, n_cells, 2)
+        diff = positions.unsqueeze(2) - positions.unsqueeze(1)  # (B, c, c, 2)
+        dist_sq = (diff ** 2).sum(dim=-1)                   # (B, n_cells, n_cells)
+        sigma = max(self.laplacian_sigma, 1e-6)
+        adj = torch.exp(-dist_sq / (2.0 * sigma * sigma))   # (B, n_cells, n_cells)
+        eye = torch.eye(n_cells, device=device).unsqueeze(0)
+        adj = adj * (1.0 - eye)
+        valid = (~cell_missing).to(adj.dtype)               # (B, n_cells)
+        adj = adj * valid.unsqueeze(1) * valid.unsqueeze(2)
+
+        # 3. Normalized Laplacian L = I - D^{-1/2} A D^{-1/2}.
+        deg = adj.sum(dim=-1).clamp(min=1e-8)               # (B, n_cells)
+        deg_inv_sqrt = 1.0 / torch.sqrt(deg)
+        # Zero out the normalization for cells with no edges so they
+        # contribute identity rows (eigvecs there are arbitrary; we
+        # zero them out via cell_missing downstream).
+        deg_inv_sqrt = torch.where(
+            cell_missing, torch.zeros_like(deg_inv_sqrt), deg_inv_sqrt)
+        norm_adj = adj * deg_inv_sqrt.unsqueeze(-1) * deg_inv_sqrt.unsqueeze(-2)
+        lap = eye - norm_adj                                # (B, n_cells, n_cells)
+
+        # 4. Eigendecomposition. No grad through positions -- they're
+        #    not learnable parameters, only the projection is.
+        with torch.no_grad():
+            # eigh returns ascending eigenvalues. Skip the smallest
+            # (trivial zero/near-zero eigenvalue) and take the next k.
+            _, eigvecs = torch.linalg.eigh(lap)              # (B, c, c)
+            pe = eigvecs[:, :, 1: self.laplacian_k + 1].contiguous()
+            # Resolve sign ambiguity by convention: first non-missing
+            # entry of each eigenvector is forced positive. (Eigvecs
+            # of a real symmetric matrix are defined up to sign.)
+            ref = pe[:, 0:1, :]                              # (B, 1, k)
+            signs = torch.where(
+                ref >= 0,
+                torch.ones_like(ref),
+                -torch.ones_like(ref),
+            )
+            pe = pe * signs
+            # Zero out missing cells' PE rows.
+            pe = pe * (~cell_missing).unsqueeze(-1).to(pe.dtype)
+
+        # 5. Project k-dim eigenvectors into embed_dim, then broadcast
+        #    each cell's PE to every token whose segment ID matches.
+        cell_pe = self.laplacian_proj(pe)                    # (B, n_cells, D)
+        # Build (B, L, D) by gathering per-token from the per-cell PE
+        # using segments-1 as the index (segment 0 = special / pad).
+        # Special tokens point to index 0 by clamping; we then zero
+        # them out via the segments==0 mask.
+        cell_idx = (segments.long() - 1).clamp(min=0)        # (B, L)
+        cell_idx_exp = cell_idx.unsqueeze(-1).expand(B, L, cell_pe.size(-1))
+        per_token_pe = torch.gather(cell_pe, dim=1, index=cell_idx_exp)
+        special_mask = (segments == 0).unsqueeze(-1)
+        per_token_pe = torch.where(
+            special_mask, torch.zeros_like(per_token_pe), per_token_pe)
+        return per_token_pe
 
     @staticmethod
     def _get_alibi_slopes(num_heads: int) -> torch.Tensor:
@@ -502,7 +638,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         - ``bool``  : -inf where False, +alibi everywhere else.
         - ``float`` : add directly.
         """
-        if self.cell_pos_enc != 'alibi':
+        if self.cell_pos_enc not in ('alibi', 'polar+alibi'):
             return masks_attention
 
         alibi = self._compute_alibi_bias(batch)  # (B, H, L, L)
@@ -647,7 +783,9 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  seq_len: int,
                  n_special_tokens: int,
                  n_segments: int,
-                 cell_pos_enc: Literal['segment', 'coord', 'polar', 'alibi'],
+                 cell_pos_enc: Literal[
+                     'segment', 'coord', 'polar', 'alibi',
+                     'polar+alibi', 'laplacian'],
                  predictor_embed_dim: int = 768,
                  depth: int = 6,
                  num_heads: int = 12,
@@ -678,12 +816,13 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.new_spc = new_spc
 
         # Initialize segment embeddings. Used by 'segment' mode (full
-        # positional signal) and by 'alibi' mode at the predictor side
-        # (the alibi attention bias itself is only applied in the
-        # encoder; on the predictor side we fall back to segment-style
-        # input encoding, which is cheap and carries the ordinal NN
-        # info the predictor needs to slot the target tokens in).
-        if self.cell_pos_enc in ('segment', 'alibi'):
+        # positional signal) and by 'alibi' / 'laplacian' modes at the
+        # predictor side. The 'alibi' attention bias and 'laplacian'
+        # PE are encoder-only; the predictor side just uses segment
+        # input encoding (cheap, carries ordinal NN info, sufficient
+        # for slotting target tokens in). 'polar+alibi' uses polar on
+        # the predictor side too.
+        if self.cell_pos_enc in ('segment', 'alibi', 'laplacian'):
             self.seg_embed = nn.Embedding(
                 1 + n_segments + (105 if api_version == 'v1' else 0) + (1 if self.nz_spc else 0), # include <pad>
                 predictor_embed_dim,
@@ -736,9 +875,9 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self._rescale_blocks()
 
         # Compute omega for coord-based positional sincos. Used by
-        # 'coord' (sincos of rel_x, rel_y) and 'polar' (sincos of
-        # log(1+r), theta).
-        if self.cell_pos_enc in ('coord', 'polar'):
+        # 'coord' (sincos of rel_x, rel_y), 'polar' / 'polar+alibi'
+        # (sincos of log(1+r), theta).
+        if self.cell_pos_enc in ('coord', 'polar', 'polar+alibi'):
             self.coord_omega = torch.arange(
                 predictor_embed_dim // 4, dtype=torch.float32)
             self.coord_omega = 1.0 / (
@@ -786,7 +925,10 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                 coord=batch['rel_y_coords'])
             seg_emb = torch.cat(
                 [rel_x_coord_emb, rel_y_coord_emb], dim=-1)
-        elif self.cell_pos_enc == 'polar':
+        elif self.cell_pos_enc in ('polar', 'polar+alibi'):
+            # Same polar reparameterization as the encoder. For
+            # 'polar+alibi' the alibi attention bias is encoder-only;
+            # the predictor sees just the polar input encoding.
             rel_x = batch['rel_x_coords']
             rel_y = batch['rel_y_coords']
             special_mask = torch.isneginf(rel_x) | torch.isneginf(rel_y)
@@ -808,11 +950,11 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                 omega=self.coord_omega,
                 coord=theta)
             seg_emb = torch.cat([r_emb, theta_emb], dim=-1)
-        elif self.cell_pos_enc == 'alibi':
-            # On the predictor side, alibi mode falls back to
-            # segment-style input encoding (the alibi attention bias
-            # is applied only in the encoder, which is where it
-            # affects the embeddings used for downstream tasks).
+        elif self.cell_pos_enc in ('alibi', 'laplacian'):
+            # On the predictor side, both 'alibi' (encoder-only
+            # attention bias) and 'laplacian' (encoder-only PE
+            # because computing it on masked subsets is non-trivial)
+            # fall back to segment-style input encoding.
             seg_emb = self.seg_embed(batch['segments'])
         else:
             raise ValueError(

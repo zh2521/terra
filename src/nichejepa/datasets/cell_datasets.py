@@ -10,9 +10,11 @@ from torch.utils.data import Dataset
 # Encoder modes that need per-token rel_x / rel_y coordinates attached
 # to each batch item. 'coord' uses them directly via sincos; 'polar'
 # recomputes (log(1+r), theta) from them at encoder forward time;
-# 'alibi' uses them to build the per-head attention distance bias.
+# 'alibi' uses them to build the per-head attention distance bias;
+# 'polar+alibi' uses both; 'laplacian' builds a spatial graph from
+# them and uses its Laplacian eigenvectors as per-cell PE.
 # 'segment' only needs the segment IDs, so coords are not attached.
-_COORD_BASED_POS_ENCS = ('coord', 'polar', 'alibi')
+_COORD_BASED_POS_ENCS = ('coord', 'polar', 'alibi', 'polar+alibi', 'laplacian')
 
 
 class CellBaseDataset(Dataset):
@@ -71,7 +73,9 @@ class CellBaseDataset(Dataset):
         # them to build the attention distance bias). 'segment' uses
         # only segment IDs. So at the dataset level, polar/alibi need
         # exactly the same rel-coord columns as coord.
-        if cell_pos_enc not in ['segment', 'coord', 'polar', 'alibi']:
+        if cell_pos_enc not in [
+                'segment', 'coord', 'polar', 'alibi',
+                'polar+alibi', 'laplacian']:
             raise ValueError(f'Invalid "cell_pos_enc": {cell_pos_enc}.')
         
         self.gt_type = gt_type
