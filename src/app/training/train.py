@@ -212,18 +212,16 @@ def train(args: dict,
     #   adaln: per-batch AdaLN modulation inside the encoder + predictor
     #   adv_classifier: gradient-reversal batch classifier on the cell
     #                   embedding (DANN-style)
-    # Both consume a per-cell batch label from
-    # ``values[:, batch_label_position]`` (default position 0).
+    # Both read the per-cell batch label directly from the
+    # ``batch_value`` column that the dataset (CellGraphDataset /
+    # CellNeighborhoodDataset) exposes in every item.
     bc_cfg = args.get('batch_correction', {}) or {}
     adaln_kwargs = bc_cfg.get('adaln', None)
     if adaln_kwargs and not adaln_kwargs.get('enabled', False):
         adaln_kwargs = None
     elif adaln_kwargs is not None:
-        # Inherit shared metadata if missing on the sub-block.
         adaln_kwargs = dict(adaln_kwargs)
         adaln_kwargs.setdefault('n_batches', bc_cfg.get('n_batches'))
-        adaln_kwargs.setdefault(
-            'batch_label_position', bc_cfg.get('batch_label_position', 0))
         if adaln_kwargs.get('n_batches') is None:
             raise ValueError(
                 "batch_correction.adaln.enabled=True requires "
@@ -237,8 +235,6 @@ def train(args: dict,
         adv_classifier_kwargs = dict(adv_classifier_kwargs)
         adv_classifier_kwargs.setdefault(
             'n_batches', bc_cfg.get('n_batches'))
-        adv_classifier_kwargs.setdefault(
-            'batch_label_position', bc_cfg.get('batch_label_position', 0))
         if adv_classifier_kwargs.get('n_batches') is None:
             raise ValueError(
                 "batch_correction.adv_classifier.enabled=True requires "
@@ -249,8 +245,6 @@ def train(args: dict,
         (adv_classifier_kwargs or {}).get('lambda_adv', 0.1))
     grl_alpha = float(
         (adv_classifier_kwargs or {}).get('grl_alpha', 1.0))
-    adv_batch_label_position = int(
-        (adv_classifier_kwargs or {}).get('batch_label_position', 0))
 
     # Optional protein-embedding initialization for the gene-token
     # embedding layer (UCE-style: frozen ESM matrix + learnable
@@ -866,8 +860,11 @@ def train(args: dict,
                     )
                     cell_emb_rev = grad_reverse(cell_emb, alpha=grl_alpha)
                     batch_logits = batch_classifier(cell_emb_rev)
-                    batch_label = udata['values'][
-                        :, adv_batch_label_position].long()
+                    # Per-cell batch label from the values tensor.
+                    # By convention the batch token is the first
+                    # special token in the sequence, so its value
+                    # (an 0-indexed batch class id) lives at index 0.
+                    batch_label = udata['values'][:, 0].long()
                     # Defensive clamp: if a batch label exceeds the
                     # classifier's n_batches output dim, the CE loss
                     # would error out. Clamp to (n_batches - 1) so a

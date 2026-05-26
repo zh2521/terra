@@ -273,6 +273,7 @@ def test_encoder_compute_cond_shape_when_enabled():
     enc = _make_encoder(adaln_kwargs={
         'enabled': True, 'n_batches': 5, 'batch_embed_dim': 16,
     })
+    # values[:, 0] holds the per-cell batch label by convention.
     batch = {'values': torch.tensor([[1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                                      [3.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])}
     cond = enc._compute_cond(batch)

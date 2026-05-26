@@ -249,15 +249,12 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             self.adaln_n_batches = int(adaln_kwargs['n_batches'])
             self.adaln_batch_embed_dim = int(adaln_kwargs.get(
                 'batch_embed_dim', 64))
-            self.adaln_batch_label_position = int(adaln_kwargs.get(
-                'batch_label_position', 0))
             self.batch_emb_table = nn.Embedding(
                 self.adaln_n_batches, self.adaln_batch_embed_dim)
             _block_cond_dim = self.adaln_batch_embed_dim
         else:
             self.adaln_n_batches = 0
             self.adaln_batch_embed_dim = 0
-            self.adaln_batch_label_position = 0
             self.batch_emb_table = None
             _block_cond_dim = None
 
@@ -537,28 +534,20 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                              ) -> torch.Tensor:
         """Pull a per-cell long-tensor batch label from the data batch.
 
-        The label is read from
-        ``batch['values'][:, adaln_batch_label_position]`` (default
-        position 0, matching configs that put 'batch' first in
-        ``special_tokens``). The ``values`` tensor stores spv_* token
-        IDs at the special-token positions of the sequence -- those
-        IDs are unique per batch and are used directly as class
-        indices for the batch embedding lookup and (optionally) the
-        adversarial classifier head.
+        Reads from ``batch['values'][:, 0]``. By convention the
+        batch token is always the first special token in the
+        sequence, so its value (the encoded ``spv_batch_<id>`` token
+        ID) lives at index 0 of every cell's value tensor and is
+        already 0-indexed across batches in the corpus.
 
-        The returned tensor is a ``LongTensor`` of shape ``(B,)``.
+        Returns a ``LongTensor`` of shape ``(B,)``.
         """
         values = batch['values']
         if values.dim() < 2:
             raise RuntimeError(
-                f"Expected `values` to be at least 2-D (B, L, ...); "
+                f"Expected `values` to be at least 2-D (B, L); "
                 f"got shape {tuple(values.shape)}.")
-        pos = self.adaln_batch_label_position
-        if pos >= values.size(1):
-            raise RuntimeError(
-                f"batch_label_position={pos} is out of range for a "
-                f"sequence of length {values.size(1)}.")
-        return values[:, pos].long()
+        return values[:, 0].long()
 
     def _compute_cond(self,
                       batch: Mapping[str, torch.Tensor],
@@ -1134,15 +1123,12 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             self.adaln_n_batches = int(adaln_kwargs['n_batches'])
             self.adaln_batch_embed_dim = int(adaln_kwargs.get(
                 'batch_embed_dim', 64))
-            self.adaln_batch_label_position = int(adaln_kwargs.get(
-                'batch_label_position', 0))
             self.batch_emb_table = nn.Embedding(
                 self.adaln_n_batches, self.adaln_batch_embed_dim)
             _block_cond_dim = self.adaln_batch_embed_dim
         else:
             self.adaln_n_batches = 0
             self.adaln_batch_embed_dim = 0
-            self.adaln_batch_label_position = 0
             self.batch_emb_table = None
             _block_cond_dim = None
 
@@ -1294,19 +1280,14 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             self,
             batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
         """Same convention as the encoder: read the per-cell long
-        batch label from ``batch['values'][:, batch_label_position]``.
+        batch label from ``batch['values'][:, 0]``.
         """
         values = batch['values']
         if values.dim() < 2:
             raise RuntimeError(
-                f"Expected `values` to be at least 2-D (B, L, ...); "
+                f"Expected `values` to be at least 2-D (B, L); "
                 f"got shape {tuple(values.shape)}.")
-        pos = self.adaln_batch_label_position
-        if pos >= values.size(1):
-            raise RuntimeError(
-                f"batch_label_position={pos} is out of range for a "
-                f"sequence of length {values.size(1)}.")
-        return values[:, pos].long()
+        return values[:, 0].long()
 
     def _compute_cond(self,
                       batch: Mapping[str, torch.Tensor],
