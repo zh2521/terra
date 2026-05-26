@@ -582,6 +582,99 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             zero_mask, torch.zeros_like(per_token_pe), per_token_pe)
         return per_token_pe
 
+    @torch.no_grad()
+    def compute_laplacian_diagnostic(self, batch: dict) -> dict:
+        """Return a dict of summary statistics on the spatial graph used
+        by Laplacian PE. Useful for tuning ``laplacian_sigma`` -- a
+        well-scaled adjacency has ``adj_offdiag_mean`` roughly in
+        ``[0.2, 0.7]``. Lower means the kernel is collapsing (sigma too
+        small relative to distances); higher means everyone is
+        effectively connected to everyone (sigma too large).
+
+        Returned keys (all scalars):
+            laplacian/sigma
+            laplacian/k
+            laplacian/adj_offdiag_mean
+            laplacian/adj_offdiag_min
+            laplacian/adj_offdiag_max
+            laplacian/dist_offdiag_mean
+            laplacian/dist_offdiag_median
+            laplacian/dist_offdiag_max
+            laplacian/eigval_min_nontrivial
+            laplacian/eigval_max
+            laplacian/spectral_gap   (= eigval[k+1] - eigval[1])
+        Returns ``{}`` if the encoder is not in laplacian mode.
+        """
+        if self.cell_pos_enc != 'laplacian':
+            return {}
+        rel_x = batch['rel_x_coords']
+        rel_y = batch['rel_y_coords']
+        device = rel_x.device
+        n_cells = self.n_segments
+
+        first_token_idx = (
+            self.n_special_tokens
+            + torch.arange(n_cells, device=device) * self.seq_len_cell
+        )
+        cell_x = rel_x[:, first_token_idx]
+        cell_y = rel_y[:, first_token_idx]
+        cell_missing = (
+            torch.isneginf(cell_x) | torch.isneginf(cell_y)
+        )
+        cell_x = torch.where(cell_missing, torch.zeros_like(cell_x), cell_x)
+        cell_y = torch.where(cell_missing, torch.zeros_like(cell_y), cell_y)
+
+        positions = torch.stack([cell_x, cell_y], dim=-1)
+        diff = positions.unsqueeze(2) - positions.unsqueeze(1)
+        dist = (diff ** 2).sum(dim=-1).clamp(min=0.0).sqrt()  # (B, c, c)
+        sigma = max(self.laplacian_sigma, 1e-6)
+        adj = torch.exp(-(dist ** 2) / (2.0 * sigma * sigma))
+        eye = torch.eye(n_cells, device=device).unsqueeze(0).bool()
+        offdiag_mask = ~eye  # (1, c, c) -> broadcasts over batch
+
+        adj_off = adj[offdiag_mask.expand_as(adj)]
+        dist_off = dist[offdiag_mask.expand_as(dist)]
+
+        # Spectrum on the actual normalized Laplacian we'd use.
+        valid = (~cell_missing).to(adj.dtype)
+        adj_masked = adj * (1.0 - eye.to(adj.dtype))
+        adj_masked = adj_masked * valid.unsqueeze(1) * valid.unsqueeze(2)
+        deg = adj_masked.sum(dim=-1).clamp(min=1e-8)
+        deg_inv_sqrt = torch.where(
+            cell_missing, torch.zeros_like(deg), 1.0 / torch.sqrt(deg))
+        norm_adj = (adj_masked
+                    * deg_inv_sqrt.unsqueeze(-1)
+                    * deg_inv_sqrt.unsqueeze(-2))
+        lap = (eye.to(adj.dtype) - norm_adj)
+        eigvals, _ = torch.linalg.eigh(lap)  # (B, c) ascending
+        # Skip the smallest (~0) eigenvalue; use means across the batch.
+        nontrivial = eigvals[:, 1:]
+        eig_min = nontrivial[:, 0].mean()
+        eig_max = nontrivial[:, -1].mean()
+        # Spectral gap between the k-th and (k+1)-th eigenvalue tells
+        # you whether keeping more eigenvectors would still carry
+        # signal. Index laplacian_k-1 of nontrivial corresponds to
+        # the last kept eigenvalue; +1 is the first dropped one.
+        k = self.laplacian_k
+        if nontrivial.size(1) > k:
+            gap = (nontrivial[:, k] - nontrivial[:, k - 1]).mean()
+        else:
+            gap = nontrivial[:, -1].mean() - nontrivial[:, 0].mean()
+
+        return {
+            "laplacian/sigma": float(self.laplacian_sigma),
+            "laplacian/k": int(self.laplacian_k),
+            "laplacian/adj_offdiag_mean": float(adj_off.mean().item()),
+            "laplacian/adj_offdiag_min": float(adj_off.min().item()),
+            "laplacian/adj_offdiag_max": float(adj_off.max().item()),
+            "laplacian/dist_offdiag_mean": float(dist_off.mean().item()),
+            "laplacian/dist_offdiag_median": float(dist_off.median().item()),
+            "laplacian/dist_offdiag_max": float(dist_off.max().item()),
+            "laplacian/eigval_min_nontrivial": float(eig_min.item()),
+            "laplacian/eigval_max": float(eig_max.item()),
+            "laplacian/spectral_gap_at_k": float(gap.item()),
+        }
+
     @staticmethod
     def _get_alibi_slopes(num_heads: int) -> torch.Tensor:
         """ALiBi per-head slopes (Press et al. 2022). Geometric

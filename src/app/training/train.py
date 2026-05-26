@@ -191,6 +191,11 @@ def train(args: dict,
     else:
         mlp_bias = True
 
+    # Optional Laplacian PE hyperparameters. Only consumed when
+    # cell_pos_enc == 'laplacian'; harmlessly ignored otherwise.
+    laplacian_k = args['meta'].get('laplacian_k', 8)
+    laplacian_sigma = float(args['meta'].get('laplacian_sigma', 1.0))
+
     # Optional protein-embedding initialization for the gene-token
     # embedding layer (UCE-style: frozen ESM matrix + learnable
     # projection). Enabled by a top-level `protein_init` block in the
@@ -365,7 +370,9 @@ def train(args: dict,
         nz_spc=nz_spc,
         new_spc=new_spc,
         mlp_bias=mlp_bias,
-        protein_init_kwargs=protein_init_kwargs)
+        protein_init_kwargs=protein_init_kwargs,
+        laplacian_k=laplacian_k,
+        laplacian_sigma=laplacian_sigma)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -609,6 +616,23 @@ def train(args: dict,
                 compute_grad_stats = True
             else:
                 compute_grad_stats = False
+
+            # Log Laplacian-PE graph diagnostics once, on the very
+            # first batch. This is a static diagnostic (depends only
+            # on the data distribution, not on training state) so a
+            # single log is enough. Tells you whether laplacian_sigma
+            # is calibrated for this dataset's spatial scale.
+            if (WORLD_RANK == 0 and epoch == 0 and itr == 0
+                    and cell_pos_enc == 'laplacian'):
+                # Unwrap DDP + EncoderMultiMaskWrapper to reach the
+                # actual encoder backbone (which carries the helper).
+                _enc = encoder.module
+                if hasattr(_enc, 'backbone'):
+                    _enc = _enc.backbone
+                diag = _enc.compute_laplacian_diagnostic(udata)
+                if diag:
+                    logger.info("Laplacian PE diagnostic: %s", diag)
+                    wandb.log(diag, step=0)
 
             _new_lr = scheduler.step()
             _new_wd = wd_scheduler.step()
