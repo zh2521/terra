@@ -196,6 +196,14 @@ def train(args: dict,
     laplacian_k = args['meta'].get('laplacian_k', 8)
     laplacian_sigma = float(args['meta'].get('laplacian_sigma', 1.0))
 
+    # Optional RoPE 2D hyperparameters. Only consumed when
+    # cell_pos_enc == 'rope'. ``rope_freq_scale`` defaults to math.pi
+    # (in init_model) which gives ~one full oscillation per neighborhood
+    # if coords are normalized to [-1, 1] -- tune to your tissue scale.
+    rope_freq_scale = args['meta'].get('rope_freq_scale', None)
+    rope_rotation_augment = bool(
+        args['meta'].get('rope_rotation_augment', True))
+
     # Optional protein-embedding initialization for the gene-token
     # embedding layer (UCE-style: frozen ESM matrix + learnable
     # projection). Enabled by a top-level `protein_init` block in the
@@ -372,7 +380,9 @@ def train(args: dict,
         mlp_bias=mlp_bias,
         protein_init_kwargs=protein_init_kwargs,
         laplacian_k=laplacian_k,
-        laplacian_sigma=laplacian_sigma)
+        laplacian_sigma=laplacian_sigma,
+        rope_freq_scale=rope_freq_scale,
+        rope_rotation_augment=rope_rotation_augment)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -585,6 +595,11 @@ def train(args: dict,
                 else:
                     torch.save(save_dict, save_path.format(epoch=f'{epoch}_{iter_number}'))
 
+    # Flag for the one-time Laplacian PE diagnostic. Using a flag
+    # rather than `epoch == 0 and itr == 0` so it still fires when
+    # training is resumed from a checkpoint (where start_epoch != 0).
+    _laplacian_diag_logged = False
+
     # Run training loop
     for epoch in range(start_epoch, num_epochs):
         logger.info(f"Epoch {epoch}")
@@ -617,22 +632,54 @@ def train(args: dict,
             else:
                 compute_grad_stats = False
 
-            # Log Laplacian-PE graph diagnostics once, on the very
-            # first batch. This is a static diagnostic (depends only
-            # on the data distribution, not on training state) so a
-            # single log is enough. Tells you whether laplacian_sigma
-            # is calibrated for this dataset's spatial scale.
-            if (WORLD_RANK == 0 and epoch == 0 and itr == 0
+            # Log Laplacian-PE graph diagnostics once, on the first
+            # batch the process actually sees. Survives checkpoint
+            # resumes (no epoch==0 / itr==0 condition). Static
+            # diagnostic; depends only on the data distribution, not
+            # on training state. Useful for sigma / k tuning.
+            if (WORLD_RANK == 0
+                    and not _laplacian_diag_logged
                     and cell_pos_enc == 'laplacian'):
-                # Unwrap DDP + EncoderMultiMaskWrapper to reach the
-                # actual encoder backbone (which carries the helper).
-                _enc = encoder.module
-                if hasattr(_enc, 'backbone'):
-                    _enc = _enc.backbone
-                diag = _enc.compute_laplacian_diagnostic(udata)
+                try:
+                    # Unwrap DDP + EncoderMultiMaskWrapper.
+                    _enc = encoder.module
+                    if hasattr(_enc, 'backbone'):
+                        _enc = _enc.backbone
+                    diag = _enc.compute_laplacian_diagnostic(udata)
+                except Exception as exc:
+                    logger.exception(
+                        "Laplacian PE diagnostic computation failed: %s",
+                        exc)
+                    diag = {}
                 if diag:
-                    logger.info("Laplacian PE diagnostic: %s", diag)
-                    wandb.log(diag, step=0)
+                    banner = (
+                        "\n"
+                        "================ Laplacian PE diagnostic ================\n"
+                        + "\n".join(
+                            f"  {k:<40s} = {v}"
+                            for k, v in diag.items())
+                        + "\n"
+                        "=========================================================\n"
+                        "  Tuning targets:\n"
+                        "    laplacian/adj_offdiag_mean in [0.2, 0.7]\n"
+                        "    -> if much lower, increase laplacian_sigma\n"
+                        "    -> if much higher, decrease laplacian_sigma\n"
+                        "    A good first try: laplacian_sigma ~= dist_offdiag_median\n"
+                        "========================================================="
+                    )
+                    logger.info(banner)
+                    # Use wandb.log without an explicit step so it
+                    # piggybacks on the auto-incremented step counter
+                    # used by the regular loss log. An explicit
+                    # step=0 can be silently dropped if wandb has
+                    # already advanced.
+                    try:
+                        wandb.log(diag)
+                    except Exception as exc:
+                        logger.warning(
+                            "wandb.log of Laplacian diagnostic failed: %s",
+                            exc)
+                _laplacian_diag_logged = True
 
             _new_lr = scheduler.step()
             _new_wd = wd_scheduler.step()

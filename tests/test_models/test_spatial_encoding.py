@@ -445,6 +445,145 @@ def test_none_attention_bias_is_passthrough():
     assert enc._compute_attention_bias(batch, masks_attention=None) is None
 
 
+# ---------------------------------------------------------------------------
+# RoPE 2D mode
+# ---------------------------------------------------------------------------
+
+def test_rope_seg_emb_is_zero():
+    """In RoPE mode the additive input encoding is zero -- positional
+    info flows through Attention via q/k rotation, not via the input.
+    """
+    enc = _make_rank_encoder("rope", embed_dim=32, num_heads=4)
+    B, L = 2, 12
+    batch = {
+        "tokens": torch.ones(B, L, dtype=torch.long),
+        "segments": torch.zeros(B, L, dtype=torch.long),
+        "rel_x_coords": torch.randn(B, L),
+        "rel_y_coords": torch.randn(B, L),
+    }
+    seg_emb = enc._get_seg_emb(batch)
+    assert seg_emb.shape == (B, L, 32)
+    assert torch.all(seg_emb == 0.0)
+
+
+def test_rope_initializes_module_and_passes_to_blocks():
+    """The encoder must own a single RoPE2D instance shared across
+    all blocks (so all attention layers rotate q/k consistently)."""
+    from nichejepa.models.rope2d import RoPE2D
+    enc = _make_rank_encoder("rope", embed_dim=32, num_heads=4)
+    assert isinstance(enc.rope, RoPE2D)
+    # head_dim = 32 / 4 = 8; freqs has shape (head_dim // 4,) = (2,)
+    assert enc.rope.freqs.shape == (2,)
+    # All blocks reference the same RoPE2D (not a deep copy).
+    for blk in enc.blocks:
+        assert blk.attn.rope is enc.rope
+
+
+def test_rope_disabled_for_non_rope_modes():
+    """Backward compat: encoders in other modes have rope = None."""
+    for mode in ("none", "segment", "coord", "polar", "alibi",
+                 "polar+alibi", "laplacian"):
+        enc = _make_rank_encoder(mode, embed_dim=32, num_heads=4)
+        assert enc.rope is None
+        for blk in enc.blocks:
+            assert blk.attn.rope is None
+
+
+def test_rope_head_dim_divisibility_enforced():
+    """RoPE requires head_dim divisible by 4. With embed_dim=30 and
+    num_heads=4, head_dim=7 which isn't even integer; with embed_dim=32
+    and num_heads=2, head_dim=16 (ok). Pick a bad combo that yields
+    head_dim=6 (32/some_heads) and confirm we raise."""
+    from nichejepa.models.gene_transformers import GeneTransformerRankEncoder
+    # embed_dim=24, num_heads=4 -> head_dim=6 -> 6 % 4 != 0 -> raise.
+    with pytest.raises(ValueError, match="divisible by 4"):
+        GeneTransformerRankEncoder(
+            vocab_size=16, seq_len=12, n_special_tokens=2, n_segments=2,
+            cell_pos_enc="rope", embed_dim=24, depth=1, num_heads=4,
+            use_flash_attention=False,
+        )
+
+
+def test_rope_build_coords_returns_correct_shape():
+    enc = _make_rank_encoder("rope", embed_dim=32, num_heads=4)
+    batch = {
+        "rel_x_coords": torch.randn(2, 12),
+        "rel_y_coords": torch.randn(2, 12),
+    }
+    coords = enc._build_coords(batch)
+    assert coords is not None
+    assert coords.shape == (2, 12, 2)
+
+
+def test_rope_build_coords_returns_none_for_other_modes():
+    enc = _make_rank_encoder("segment", embed_dim=32, num_heads=4)
+    batch = {
+        "rel_x_coords": torch.randn(2, 12),
+        "rel_y_coords": torch.randn(2, 12),
+    }
+    assert enc._build_coords(batch) is None
+
+
+def test_rope_within_cell_tokens_unaffected():
+    """Critical property: all tokens of the same cell share (x, y),
+    so identical rotations cancel in q @ k^T. Within-cell attention
+    should be exactly what it would be without RoPE for a constant
+    coord block."""
+    from nichejepa.models.rope2d import RoPE2D
+    rope = RoPE2D(head_dim=8, rotation_augment=False)
+    rope.eval()
+    # All tokens at the same coord.
+    coords = torch.zeros(1, 6, 2)
+    coords[..., 0] = 3.7  # arbitrary const
+    coords[..., 1] = -1.2
+    q = torch.randn(1, 2, 6, 8)
+    k = torch.randn(1, 2, 6, 8)
+    q_rot, k_rot = rope(q, k, coords)
+    # q_rot @ k_rot^T should equal q @ k^T because the rotation is
+    # the same for every position.
+    qk = q @ k.transpose(-2, -1)
+    qk_rot = q_rot @ k_rot.transpose(-2, -1)
+    torch.testing.assert_close(qk, qk_rot, atol=1e-5, rtol=1e-5)
+
+
+def test_rope_translation_invariance():
+    """Translating all coords by a constant shouldn't change the
+    output of q @ k^T, because RoPE's effect on logits depends only
+    on relative position (key property of rotary embeddings)."""
+    from nichejepa.models.rope2d import RoPE2D
+    rope = RoPE2D(head_dim=8, rotation_augment=False)
+    rope.eval()
+    coords_a = torch.randn(1, 5, 2)
+    shift = torch.tensor([[2.3, -0.7]])
+    coords_b = coords_a + shift
+    q = torch.randn(1, 2, 5, 8)
+    k = torch.randn(1, 2, 5, 8)
+    qa, ka = rope(q, k, coords_a)
+    qb, kb = rope(q, k, coords_b)
+    qk_a = qa @ ka.transpose(-2, -1)
+    qk_b = qb @ kb.transpose(-2, -1)
+    torch.testing.assert_close(qk_a, qk_b, atol=1e-4, rtol=1e-4)
+
+
+def test_rope_neginf_coords_get_sanitized_in_attention():
+    """The Attention module replaces non-finite coords with (0, 0)
+    before RoPE so special tokens / padding don't blow up the
+    rotation."""
+    from nichejepa.models.modules import Attention
+    from nichejepa.models.rope2d import RoPE2D
+    rope = RoPE2D(head_dim=8, rotation_augment=False)
+    attn = Attention(dim=16, num_heads=2, use_flash_attention=False, rope=rope)
+    attn.eval()
+    x = torch.randn(1, 4, 16)
+    coords = torch.tensor([[[float("-inf"), float("-inf")],
+                            [1.0, 2.0],
+                            [3.0, 4.0],
+                            [float("nan"), float("inf")]]])
+    # Just must not produce NaN/Inf output for the rope-rotated tokens.
+    y, _ = attn(x, masks=None, coords=coords)
+    assert torch.isfinite(y).all()
+
+
 def test_laplacian_pe_pad_tokens_zeroed():
     """Pad tokens within a cell block (token == 0) get zero PE."""
     enc = _make_rank_encoder("laplacian", embed_dim=32)

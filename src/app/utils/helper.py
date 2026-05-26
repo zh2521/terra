@@ -7,6 +7,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/helper.py
 """
 
 import logging
+import math
 import sys
 from typing import Literal
 
@@ -217,7 +218,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                n_value_bins: int,
                cell_pos_enc: Literal[
                    'none', 'segment', 'coord', 'polar', 'alibi',
-                   'polar+alibi', 'laplacian'],
+                   'polar+alibi', 'laplacian', 'rope'],
                device: str,
                vocab_size: int,
                seq_len: int,
@@ -242,6 +243,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                protein_init_kwargs: dict | None = None,
                laplacian_k: int = 8,
                laplacian_sigma: float = 1.0,
+               rope_freq_scale: float | None = None,
+               rope_rotation_augment: bool = True,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -317,7 +320,10 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         mlp_bias=mlp_bias,
         protein_init_kwargs=protein_init_kwargs,
         laplacian_k=laplacian_k,
-        laplacian_sigma=laplacian_sigma)
+        laplacian_sigma=laplacian_sigma,
+        rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
+                         else math.pi),
+        rope_rotation_augment=rope_rotation_augment)
     if api_version == 'v3' or api_version == 'v4':
         encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
@@ -338,7 +344,10 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         predict_gene=predict_gene,
         pos_learnable=pos_learnable,
         nz_spc=nz_spc,
-        new_spc=new_spc)
+        new_spc=new_spc,
+        rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
+                         else math.pi),
+        rope_rotation_augment=rope_rotation_augment)
     if api_version == 'v3' or api_version == 'v4':
         predictor = PredictorMultiMaskWrapper(predictor)
 

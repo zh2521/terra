@@ -12,9 +12,12 @@ from torch.utils.data import Dataset
 # recomputes (log(1+r), theta) from them at encoder forward time;
 # 'alibi' uses them to build the per-head attention distance bias;
 # 'polar+alibi' uses both; 'laplacian' builds a spatial graph from
-# them and uses its Laplacian eigenvectors as per-cell PE.
-# 'segment' only needs the segment IDs, so coords are not attached.
-_COORD_BASED_POS_ENCS = ('coord', 'polar', 'alibi', 'polar+alibi', 'laplacian')
+# them and uses its Laplacian eigenvectors as per-cell PE; 'rope'
+# uses them to rotate q/k inside attention.
+# 'segment' and 'none' only need the segment IDs (or nothing), so
+# coords are not attached.
+_COORD_BASED_POS_ENCS = (
+    'coord', 'polar', 'alibi', 'polar+alibi', 'laplacian', 'rope')
 
 
 class CellBaseDataset(Dataset):
@@ -75,7 +78,7 @@ class CellBaseDataset(Dataset):
         # exactly the same rel-coord columns as coord.
         if cell_pos_enc not in [
                 'none', 'segment', 'coord', 'polar', 'alibi',
-                'polar+alibi', 'laplacian']:
+                'polar+alibi', 'laplacian', 'rope']:
             raise ValueError(f'Invalid "cell_pos_enc": {cell_pos_enc}.')
         
         self.gt_type = gt_type

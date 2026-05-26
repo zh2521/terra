@@ -12,6 +12,8 @@ import torch
 import torch.nn as nn
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+from .rope2d import RoPE2D
+
 
 class Attention(nn.Module):
     """
@@ -43,6 +45,7 @@ class Attention(nn.Module):
                  attn_drop: float=0.0,
                  proj_drop: float=0.0,
                  use_flash_attention: bool = True,
+                 rope: RoPE2D | None = None,
                  ):
         super().__init__()
         self.num_heads = num_heads
@@ -55,10 +58,17 @@ class Attention(nn.Module):
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
         self.use_flash_attention = use_flash_attention
+        # Optional 2D rotary position embedding. When set, q and k are
+        # rotated based on the per-token (x, y) coordinates BEFORE the
+        # SDPA call, so attention logits depend only on relative
+        # position. The RoPE2D module is shared across all blocks of
+        # the encoder/predictor that use it (one instance, many refs).
+        self.rope = rope
 
     def forward(self,
                 x: torch.Tensor,
-                masks: torch.Tensor | None = None
+                masks: torch.Tensor | None = None,
+                coords: torch.Tensor | None = None,
                 ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the attention module.
@@ -68,7 +78,12 @@ class Attention(nn.Module):
         x:
             Input to the attention module with shape (B, N, C).
         masks:
-            Mask applied to the attention vectors.
+            Mask applied to the attention vectors. Bool or additive
+            float (e.g. ALiBi bias).
+        coords:
+            Per-token 2D coordinates of shape (B, N, 2). Required if
+            RoPE is configured on this attention module; ignored
+            otherwise. Special / padding tokens should carry (0, 0).
 
         Returns
         -----------
@@ -84,6 +99,14 @@ class Attention(nn.Module):
             B, N, 3, self.num_heads, C // self.num_heads).permute(
                 2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]
+
+        # Apply 2D rotary position embedding if configured. Sanitize
+        # any non-finite sentinel values (e.g. -inf padding from
+        # block-masking) to (0, 0) so the rotation is identity there.
+        if self.rope is not None and coords is not None:
+            coords_clean = torch.nan_to_num(
+                coords, nan=0.0, posinf=0.0, neginf=0.0)
+            q, k = self.rope(q, k, coords_clean)
 
         if self.use_flash_attention:
             if masks is not None:
@@ -160,6 +183,7 @@ class Block(nn.Module):
                  use_layer_norm: bool=True,
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
                  use_flash_attention: bool=True,
+                 rope: RoPE2D | None = None,
                  ):
         super().__init__()
         if use_layer_norm:
@@ -172,7 +196,8 @@ class Block(nn.Module):
                               qk_scale=qk_scale,
                               attn_drop=attn_drop,
                               proj_drop=drop,
-                              use_flash_attention=use_flash_attention)
+                              use_flash_attention=use_flash_attention,
+                              rope=rope)
         if use_layer_norm:
             self.norm2 = norm_layer(dim)
         else:
@@ -187,6 +212,7 @@ class Block(nn.Module):
                 x: torch.Tensor,
                 return_attention: bool = False,
                 masks: torch.Tensor | None = None,
+                coords: torch.Tensor | None = None,
                 ) -> torch.Tensor:
         """
         Forward pass of the transformer block.
@@ -200,6 +226,9 @@ class Block(nn.Module):
             block output.
         masks:
             Mask used in Attention module.
+        coords:
+            Per-token 2D coordinates of shape (B, N, 2), forwarded to
+            the Attention module. Only used if RoPE is configured.
 
         Returns
         -----------
@@ -207,7 +236,8 @@ class Block(nn.Module):
             Output of the transformer block with shape (B, N, D).       
         """
         y, attn = self.attn(self.norm1(x),
-                            masks=masks)
+                            masks=masks,
+                            coords=coords)
         if return_attention:
             return attn
         x = x + y
