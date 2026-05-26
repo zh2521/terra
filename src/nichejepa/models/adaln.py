@@ -26,6 +26,26 @@ import torch
 import torch.nn as nn
 
 
+def zero_init_adaln_modulations(module: nn.Module) -> int:
+    """Walk ``module`` and re-zero every AdaLN's modulation
+    hypernetwork. Returns the number of AdaLN modules that were
+    re-initialized.
+
+    Call this AFTER any pass that may have overwritten AdaLN's
+    zero-init (e.g. the encoder's ``self.apply(_init_weights)`` or
+    the second-pass ``init_weights`` loop in ``init_model``). The
+    zero-init is what makes AdaLN start out identical to LayerNorm
+    at step 0 -- without restoring it after these passes, AdaLN
+    starts as a noisy LayerNorm (~16% per-element perturbation).
+    """
+    n = 0
+    for m in module.modules():
+        if isinstance(m, AdaLN):
+            m.reset_modulation_to_zero()
+            n += 1
+    return n
+
+
 class AdaLN(nn.Module):
     """Adaptive LayerNorm: ``gamma * LayerNorm(x) + beta`` with
     ``(gamma, beta)`` produced from a conditioning vector.
@@ -60,8 +80,24 @@ class AdaLN(nn.Module):
         # AdaLN output is exactly LayerNorm(x). Without this, the
         # AdaLN would inject random noise at step 0 and break
         # backward-compat with existing training.
+        self.reset_modulation_to_zero()
+
+    def reset_modulation_to_zero(self) -> None:
+        """Re-initialize the modulation hypernetwork to zeros so that
+        at the next forward, gamma = 1 and beta = 0 (i.e. AdaLN
+        output == LayerNorm(x) modulo numerical precision).
+
+        Exposed as a method so it can be called AFTER any global
+        re-initialization pass (e.g. ``self.apply(_init_weights)`` in
+        the encoder / predictor base, or the second ``init_weights``
+        pass inside ``init_model``) that would otherwise overwrite
+        the original zero-init with ``trunc_normal_``-style noise.
+        Calling this is essential for the AdaLN-at-step-0 == LayerNorm
+        invariant the tests rely on.
+        """
         nn.init.zeros_(self.modulation.weight)
-        nn.init.zeros_(self.modulation.bias)
+        if self.modulation.bias is not None:
+            nn.init.zeros_(self.modulation.bias)
 
     def extra_repr(self) -> str:
         return f"embed_dim={self.embed_dim}, cond_dim={self.cond_dim}"

@@ -15,6 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from .adaln import zero_init_adaln_modulations
 from .modules import Attention, Block, MLP, ValueEmbWeightsProjection
 from .protein_init import (build_protein_init_token_embedding,
                            build_warm_start_token_embedding)
@@ -279,6 +280,13 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         # Initialize weights of layers
         self.apply(self._init_weights)
         self._rescale_blocks()
+        # `self.apply(_init_weights)` above visits every nn.Linear --
+        # including each AdaLN's modulation hypernetwork -- and re-
+        # initializes it via trunc_normal_(self.init_std). That
+        # overwrites the zero-init from AdaLN.__init__ and breaks the
+        # AdaLN-at-step-0 == LayerNorm invariant. Restore it here.
+        # No-op when AdaLN is disabled (no AdaLN modules to find).
+        zero_init_adaln_modulations(self)
 
         # Compute omega for coord-based positional sincos: 1 / 10000^{2i/dim}
         # Used by 'coord' (sincos of rel_x, rel_y), 'polar' (sincos of
@@ -1165,6 +1173,13 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # Initialize layer weights
         self.apply(self._init_weights)
         self._rescale_blocks()
+        # `self.apply(_init_weights)` above visits every nn.Linear --
+        # including each AdaLN's modulation hypernetwork -- and re-
+        # initializes it via trunc_normal_(self.init_std). That
+        # overwrites the zero-init from AdaLN.__init__ and breaks the
+        # AdaLN-at-step-0 == LayerNorm invariant. Restore it here.
+        # No-op when AdaLN is disabled (no AdaLN modules to find).
+        zero_init_adaln_modulations(self)
 
         # Compute omega for coord-based positional sincos. Used by
         # 'coord' (sincos of rel_x, rel_y), 'polar' / 'polar+alibi'

@@ -232,6 +232,102 @@ def _make_encoder(adaln_kwargs=None):
     )
 
 
+def test_encoder_adaln_modulation_remains_zero_after_init_passes():
+    """REGRESSION: the encoder's own ``self.apply(_init_weights)`` AND
+    ``init_model``'s second reinit pass would overwrite AdaLN's
+    zero-init with ``trunc_normal_(0.02)``. ``zero_init_adaln_modulations``
+    must be called after both passes to restore the zero state, so
+    that gamma=1, beta=0 at step 0.
+    """
+    enc = GeneTransformerRankEncoder(
+        vocab_size=16, seq_len=12, n_special_tokens=2, n_segments=2,
+        cell_pos_enc='segment', embed_dim=32, depth=2, num_heads=4,
+        use_flash_attention=False,
+        adaln_kwargs={'enabled': True, 'n_batches': 5,
+                      'batch_embed_dim': 8},
+    )
+    from nichejepa.models.adaln import AdaLN
+    n_adaln = 0
+    for m in enc.modules():
+        if isinstance(m, AdaLN):
+            n_adaln += 1
+            torch.testing.assert_close(
+                m.modulation.weight,
+                torch.zeros_like(m.modulation.weight),
+                atol=0, rtol=0,
+                msg=lambda s: (
+                    "AdaLN.modulation.weight is not zero after encoder "
+                    "construction. The encoder's apply(_init_weights) "
+                    "must be followed by zero_init_adaln_modulations()."
+                ),
+            )
+            if m.modulation.bias is not None:
+                torch.testing.assert_close(
+                    m.modulation.bias,
+                    torch.zeros_like(m.modulation.bias),
+                    atol=0, rtol=0,
+                )
+    assert n_adaln > 0, (
+        "Expected at least one AdaLN module in the encoder "
+        "(depth=2 -> 4 AdaLN modules: norm1 + norm2 per block)."
+    )
+
+
+def test_encoder_adaln_at_step0_matches_no_adaln_encoder():
+    """End-to-end: an AdaLN-enabled encoder built normally (with both
+    init_weights passes applied) must produce IDENTICAL output to an
+    identical encoder built with adaln_kwargs=None, when both see the
+    same batch and we manually align their non-AdaLN weights. This is
+    the strongest backward-compat invariant; if it holds, AdaLN at
+    step 0 is mathematically indistinguishable from plain LayerNorm.
+    """
+    torch.manual_seed(0)
+    common_kwargs = dict(
+        vocab_size=16, seq_len=12, n_special_tokens=2, n_segments=2,
+        cell_pos_enc='segment', embed_dim=32, depth=2, num_heads=4,
+        use_flash_attention=False,
+    )
+    enc_adaln = GeneTransformerRankEncoder(
+        **common_kwargs,
+        adaln_kwargs={'enabled': True, 'n_batches': 5,
+                      'batch_embed_dim': 8},
+    )
+    enc_plain = GeneTransformerRankEncoder(
+        **common_kwargs, adaln_kwargs=None,
+    )
+    # Copy shared weights (everything except the AdaLN-specific
+    # modules) from the AdaLN encoder into the plain encoder. We
+    # iterate over the plain encoder's state_dict and pull any
+    # shape-matching weights from the AdaLN encoder.
+    sd_a = enc_adaln.state_dict()
+    sd_p = enc_plain.state_dict()
+    for k in sd_p:
+        if k in sd_a and sd_a[k].shape == sd_p[k].shape:
+            sd_p[k] = sd_a[k].clone()
+    enc_plain.load_state_dict(sd_p)
+    enc_adaln.eval()
+    enc_plain.eval()
+
+    # Run forwards. AdaLN encoder needs a values column whose first
+    # entry indexes the batch_emb_table; any non-OOB value works
+    # because the modulation MLP outputs zero regardless.
+    B, L = 2, 12
+    batch = {
+        'tokens': torch.randint(1, 16, (B, L)),
+        'values': torch.zeros(B, L),
+        'rel_x_coords': torch.zeros(B, L),
+        'rel_y_coords': torch.zeros(B, L),
+        'segments': torch.ones(B, L, dtype=torch.long),
+        'positions': torch.arange(L).unsqueeze(0).expand(B, L),
+    }
+    # Pick valid batch labels (< n_batches=5).
+    batch['values'][:, 0] = torch.tensor([0.0, 3.0])
+    with torch.no_grad():
+        out_adaln, _ = enc_adaln(batch=batch, masks=None, masks_attention=None)
+        out_plain, _ = enc_plain(batch=batch, masks=None, masks_attention=None)
+    torch.testing.assert_close(out_adaln, out_plain, atol=1e-5, rtol=1e-5)
+
+
 def test_encoder_default_no_adaln_attrs():
     """When adaln_kwargs is None, none of the AdaLN infrastructure
     is created. Backward-compat invariant for existing configs."""

@@ -375,6 +375,14 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
     for m in predictor.modules():
         init_weights(m)
 
+    # The init_weights loop above overwrites AdaLN's modulation
+    # hypernetwork with trunc_normal_(0.02). Restore the zero-init so
+    # the AdaLN-at-step-0 == LayerNorm invariant survives this second
+    # reinit pass. No-op when AdaLN is disabled.
+    from nichejepa.models.adaln import zero_init_adaln_modulations
+    zero_init_adaln_modulations(encoder)
+    zero_init_adaln_modulations(predictor)
+
     encoder.to(device)
     predictor.to(device)
     logger.info(encoder)
