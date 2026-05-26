@@ -1,2 +1,3 @@
-from .helper import (init_model, init_opt, load_checkpoint,
+from .helper import (build_batch_classifier_head,
+                     init_model, init_opt, load_checkpoint,
                      parse_protein_init_kwargs)

@@ -19,6 +19,14 @@ from .modules import Attention, Block, MLP, ValueEmbWeightsProjection
 from .protein_init import (build_protein_init_token_embedding,
                            build_warm_start_token_embedding)
 from .rope2d import RoPE2D
+
+
+# Sentinel used by encoder/predictor _compute_cond when AdaLN is off:
+# a None cond signals to Block.forward() that it should use its plain
+# LayerNorm path (assuming Block was constructed without AdaLN). This
+# keeps the conditioning-aware codepath uniformly None-able rather
+# than requiring a parallel "no-cond" forward branch.
+_NO_COND = None
 from .utils import (get_1d_sincos_pos_embed,
                     get_1d_sincos_pos_embed_from_coord,
                     repeat_interleave_batch,
@@ -118,6 +126,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  laplacian_sigma: float = 1.0,
                  rope_freq_scale: float = math.pi,
                  rope_rotation_augment: bool = True,
+                 adaln_kwargs: dict | None = None,
                  **kwargs
                  ):
         super().__init__()
@@ -229,6 +238,29 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         else:
             self.rope = None
 
+        # Adaptive LayerNorm (AdaLN) for per-batch conditioning. When
+        # enabled, every transformer block's LayerNorms become AdaLN
+        # modulated by a per-cell conditioning embedding looked up
+        # from a batch ID at forward time. Default off: cond_dim None
+        # -> Block uses plain LayerNorm and behaviour is unchanged.
+        self.adaln_enabled = bool(adaln_kwargs) and adaln_kwargs.get(
+            'enabled', False)
+        if self.adaln_enabled:
+            self.adaln_n_batches = int(adaln_kwargs['n_batches'])
+            self.adaln_batch_embed_dim = int(adaln_kwargs.get(
+                'batch_embed_dim', 64))
+            self.adaln_batch_label_position = int(adaln_kwargs.get(
+                'batch_label_position', 0))
+            self.batch_emb_table = nn.Embedding(
+                self.adaln_n_batches, self.adaln_batch_embed_dim)
+            _block_cond_dim = self.adaln_batch_embed_dim
+        else:
+            self.adaln_n_batches = 0
+            self.adaln_batch_embed_dim = 0
+            self.adaln_batch_label_position = 0
+            self.batch_emb_table = None
+            _block_cond_dim = None
+
         # Initialize encoder blocks and norm layer
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim,
@@ -242,7 +274,8 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                   norm_layer=norm_layer,
                   use_flash_attention=use_flash_attention,
                   use_layer_norm=use_layer_norm,
-                  rope=self.rope)
+                  rope=self.rope,
+                  cond_dim=_block_cond_dim)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
@@ -316,10 +349,14 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             layers: Sequence[int],
             masks: list[torch.Tensor] | torch.Tensor | None,
             cell_only: bool,
-            ignore_spc_tokens: bool = False) -> dict[int, torch.Tensor]:
+            ignore_spc_tokens: bool = False,
+            coords: torch.Tensor | None = None,
+            cond: torch.Tensor | None = None,
+            ) -> dict[int, torch.Tensor]:
         """
         Helper function to return embeddings for either full context or
-        cell only context.
+        cell only context. ``coords`` (for RoPE) and ``cond`` (for
+        AdaLN) are forwarded unchanged to each Block.
         """
         layers: list[int] = sorted({int(l) for l in layers})
         max_layer: int = max(layers)
@@ -374,7 +411,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         if DEBUG:
             valid_mask = x.ne(0).any(dim=-1)
         for i, blk in enumerate(self.blocks, start=1):
-            x = blk(x, masks=attn)
+            x = blk(x, masks=attn, coords=coords, cond=cond)
             if i == len(self.blocks) and (self.norm is not None):
                 # Apply norm only for last layer as in training
                 x = self.norm(x)
@@ -494,6 +531,55 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             return None
         return torch.stack(
             [batch['rel_x_coords'], batch['rel_y_coords']], dim=-1)
+
+    def _extract_batch_label(self,
+                             batch: Mapping[str, torch.Tensor]
+                             ) -> torch.Tensor:
+        """Pull a per-cell long-tensor batch label from the data batch.
+
+        The label is read from
+        ``batch['values'][:, adaln_batch_label_position]`` (default
+        position 0, matching configs that put 'batch' first in
+        ``special_tokens``). The ``values`` tensor stores spv_* token
+        IDs at the special-token positions of the sequence -- those
+        IDs are unique per batch and are used directly as class
+        indices for the batch embedding lookup and (optionally) the
+        adversarial classifier head.
+
+        The returned tensor is a ``LongTensor`` of shape ``(B,)``.
+        """
+        values = batch['values']
+        if values.dim() < 2:
+            raise RuntimeError(
+                f"Expected `values` to be at least 2-D (B, L, ...); "
+                f"got shape {tuple(values.shape)}.")
+        pos = self.adaln_batch_label_position
+        if pos >= values.size(1):
+            raise RuntimeError(
+                f"batch_label_position={pos} is out of range for a "
+                f"sequence of length {values.size(1)}.")
+        return values[:, pos].long()
+
+    def _compute_cond(self,
+                      batch: Mapping[str, torch.Tensor],
+                      ) -> torch.Tensor | None:
+        """Return the per-cell conditioning embedding for AdaLN.
+
+        Shape ``(B, adaln_batch_embed_dim)`` when AdaLN is on,
+        ``None`` otherwise. The forwards pass ``cond=None`` through
+        Block.forward whose AdaLN-off branch ignores it -- the same
+        codepath therefore works in both modes without branching at
+        every block.
+        """
+        if not self.adaln_enabled:
+            return _NO_COND
+        batch_label = self._extract_batch_label(batch)
+        # Defensive clamp so an unexpectedly-large batch index can't
+        # OOB the embedding table. Out-of-range indices map to the
+        # last embedding row (effectively a "shared rare-batch" slot).
+        max_id = self.adaln_n_batches - 1
+        batch_label = batch_label.clamp(min=0, max=max_id)
+        return self.batch_emb_table(batch_label)
 
     def _compute_laplacian_pe(self, batch: dict) -> torch.Tensor:
         """Per-token Laplacian positional encoding.
@@ -976,6 +1062,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  new_spc: bool = False,
                  rope_freq_scale: float = math.pi,
                  rope_rotation_augment: bool = True,
+                 adaln_kwargs: dict | None = None,
                  **kwargs
                  ):
         super().__init__()
@@ -1034,6 +1121,31 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         else:
             self.rope = None
 
+        # AdaLN conditioning. Mirrors the encoder's setup: a per-batch
+        # embedding lookup table whose output is fed to every Block's
+        # two AdaLN modules. Predictor uses its own embedding table
+        # (predictor_embed_dim != encoder_embed_dim in general), so
+        # there's no parameter sharing between encoder.batch_emb_table
+        # and predictor.batch_emb_table. They're updated independently
+        # by gradient descent.
+        self.adaln_enabled = bool(adaln_kwargs) and adaln_kwargs.get(
+            'enabled', False)
+        if self.adaln_enabled:
+            self.adaln_n_batches = int(adaln_kwargs['n_batches'])
+            self.adaln_batch_embed_dim = int(adaln_kwargs.get(
+                'batch_embed_dim', 64))
+            self.adaln_batch_label_position = int(adaln_kwargs.get(
+                'batch_label_position', 0))
+            self.batch_emb_table = nn.Embedding(
+                self.adaln_n_batches, self.adaln_batch_embed_dim)
+            _block_cond_dim = self.adaln_batch_embed_dim
+        else:
+            self.adaln_n_batches = 0
+            self.adaln_batch_embed_dim = 0
+            self.adaln_batch_label_position = 0
+            self.batch_emb_table = None
+            _block_cond_dim = None
+
         # Initialize predictor blocks, norm layer, and predictor
         # projection layer to project back to encoder embedding size
         self.predictor_blocks = nn.ModuleList([
@@ -1047,7 +1159,8 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                   norm_layer=norm_layer,
                   use_flash_attention=use_flash_attention,
                   use_layer_norm=use_layer_norm,
-                  rope=self.rope)
+                  rope=self.rope,
+                  cond_dim=_block_cond_dim)
             for i in range(depth)])
         self.predictor_norm = norm_layer(predictor_embed_dim)
         self.predictor_proj = nn.Linear(predictor_embed_dim,
@@ -1176,6 +1289,38 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             return None
         return torch.stack(
             [batch['rel_x_coords'], batch['rel_y_coords']], dim=-1)
+
+    def _extract_batch_label(
+            self,
+            batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
+        """Same convention as the encoder: read the per-cell long
+        batch label from ``batch['values'][:, batch_label_position]``.
+        """
+        values = batch['values']
+        if values.dim() < 2:
+            raise RuntimeError(
+                f"Expected `values` to be at least 2-D (B, L, ...); "
+                f"got shape {tuple(values.shape)}.")
+        pos = self.adaln_batch_label_position
+        if pos >= values.size(1):
+            raise RuntimeError(
+                f"batch_label_position={pos} is out of range for a "
+                f"sequence of length {values.size(1)}.")
+        return values[:, pos].long()
+
+    def _compute_cond(self,
+                      batch: Mapping[str, torch.Tensor],
+                      ) -> torch.Tensor | None:
+        """Return the per-cell conditioning embedding for AdaLN. The
+        predictor's table is independent of the encoder's; both are
+        looked up by the same batch label.
+        """
+        if not self.adaln_enabled:
+            return None
+        batch_label = self._extract_batch_label(batch)
+        max_id = self.adaln_n_batches - 1
+        batch_label = batch_label.clamp(min=0, max=max_id)
+        return self.batch_emb_table(batch_label)
 
     def _compose_predictor_coords(
             self,
@@ -1316,6 +1461,9 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
             # Build (B, L, 2) coords for RoPE; None for other modes.
             coords = self._build_coords(batch)
 
+            # Per-cell conditioning for AdaLN (or None when off).
+            cond = self._compute_cond(batch)
+
             # Mask token embeddings if masks are provided
             if masks is not None:
                 x = apply_masks(x, masks)
@@ -1324,7 +1472,7 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
 
             # Run forward prop
             for i, blk in enumerate(self.blocks):
-                x = blk(x, masks=attn_bias, coords=coords)
+                x = blk(x, masks=attn_bias, coords=coords, cond=cond)
             if self.norm is not None:
                 x = self.norm(x)
 
@@ -1394,20 +1542,29 @@ class GeneTransformerRankEncoder(GeneTransformerBaseEncoder):
         #    if self.n_special_tokens:
         #        x[:, :self.n_special_tokens, :] = 0
 
+        # Inference path: build coords (for RoPE) and cond (for AdaLN)
+        # so models trained with these features can also be embedded.
+        coords = self._build_coords(batch)
+        cond = self._compute_cond(batch)
+
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=False,
-            ignore_spc_tokens=ignore_spc_tokens)
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=True,
-            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
@@ -1569,6 +1726,9 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         coords = self._build_coords(batch)
 
+        # Per-cell conditioning for AdaLN (or None when off).
+        cond = self._compute_cond(batch)
+
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
@@ -1577,7 +1737,7 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         # Run forward prop
         for i, blk in enumerate(self.blocks):
-            x = blk(x, masks=attn_bias, coords=coords)
+            x = blk(x, masks=attn_bias, coords=coords, cond=cond)
         if self.norm is not None:
             x = self.norm(x)
 
@@ -1688,20 +1848,29 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
         #    if self.n_special_tokens:
         #        x[:, :self.n_special_tokens, :] = 0
 
+        # Inference path: build coords (for RoPE) and cond (for AdaLN)
+        # so models trained with these features can also be embedded.
+        coords = self._build_coords(batch)
+        cond = self._compute_cond(batch)
+
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=False,
-            ignore_spc_tokens=ignore_spc_tokens)
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=True,
-            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
@@ -1887,6 +2056,9 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         coords = self._build_coords(batch)
 
+        # Per-cell conditioning for AdaLN (or None when off).
+        cond = self._compute_cond(batch)
+
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
@@ -1895,7 +2067,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         # Run forward prop
         for i, blk in enumerate(self.blocks):
-            x = blk(x, masks=attn_bias, coords=coords)
+            x = blk(x, masks=attn_bias, coords=coords, cond=cond)
         if self.norm is not None:
             x = self.norm(x)
 
@@ -2024,20 +2196,29 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         #    if self.n_special_tokens:
         #        x[:, :self.n_special_tokens, :] = 0
 
+        # Inference path: build coords (for RoPE) and cond (for AdaLN)
+        # so models trained with these features can also be embedded.
+        coords = self._build_coords(batch)
+        cond = self._compute_cond(batch)
+
         full_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=False,
-            ignore_spc_tokens=ignore_spc_tokens)
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond)
         cell_only_ctx: dict[int, torch.Tensor] = self._compute_layer_emb(
             x,
             masks_attention,
             layers,
             masks,
             cell_only=True,
-            ignore_spc_tokens=ignore_spc_tokens) if need_cell_only_context else None
+            ignore_spc_tokens=ignore_spc_tokens,
+            coords=coords,
+            cond=cond) if need_cell_only_context else None
 
         return full_ctx, cell_only_ctx
 
@@ -2187,9 +2368,20 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             else:
                 pred_coords = None
 
+            # Per-cell AdaLN conditioning. Per-cell label is constant
+            # across all tokens, so repeating n_pred_masks times
+            # matches the outer batch dim after target-mask
+            # repetition.
+            cond_full = self._compute_cond(batch)
+            if cond_full is not None:
+                pred_cond = cond_full.repeat(len(masks_pred), 1)
+            else:
+                pred_cond = None
+
             # Run forward prop
             for blk in self.predictor_blocks:
-                z = blk(z, masks=masks_attention, coords=pred_coords)
+                z = blk(z, masks=masks_attention,
+                        coords=pred_coords, cond=pred_cond)
             z = self.predictor_norm(z)
 
             # Return predictions for (target) mask tokens
@@ -2315,9 +2507,31 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
                 #z[:, self.n_special_tokens:, :] # context gene tokens (excl. special tokens)
                 ], dim=1)
 
+        # Build coords for RoPE (per-token (x, y) for the concatenated
+        # context+target sequence the predictor sees). None for non-rope
+        # modes; Block.forward passes through unchanged in that case.
+        coords_full = self._build_coords(batch)
+        if coords_full is not None:
+            pred_coords = self._compose_predictor_coords(
+                coords_full, masks_enc, masks_pred)
+        else:
+            pred_coords = None
+
+        # Per-cell AdaLN conditioning. The predictor's concatenated
+        # sequence (context + target) has shape (B * n_pred_masks,
+        # ..., D). The per-cell label is constant across all tokens
+        # of a given batch element, so we just repeat it n_pred_masks
+        # times to match the outer batch dim of z.
+        cond_full = self._compute_cond(batch)
+        if cond_full is not None:
+            pred_cond = cond_full.repeat(len(masks_pred), 1)
+        else:
+            pred_cond = None
+
         # Run forward prop
         for blk in self.predictor_blocks:
-            z = blk(z, masks=masks_attention)
+            z = blk(z, masks=masks_attention,
+                    coords=pred_coords, cond=pred_cond)
         z = self.predictor_norm(z)
 
         # Return predictions for (target) mask tokens
@@ -2489,9 +2703,31 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
                 #z[:, self.n_special_tokens:, :] # context gene tokens (excl. special tokens)
                 ], dim=1)
 
+        # Build coords for RoPE (per-token (x, y) for the concatenated
+        # context+target sequence the predictor sees). None for non-rope
+        # modes; Block.forward passes through unchanged in that case.
+        coords_full = self._build_coords(batch)
+        if coords_full is not None:
+            pred_coords = self._compose_predictor_coords(
+                coords_full, masks_enc, masks_pred)
+        else:
+            pred_coords = None
+
+        # Per-cell AdaLN conditioning. The predictor's concatenated
+        # sequence (context + target) has shape (B * n_pred_masks,
+        # ..., D). The per-cell label is constant across all tokens
+        # of a given batch element, so we just repeat it n_pred_masks
+        # times to match the outer batch dim of z.
+        cond_full = self._compute_cond(batch)
+        if cond_full is not None:
+            pred_cond = cond_full.repeat(len(masks_pred), 1)
+        else:
+            pred_cond = None
+
         # Run forward prop
         for blk in self.predictor_blocks:
-            z = blk(z, masks=masks_attention)
+            z = blk(z, masks=masks_attention,
+                    coords=pred_coords, cond=pred_cond)
         z = self.predictor_norm(z)
 
         # Return predictions for (target) mask tokens

@@ -38,8 +38,11 @@ from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
-from app.utils import (init_model, init_opt, load_checkpoint,
+from app.utils import (build_batch_classifier_head,
+                       init_model, init_opt, load_checkpoint,
                        parse_protein_init_kwargs)
+from nichejepa.models.batch_classifier import (
+    grad_reverse, mean_pool_cell_embedding)
 from nichejepa.datasets.cell_datasets import init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
@@ -203,6 +206,51 @@ def train(args: dict,
     rope_freq_scale = args['meta'].get('rope_freq_scale', None)
     rope_rotation_augment = bool(
         args['meta'].get('rope_rotation_augment', True))
+
+    # Optional batch-correction kwargs (off by default; existing
+    # behavior preserved). Two independent features:
+    #   adaln: per-batch AdaLN modulation inside the encoder + predictor
+    #   adv_classifier: gradient-reversal batch classifier on the cell
+    #                   embedding (DANN-style)
+    # Both consume a per-cell batch label from
+    # ``values[:, batch_label_position]`` (default position 0).
+    bc_cfg = args.get('batch_correction', {}) or {}
+    adaln_kwargs = bc_cfg.get('adaln', None)
+    if adaln_kwargs and not adaln_kwargs.get('enabled', False):
+        adaln_kwargs = None
+    elif adaln_kwargs is not None:
+        # Inherit shared metadata if missing on the sub-block.
+        adaln_kwargs = dict(adaln_kwargs)
+        adaln_kwargs.setdefault('n_batches', bc_cfg.get('n_batches'))
+        adaln_kwargs.setdefault(
+            'batch_label_position', bc_cfg.get('batch_label_position', 0))
+        if adaln_kwargs.get('n_batches') is None:
+            raise ValueError(
+                "batch_correction.adaln.enabled=True requires "
+                "batch_correction.n_batches (or adaln.n_batches) to be set.")
+
+    adv_classifier_kwargs = bc_cfg.get('adv_classifier', None)
+    if adv_classifier_kwargs and not adv_classifier_kwargs.get(
+            'enabled', False):
+        adv_classifier_kwargs = None
+    elif adv_classifier_kwargs is not None:
+        adv_classifier_kwargs = dict(adv_classifier_kwargs)
+        adv_classifier_kwargs.setdefault(
+            'n_batches', bc_cfg.get('n_batches'))
+        adv_classifier_kwargs.setdefault(
+            'batch_label_position', bc_cfg.get('batch_label_position', 0))
+        if adv_classifier_kwargs.get('n_batches') is None:
+            raise ValueError(
+                "batch_correction.adv_classifier.enabled=True requires "
+                "batch_correction.n_batches (or adv_classifier.n_batches) "
+                "to be set.")
+
+    lambda_adv = float(
+        (adv_classifier_kwargs or {}).get('lambda_adv', 0.1))
+    grl_alpha = float(
+        (adv_classifier_kwargs or {}).get('grl_alpha', 1.0))
+    adv_batch_label_position = int(
+        (adv_classifier_kwargs or {}).get('batch_label_position', 0))
 
     # Optional protein-embedding initialization for the gene-token
     # embedding layer (UCE-style: frozen ESM matrix + learnable
@@ -382,7 +430,12 @@ def train(args: dict,
         laplacian_k=laplacian_k,
         laplacian_sigma=laplacian_sigma,
         rope_freq_scale=rope_freq_scale,
-        rope_rotation_augment=rope_rotation_augment)
+        rope_rotation_augment=rope_rotation_augment,
+        adaln_kwargs=adaln_kwargs)
+    # Build the adversarial batch classifier head (returns None when
+    # disabled, so default training is unchanged).
+    batch_classifier = build_batch_classifier_head(
+        adv_classifier_kwargs, embed_dim=enc_emb_dim, device=device)
     target_encoder = copy.deepcopy(encoder)
 
     # Initialize mask collator
@@ -498,6 +551,30 @@ def train(args: dict,
         num_epochs=num_epochs,
         ipe_scale=ipe_scale,
         use_bfloat16=use_bfloat16)
+
+    # Add adversarial batch classifier head params to the optimizer.
+    # Use a separate param group so its weight decay can be controlled
+    # independently if needed; for now apply the same WD as the
+    # encoder's weight-decay group, and no-WD for biases / 1-D params.
+    if batch_classifier is not None:
+        cls_decay_params, cls_no_decay_params = [], []
+        for n, p in batch_classifier.named_parameters():
+            if 'bias' in n or p.dim() == 1:
+                cls_no_decay_params.append(p)
+            else:
+                cls_decay_params.append(p)
+        if cls_decay_params:
+            optimizer.add_param_group({'params': cls_decay_params})
+        if cls_no_decay_params:
+            optimizer.add_param_group({
+                'params': cls_no_decay_params,
+                'WD_exclude': True,
+                'weight_decay': 0,
+            })
+        logger.info(
+            f"Added {len(cls_decay_params)} decay + "
+            f"{len(cls_no_decay_params)} no-decay param groups for the "
+            "adversarial batch classifier head.")
     
     #encoder = torch.compile(encoder)
     #predictor = torch.compile(predictor)
@@ -550,6 +627,16 @@ def train(args: dict,
         broadcast_buffers=False)
     for p in target_encoder.parameters():
         p.requires_grad = False
+    # Wrap the adversarial batch classifier in DDP too so its grads
+    # are reduced across ranks. None when adv classifier is disabled.
+    if batch_classifier is not None:
+        batch_classifier = DistributedDataParallel(
+            batch_classifier,
+            static_graph=True,
+            device_ids=[LOCAL_RANK],
+            output_device=LOCAL_RANK,
+            gradient_as_bucket_view=True,
+            broadcast_buffers=False)
 
     # Define momentum schedule
     momentum_scheduler = (
@@ -699,6 +786,13 @@ def train(args: dict,
                     batch=udata,
                     masks=masks_enc,
                     masks_attention=None)
+                # Keep a reference to the encoder's outputs (a list of
+                # one tensor per context mask) for the adversarial
+                # classifier head. The predictor call below REBINDS
+                # ``z`` to its own output, so without this save the
+                # encoder output would be inaccessible by the time the
+                # adversarial loss is computed.
+                z_encoder_output = z
 
                 # Forward pass of predictor
                 z = predictor(
@@ -752,6 +846,42 @@ def train(args: dict,
                     loss_cov = covariance_loss(all_z)
 
                     loss = loss + lambda_var * loss_var + lambda_cov * loss_cov
+
+                # ----------------------------------------------------
+                # Adversarial batch classifier (DANN-style)
+                # ----------------------------------------------------
+                # Pull a single-scalar batch label per cell from the
+                # special-token-position value, mean-pool the encoder's
+                # context-mask output to a per-cell embedding, send it
+                # through the gradient-reversal layer, then a small MLP
+                # classifier head. CE loss is ADDED to the total with
+                # weight lambda_adv. Gradient reversal pushes the
+                # encoder to produce batch-invariant representations.
+                adv_loss = None
+                adv_accuracy = None
+                if batch_classifier is not None:
+                    cell_emb = mean_pool_cell_embedding(
+                        z_encoder_output[0],
+                        n_special_tokens=n_special_tokens,
+                    )
+                    cell_emb_rev = grad_reverse(cell_emb, alpha=grl_alpha)
+                    batch_logits = batch_classifier(cell_emb_rev)
+                    batch_label = udata['values'][
+                        :, adv_batch_label_position].long()
+                    # Defensive clamp: if a batch label exceeds the
+                    # classifier's n_batches output dim, the CE loss
+                    # would error out. Clamp to (n_batches - 1) so a
+                    # rare out-of-range batch is folded into the last
+                    # class -- this should be rare if n_batches was
+                    # set correctly at config time.
+                    n_cls = batch_logits.size(-1)
+                    batch_label = batch_label.clamp(min=0, max=n_cls - 1)
+                    adv_loss = F.cross_entropy(batch_logits, batch_label)
+                    loss = loss + lambda_adv * adv_loss
+                    with torch.no_grad():
+                        adv_accuracy = (
+                            batch_logits.argmax(dim=-1) == batch_label
+                        ).float().mean().item()
 
             # Step 2: backward pass and step
             _enc_norm, _pred_norm = 0., 0.
@@ -830,13 +960,24 @@ def train(args: dict,
 
             #log_stats()
             if WORLD_RANK == 0 and (itr % log_freq == 0):
-                wandb.log({
+                log_payload = {
                     "loss": float(loss),
                     "lr": float(_new_lr),
                     "epoch": int(epoch),
                     "global_norm_enc": float(grad_stats.global_norm),
                     "global_norm_pred": float(grad_stats_pred.global_norm),
-                })
+                }
+                # Diagnostic metrics for the adversarial batch
+                # classifier when it's enabled. Target accuracy is
+                # ~1/n_batches (random chance): the closer it gets,
+                # the more the encoder has succeeded at producing
+                # batch-invariant representations.
+                if adv_loss is not None:
+                    log_payload["adv/batch_classifier_loss"] = float(
+                        adv_loss.detach())
+                    log_payload["adv/batch_classifier_accuracy"] = float(
+                        adv_accuracy)
+                wandb.log(log_payload)
             assert not np.isnan(float(loss)), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:
                 logger.info(f'Saving checkpoint at epoch {epoch} iteration {itr}')

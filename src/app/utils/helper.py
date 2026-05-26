@@ -245,6 +245,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                laplacian_sigma: float = 1.0,
                rope_freq_scale: float | None = None,
                rope_rotation_augment: bool = True,
+               adaln_kwargs: dict | None = None,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -323,7 +324,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         laplacian_sigma=laplacian_sigma,
         rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
                          else math.pi),
-        rope_rotation_augment=rope_rotation_augment)
+        rope_rotation_augment=rope_rotation_augment,
+        adaln_kwargs=adaln_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
@@ -347,7 +349,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         new_spc=new_spc,
         rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
                          else math.pi),
-        rope_rotation_augment=rope_rotation_augment)
+        rope_rotation_augment=rope_rotation_augment,
+        adaln_kwargs=adaln_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         predictor = PredictorMultiMaskWrapper(predictor)
 
@@ -377,8 +380,57 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
     logger.info(f'Encoder number of parameters: {count_parameters(encoder)}')
     logger.info(
         f'Predictor number of parameters: {count_parameters(predictor)}')
-    
+
     return encoder, predictor
+
+
+def build_batch_classifier_head(
+        adv_classifier_kwargs: dict | None,
+        embed_dim: int,
+        device: str,
+        ) -> torch.nn.Module | None:
+    """Construct the adversarial batch classifier head.
+
+    Returns None when ``adv_classifier_kwargs`` is missing / disabled,
+    so the existing two-tuple return of ``init_model`` and the inference
+    scripts are unaffected. When enabled, returns a
+    ``gt.BatchClassifierHead`` on ``device``.
+
+    Parameters
+    ----------
+    adv_classifier_kwargs:
+        Config dict. Required keys when ``enabled=True``:
+        ``n_batches`` (int, max batch ID + 1 in the corpus).
+        Optional keys: ``hidden_dim`` (default 256), ``dropout``
+        (default 0.1).
+    embed_dim:
+        Cell embedding dimension at the input (= encoder ``enc_emb_dim``).
+    device:
+        Torch device.
+    """
+    if not (adv_classifier_kwargs
+            and adv_classifier_kwargs.get('enabled', False)):
+        return None
+    head = gt.BatchClassifierHead(
+        embed_dim=embed_dim,
+        n_batches=int(adv_classifier_kwargs['n_batches']),
+        hidden_dim=int(adv_classifier_kwargs.get('hidden_dim', 256)),
+        dropout=float(adv_classifier_kwargs.get('dropout', 0.1)),
+    ).to(device)
+
+    def _init_w(m):
+        if isinstance(m, torch.nn.Linear):
+            trunc_normal_(m.weight, std=0.02)
+            if m.bias is not None:
+                torch.nn.init.constant_(m.bias, 0)
+    for m in head.modules():
+        _init_w(m)
+
+    n_params = sum(p.numel() for p in head.parameters() if p.requires_grad)
+    logger.info(
+        f'Adversarial batch classifier head: {n_params} params, '
+        f'n_batches={adv_classifier_kwargs["n_batches"]}.')
+    return head
 
     
 def init_opt(encoder: gt.GeneTransformerBaseEncoder,

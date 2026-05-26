@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+from .adaln import AdaLN
 from .rope2d import RoPE2D
 
 
@@ -184,12 +185,28 @@ class Block(nn.Module):
                  norm_layer: nn.modules.normalization=nn.LayerNorm,
                  use_flash_attention: bool=True,
                  rope: RoPE2D | None = None,
+                 cond_dim: int | None = None,
                  ):
         super().__init__()
-        if use_layer_norm:
-            self.norm1 = norm_layer(dim)
-        else:
-            self.norm1 = DyT(dim)
+        # When `cond_dim` is provided the two norms become AdaLN (DiT-
+        # style), modulated by a per-cell conditioning vector (batch
+        # embedding). Zero-initialized so behavior at step 0 is
+        # identical to plain LayerNorm -- see adaln.AdaLN docstring.
+        # AdaLN always uses LayerNorm internally (not DyT); a future
+        # extension could add a Dyt-based AdaLN if needed.
+        self.uses_adaln = cond_dim is not None
+
+        def _make_norm():
+            if self.uses_adaln:
+                return AdaLN(dim, cond_dim=cond_dim)
+            if use_layer_norm:
+                return norm_layer(dim)
+            return DyT(dim)
+
+        # Preserve the original submodule registration order
+        # (norm1, attn, norm2, mlp) so existing checkpoints load and
+        # named_parameters() ordering is unchanged for non-AdaLN runs.
+        self.norm1 = _make_norm()
         self.attn = Attention(dim,
                               num_heads=num_heads,
                               qkv_bias=qkv_bias,
@@ -198,10 +215,7 @@ class Block(nn.Module):
                               proj_drop=drop,
                               use_flash_attention=use_flash_attention,
                               rope=rope)
-        if use_layer_norm:
-            self.norm2 = norm_layer(dim)
-        else:
-            self.norm2 = DyT(dim)
+        self.norm2 = _make_norm()
         mlp_hidden_dim = int(dim * mlp_ratio)
         self.mlp = MLP(in_features=dim,
                        hidden_features=mlp_hidden_dim,
@@ -213,6 +227,7 @@ class Block(nn.Module):
                 return_attention: bool = False,
                 masks: torch.Tensor | None = None,
                 coords: torch.Tensor | None = None,
+                cond: torch.Tensor | None = None,
                 ) -> torch.Tensor:
         """
         Forward pass of the transformer block.
@@ -229,19 +244,36 @@ class Block(nn.Module):
         coords:
             Per-token 2D coordinates of shape (B, N, 2), forwarded to
             the Attention module. Only used if RoPE is configured.
+        cond:
+            Per-cell conditioning embedding of shape (B, cond_dim),
+            used by AdaLN to modulate the two layer norms. Required
+            when this block was constructed with ``cond_dim != None``
+            and ignored otherwise.
 
         Returns
         -----------
         x:
-            Output of the transformer block with shape (B, N, D).       
+            Output of the transformer block with shape (B, N, D).
         """
-        y, attn = self.attn(self.norm1(x),
-                            masks=masks,
-                            coords=coords)
+        # Branch the norm call signature based on whether this block
+        # was built with AdaLN. Cheap and explicit -- avoids a runtime
+        # type check on every forward.
+        if self.uses_adaln:
+            if cond is None:
+                raise RuntimeError(
+                    "Block was constructed with cond_dim != None (AdaLN) "
+                    "but `cond` was not provided to forward().")
+            h1 = self.norm1(x, cond)
+        else:
+            h1 = self.norm1(x)
+        y, attn = self.attn(h1, masks=masks, coords=coords)
         if return_attention:
             return attn
         x = x + y
-        x = x + self.mlp(self.norm2(x))
+        if self.uses_adaln:
+            x = x + self.mlp(self.norm2(x, cond))
+        else:
+            x = x + self.mlp(self.norm2(x))
 
         return x
 

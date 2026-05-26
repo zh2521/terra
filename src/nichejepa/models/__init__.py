@@ -4,6 +4,12 @@ from .gene_transformers import (GeneTransformerBaseEncoder,
                                 GeneTransformerCountPredictor,
                                 GeneTransformerRankEncoder,
                                 GeneTransformerRankPredictor)
+from .adaln import AdaLN
+from .batch_classifier import (BatchClassifierHead,
+                               GradReverseFn,
+                               GradReverseLayer,
+                               grad_reverse,
+                               mean_pool_cell_embedding)
 from .modules import Attention, Block, DyT, MLP, ValueEmbWeightsProjection
 from .multimask import EncoderMultiMaskWrapper, PredictorMultiMaskWrapper
 from .protein_init import (ProteinInitTokenEmbedding,
