@@ -93,7 +93,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  n_special_tokens: int,
                  n_segments: int,
                  cell_pos_enc: Literal[
-                     'segment', 'coord', 'polar', 'alibi',
+                     'none', 'segment', 'coord', 'polar', 'alibi',
                      'polar+alibi', 'laplacian'],
                  embed_dim: int = 768,
                  depth: int = 12,
@@ -378,6 +378,17 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         """
         Helper function to get segment embeddings.
         """
+        if self.cell_pos_enc == 'none':
+            # No spatial encoding at all. Return zeros so the forward's
+            # ``x = seg_emb + pos_emb + token_emb + ...`` addition is a
+            # no-op for the seg term. Shape matches token_emb's
+            # (B, L, embed_dim). Float32 is fine -- autocast handles
+            # the mixed-precision add downstream.
+            tokens = batch['tokens']
+            return torch.zeros(
+                tokens.size(0), tokens.size(1), self.embed_dim,
+                device=tokens.device, dtype=torch.float32,
+            )
         if self.cell_pos_enc == 'segment':
             seg_emb = self.seg_embed(batch['segments'])
         elif self.cell_pos_enc == 'coord':
@@ -809,7 +820,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  n_special_tokens: int,
                  n_segments: int,
                  cell_pos_enc: Literal[
-                     'segment', 'coord', 'polar', 'alibi',
+                     'none', 'segment', 'coord', 'polar', 'alibi',
                      'polar+alibi', 'laplacian'],
                  predictor_embed_dim: int = 768,
                  depth: int = 6,
@@ -937,6 +948,15 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         """
         Helper function to get segment embeddings.
         """
+        if self.cell_pos_enc == 'none':
+            # No spatial encoding (predictor side). Mirrors the
+            # encoder's 'none' branch: return zeros of the right
+            # shape so the predictor's additive sum is unaffected.
+            tokens = batch['tokens']
+            return torch.zeros(
+                tokens.size(0), tokens.size(1), self.predictor_embed_dim,
+                device=tokens.device, dtype=torch.float32,
+            )
         if self.cell_pos_enc == 'segment':
             seg_emb = self.seg_embed(batch['segments'])
         elif self.cell_pos_enc == 'coord':

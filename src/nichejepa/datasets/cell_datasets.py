@@ -74,7 +74,7 @@ class CellBaseDataset(Dataset):
         # only segment IDs. So at the dataset level, polar/alibi need
         # exactly the same rel-coord columns as coord.
         if cell_pos_enc not in [
-                'segment', 'coord', 'polar', 'alibi',
+                'none', 'segment', 'coord', 'polar', 'alibi',
                 'polar+alibi', 'laplacian']:
             raise ValueError(f'Invalid "cell_pos_enc": {cell_pos_enc}.')
         

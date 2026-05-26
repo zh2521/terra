@@ -403,6 +403,48 @@ def test_laplacian_pe_handles_nz_spc_special_segments():
     assert torch.all(special_block == 0.0)
 
 
+# ---------------------------------------------------------------------------
+# 'none' mode (no spatial encoding)
+# ---------------------------------------------------------------------------
+
+def test_none_seg_emb_is_zero_and_shape_matches():
+    """cell_pos_enc='none' must produce a zero tensor of shape
+    (B, L, embed_dim) so the encoder's additive sum is unaffected."""
+    enc = _make_rank_encoder("none", embed_dim=32)
+    B, L = 2, 12
+    batch = {
+        "tokens": torch.ones(B, L, dtype=torch.long),
+        # Other fields are not required by the 'none' branch but
+        # build them anyway to mimic a real batch.
+        "segments": torch.zeros(B, L, dtype=torch.long),
+        "rel_x_coords": torch.zeros(B, L),
+        "rel_y_coords": torch.zeros(B, L),
+    }
+    seg_emb = enc._get_seg_emb(batch)
+    assert seg_emb.shape == (B, L, 32)
+    assert torch.all(seg_emb == 0.0)
+
+
+def test_none_does_not_initialize_spatial_modules():
+    """The 'none' mode must not create seg_embed, coord_omega,
+    alibi_slopes, or laplacian_proj -- it's the no-spatial-info
+    baseline and should add zero spatial parameters to the model."""
+    enc = _make_rank_encoder("none", embed_dim=32)
+    assert not hasattr(enc, "seg_embed")
+    assert not hasattr(enc, "coord_omega")
+    assert not hasattr(enc, "alibi_slopes")
+    assert not hasattr(enc, "laplacian_proj")
+
+
+def test_none_attention_bias_is_passthrough():
+    enc = _make_rank_encoder("none", embed_dim=32)
+    batch = {"rel_x_coords": torch.zeros(1, 4),
+             "rel_y_coords": torch.zeros(1, 4)}
+    bool_mask = torch.tensor([[[[True, True, False, True]]]])
+    assert enc._compute_attention_bias(batch, masks_attention=bool_mask) is bool_mask
+    assert enc._compute_attention_bias(batch, masks_attention=None) is None
+
+
 def test_laplacian_pe_pad_tokens_zeroed():
     """Pad tokens within a cell block (token == 0) get zero PE."""
     enc = _make_rank_encoder("laplacian", embed_dim=32)
