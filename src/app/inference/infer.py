@@ -21,7 +21,8 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import init_model, load_checkpoint, parse_protein_init_kwargs
+from app.utils import (init_model, load_checkpoint, parse_arch_kwargs,
+                       parse_protein_init_kwargs)
 from nichejepa.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
@@ -309,7 +310,8 @@ def infer(args: dict,
         pos_learnable=pos_learnable,
         nz_spc=nz_spc,
         mlp_bias=mlp_bias,
-        protein_init_kwargs=parse_protein_init_kwargs(args, token_dict))
+        protein_init_kwargs=parse_protein_init_kwargs(args, token_dict),
+        **parse_arch_kwargs(args))
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb

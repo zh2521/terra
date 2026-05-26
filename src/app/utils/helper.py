@@ -15,6 +15,7 @@ import torch
 #from peft import get_peft_model, LoraConfig
 
 import nichejepa.models.gene_transformers as gt
+from nichejepa.models.batch_classifier import BatchClassifierHead
 from nichejepa.models.multimask import (EncoderMultiMaskWrapper,
                                         PredictorMultiMaskWrapper)
 from nichejepa.models.utils import trunc_normal_
@@ -32,6 +33,47 @@ def apply_peft(model, peft_method='lora', rank=8):
         model = get_peft_model(model, peft_config)
     return model
 """
+
+def parse_arch_kwargs(args: dict) -> dict:
+    """Parse architecture hyperparameters that must round-trip from a
+    saved ``params.yaml`` into ``init_model`` when rebuilding a
+    trained encoder for fine-tuning or inference.
+
+    Returns a dict suitable for direct ``**unpacking`` into
+    ``init_model``. Covers: Laplacian PE (laplacian_k, laplacian_sigma),
+    RoPE (rope_freq_scale, rope_rotation_augment), and AdaLN
+    (adaln_kwargs). For any field missing from the config, the
+    corresponding default in ``init_model``'s signature applies.
+
+    Use this in every entry point that reconstructs a trained
+    encoder, so a checkpoint trained with non-default hyperparameters
+    rebuilds with the same shapes / dynamics. Skipping it means
+    state_dict load may silently succeed but the runtime behavior
+    differs from training (e.g. wrong Laplacian sigma -> wrong
+    adjacency -> wrong embeddings).
+    """
+    meta = args.get('meta', {}) or {}
+    bc = args.get('batch_correction', {}) or {}
+    adaln = bc.get('adaln', None)
+    if adaln and not adaln.get('enabled', False):
+        adaln = None
+    elif adaln is not None:
+        adaln = dict(adaln)
+        adaln.setdefault('n_batches', bc.get('n_batches'))
+        if adaln.get('n_batches') is None:
+            raise ValueError(
+                "batch_correction.adaln.enabled=True in the saved "
+                "config but n_batches is missing. Either set "
+                "batch_correction.n_batches or adaln.n_batches.")
+    return {
+        'laplacian_k': int(meta.get('laplacian_k', 8)),
+        'laplacian_sigma': float(meta.get('laplacian_sigma', 1.0)),
+        'rope_freq_scale': meta.get('rope_freq_scale', None),
+        'rope_rotation_augment': bool(
+            meta.get('rope_rotation_augment', True)),
+        'adaln_kwargs': adaln,
+    }
+
 
 def parse_protein_init_kwargs(args: dict,
                               token_dict: dict | None = None,
@@ -408,7 +450,7 @@ def build_batch_classifier_head(
     Returns None when ``adv_classifier_kwargs`` is missing / disabled,
     so the existing two-tuple return of ``init_model`` and the inference
     scripts are unaffected. When enabled, returns a
-    ``gt.BatchClassifierHead`` on ``device``.
+    ``BatchClassifierHead`` on ``device``.
 
     Parameters
     ----------
@@ -425,7 +467,7 @@ def build_batch_classifier_head(
     if not (adv_classifier_kwargs
             and adv_classifier_kwargs.get('enabled', False)):
         return None
-    head = gt.BatchClassifierHead(
+    head = BatchClassifierHead(
         embed_dim=embed_dim,
         n_batches=int(adv_classifier_kwargs['n_batches']),
         hidden_dim=int(adv_classifier_kwargs.get('hidden_dim', 256)),

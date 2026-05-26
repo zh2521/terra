@@ -6,7 +6,8 @@ import anndata as ad
 import torch
 from tqdm import tqdm
 
-from app.utils import init_model, load_checkpoint, parse_protein_init_kwargs
+from app.utils import (init_model, load_checkpoint, parse_arch_kwargs,
+                       parse_protein_init_kwargs)
 from nichejepa.datasets.cell_datasets import CellBaseDataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.models.modules import ClassificationModel
@@ -237,6 +238,13 @@ def finetune(args: dict,
     load_path = os.path.join(
         load_folder_path, r_file) if r_file is not None else latest_path
 
+    # Pull architecture hyperparameters that must round-trip from
+    # the saved config (laplacian / rope / adaln). Without this the
+    # checkpoint load below would silently use the init_model defaults
+    # for these knobs, producing the wrong architecture or runtime
+    # behavior versus how it was trained.
+    arch_kwargs = parse_arch_kwargs(args)
+
     # Initialize target encoder
     target_encoder, _ = init_model(
         gt_type=gt_type,
@@ -258,7 +266,8 @@ def finetune(args: dict,
         use_flash_attention=use_flash_attention,
         use_layer_norm=use_layer_norm,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
-        protein_init_kwargs=protein_init_kwargs)
+        protein_init_kwargs=protein_init_kwargs,
+        **arch_kwargs)
 
     if api_version != 'v3':
         return_layer_emb_fn = target_encoder.return_layer_emb
