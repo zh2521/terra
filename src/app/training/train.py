@@ -865,14 +865,26 @@ def train(args: dict,
                     # special token in the sequence, so its value
                     # (an 0-indexed batch class id) lives at index 0.
                     batch_label = udata['values'][:, 0].long()
-                    # Defensive clamp: if a batch label exceeds the
-                    # classifier's n_batches output dim, the CE loss
-                    # would error out. Clamp to (n_batches - 1) so a
-                    # rare out-of-range batch is folded into the last
-                    # class -- this should be rare if n_batches was
-                    # set correctly at config time.
                     n_cls = batch_logits.size(-1)
-                    batch_label = batch_label.clamp(min=0, max=n_cls - 1)
+                    # Hard range check. Silent clamping collapsed all
+                    # out-of-range cells into the last class and let
+                    # bugs go undetected. Raise loudly so the user
+                    # can fix n_batches in their config. Note that
+                    # values[:, 0] is offset-subtracted across all
+                    # spv_* tokens (NOT 0-indexed across batches), so
+                    # for a small dataset n_batches typically needs
+                    # to be ~n_special_values + 2.
+                    with torch.no_grad():
+                        max_obs = int(batch_label.max().item())
+                        min_obs = int(batch_label.min().item())
+                    if max_obs >= n_cls or min_obs < 0:
+                        raise RuntimeError(
+                            "Adversarial batch classifier: batch labels "
+                            f"in range [{min_obs}, {max_obs}] but "
+                            f"n_batches (classifier output dim) = {n_cls}. "
+                            "Set batch_correction.n_batches to at least "
+                            f"{max_obs + 1}."
+                        )
                     adv_loss = F.cross_entropy(batch_logits, batch_label)
                     loss = loss + lambda_adv * adv_loss
                     with torch.no_grad():

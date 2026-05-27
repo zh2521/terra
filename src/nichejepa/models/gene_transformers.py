@@ -573,15 +573,57 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         Block.forward whose AdaLN-off branch ignores it -- the same
         codepath therefore works in both modes without branching at
         every block.
+
+        Diagnostic + safety: on the first call (rank-agnostic, but
+        only logged once per process) we record the observed range of
+        batch labels and raise a hard error if any label is >=
+        n_batches. The earlier silent ``clamp`` collapsed all
+        out-of-range labels to the last embedding row, which is
+        usually catastrophic on datasets where the dataset-level
+        ``values[:, 0]`` is offset-subtracted across ALL spv_*
+        tokens rather than 0-indexed across batches. Better to fail
+        loud than to silently degrade.
         """
         if not self.adaln_enabled:
             return _NO_COND
         batch_label = self._extract_batch_label(batch)
-        # Defensive clamp so an unexpectedly-large batch index can't
-        # OOB the embedding table. Out-of-range indices map to the
-        # last embedding row (effectively a "shared rare-batch" slot).
-        max_id = self.adaln_n_batches - 1
-        batch_label = batch_label.clamp(min=0, max=max_id)
+
+        # Hard range check. If the user set n_batches smaller than
+        # the actual range of values[:, 0], every out-of-range cell
+        # used to be silently clamped to the last row, defeating
+        # AdaLN's purpose. Fail with actionable guidance.
+        with torch.no_grad():
+            max_observed = int(batch_label.max().item())
+            min_observed = int(batch_label.min().item())
+        if max_observed >= self.adaln_n_batches or min_observed < 0:
+            raise RuntimeError(
+                "AdaLN batch_label out of range: observed values in "
+                f"[{min_observed}, {max_observed}] but n_batches="
+                f"{self.adaln_n_batches}. The labels are extracted "
+                "from values[:, 0] which is offset-subtracted across "
+                "ALL spv_* tokens (not 0-indexed across batches). "
+                "Set batch_correction.n_batches to at least "
+                f"{max_observed + 1} (a safe choice is "
+                "n_special_values + 2 from your data config)."
+            )
+
+        # One-time diagnostic log on the first call after construction.
+        if not getattr(self, "_adaln_label_range_logged", False):
+            n_unique = int(torch.unique(batch_label).numel())
+            import logging as _logging
+            _logging.getLogger("nichejepa.models.gene_transformers").info(
+                "AdaLN batch_label diagnostic on first batch: "
+                "min=%d, max=%d, unique=%d, n_batches=%d. If "
+                "max+1 is close to n_special_values, the encoding is "
+                "the offset-subtracted spv_* token ID (correct). If "
+                "max+1 equals the actual number of batches, the "
+                "encoding is 0-indexed (also correct). Otherwise the "
+                "n_batches setting may be wasteful or wrong.",
+                min_observed, max_observed, n_unique,
+                self.adaln_n_batches,
+            )
+            self._adaln_label_range_logged = True
+
         return self.batch_emb_table(batch_label)
 
     def _compute_laplacian_pe(self, batch: dict) -> torch.Tensor:
@@ -1321,13 +1363,23 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                       ) -> torch.Tensor | None:
         """Return the per-cell conditioning embedding for AdaLN. The
         predictor's table is independent of the encoder's; both are
-        looked up by the same batch label.
+        looked up by the same batch label. Same hard range check as
+        the encoder side -- see encoder._compute_cond docstring.
         """
         if not self.adaln_enabled:
             return None
         batch_label = self._extract_batch_label(batch)
-        max_id = self.adaln_n_batches - 1
-        batch_label = batch_label.clamp(min=0, max=max_id)
+        with torch.no_grad():
+            max_observed = int(batch_label.max().item())
+            min_observed = int(batch_label.min().item())
+        if max_observed >= self.adaln_n_batches or min_observed < 0:
+            raise RuntimeError(
+                "AdaLN batch_label out of range (predictor side): "
+                f"observed [{min_observed}, {max_observed}] but "
+                f"n_batches={self.adaln_n_batches}. Set "
+                f"batch_correction.n_batches to at least "
+                f"{max_observed + 1}."
+            )
         return self.batch_emb_table(batch_label)
 
     def _compose_predictor_coords(
