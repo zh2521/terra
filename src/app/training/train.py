@@ -40,9 +40,12 @@ from tqdm import tqdm
 
 from app.utils import (build_batch_classifier_head,
                        init_model, init_opt, load_checkpoint,
+                       parse_distribution_alignment_kwargs,
                        parse_protein_init_kwargs)
 from nichejepa.models.batch_classifier import (
     grad_reverse, mean_pool_cell_embedding)
+from nichejepa.models.distribution_alignment import (
+    compute_distribution_alignment_loss)
 from nichejepa.datasets.cell_datasets import init_cell_dataset
 from nichejepa.datasets.dataloaders import init_dataloader_and_sampler
 from nichejepa.masks.block_masking  import BlockMaskCollator
@@ -245,6 +248,14 @@ def train(args: dict,
         (adv_classifier_kwargs or {}).get('lambda_adv', 0.1))
     grl_alpha = float(
         (adv_classifier_kwargs or {}).get('grl_alpha', 1.0))
+
+    # Optional distribution-alignment (CORAL / MMD) loss between
+    # batches in each minibatch. Non-adversarial alternative to the
+    # batch classifier -- no arms race, no collapse attractor.
+    dist_align_kwargs = parse_distribution_alignment_kwargs(args)
+    lambda_align = float(
+        (dist_align_kwargs or {}).get('lambda', 0.0)
+    ) if dist_align_kwargs else 0.0
 
     # Optional protein-embedding initialization for the gene-token
     # embedding layer (UCE-style: frozen ESM matrix + learnable
@@ -818,10 +829,37 @@ def train(args: dict,
                 # ----------------------------------------------------
                 # VICReg-style variance + covariance regularization
                 # ----------------------------------------------------
+                # NOTE: this used to operate on the (already overwritten)
+                # predictor output, and on every token including pad +
+                # special tokens. Both are off-spec from the original
+                # VICReg setup and dilute the constraint. Switched to:
+                #  (1) the ENCODER output ``z_encoder_output`` (saved
+                #      above before the predictor overwrites z), and
+                #  (2) gene-token positions only -- pad tokens (token
+                #      == 0) and special-token positions are filtered
+                #      out via the JEPA mask indices.
                 if lambda_var > 0 or lambda_cov > 0:
 
-                    all_z = torch.cat(z, dim=0)
-                    all_z = all_z.reshape(-1, all_z.shape[-1])
+                    # Build a (B, mask_size) boolean gene-token mask
+                    # from the JEPA mask indices: gather the original
+                    # token ID at each unmasked position, then exclude
+                    # the special-token prefix and any pad positions.
+                    mask_positions = masks_enc[0]  # (B, mask_size)
+                    masked_tokens = torch.gather(
+                        udata['tokens'], 1, mask_positions)
+                    is_special = mask_positions < n_special_tokens
+                    is_pad = (masked_tokens == 0)
+                    is_gene = (~is_special) & (~is_pad)  # (B, mask_size)
+
+                    # z_encoder_output is a list (one per context mask);
+                    # n_contexts=1 in current configs but iterate to
+                    # support multi-context. Each element shape:
+                    # (B, mask_size, D).
+                    enc_z_list = z_encoder_output
+                    if not isinstance(enc_z_list, list):
+                        enc_z_list = [enc_z_list]
+                    gene_emb_list = [zi[is_gene] for zi in enc_z_list]
+                    gene_emb = torch.cat(gene_emb_list, dim=0)  # (N, D)
 
                     # ----- variance loss -----
                     def variance_loss(z, gamma=1.0, eps=1e-4):
@@ -836,10 +874,16 @@ def train(args: dict,
                         off_diag = cov - torch.diag(torch.diag(cov))
                         return (off_diag**2).sum() / D
 
-                    loss_var = variance_loss(all_z)
-                    loss_cov = covariance_loss(all_z)
-
-                    loss = loss + lambda_var * loss_var + lambda_cov * loss_cov
+                    # Guard against degenerate batches (no gene tokens
+                    # in the mask, e.g. extremely sparse cells). At
+                    # least 2 samples are required for std/cov to be
+                    # well-defined.
+                    if gene_emb.size(0) >= 2:
+                        loss_var = variance_loss(gene_emb)
+                        loss_cov = covariance_loss(gene_emb)
+                        loss = (loss
+                                + lambda_var * loss_var
+                                + lambda_cov * loss_cov)
 
                 # ----------------------------------------------------
                 # Adversarial batch classifier (DANN-style)
@@ -853,6 +897,13 @@ def train(args: dict,
                 # encoder to produce batch-invariant representations.
                 adv_loss = None
                 adv_accuracy = None
+                dist_align_loss_val = None
+                dist_align_info = None
+                # `cell_emb` is shared between the adversarial path
+                # and the distribution-alignment path. Computed lazily:
+                # set to None here and populated in whichever block
+                # fires first.
+                cell_emb = None
                 if batch_classifier is not None:
                     cell_emb = mean_pool_cell_embedding(
                         z_encoder_output[0],
@@ -891,6 +942,40 @@ def train(args: dict,
                         adv_accuracy = (
                             batch_logits.argmax(dim=-1) == batch_label
                         ).float().mean().item()
+
+                # ----------------------------------------------------
+                # Distribution alignment (CORAL / MMD)
+                # ----------------------------------------------------
+                # Non-adversarial batch correction. Pulls per-batch
+                # embedding distributions toward each other without a
+                # classifier. Safe to combine with VICReg variance
+                # loss (recommended) so the alignment can't be
+                # trivially satisfied by collapsing all batches to a
+                # single point.
+                dist_align_loss_val = None
+                dist_align_info = None
+                if dist_align_kwargs is not None and lambda_align > 0:
+                    # Per-cell embedding (same recipe as for the
+                    # adversarial classifier). Pool over non-special
+                    # token positions.
+                    if 'cell_emb' not in locals() or cell_emb is None:
+                        cell_emb_for_align = mean_pool_cell_embedding(
+                            z_encoder_output[0],
+                            n_special_tokens=n_special_tokens,
+                        )
+                    else:
+                        cell_emb_for_align = cell_emb
+                    batch_label_align = udata['values'][:, 0].long()
+                    dist_align_loss_val, dist_align_info = (
+                        compute_distribution_alignment_loss(
+                            cell_emb=cell_emb_for_align,
+                            batch_label=batch_label_align,
+                            method=dist_align_kwargs['method'],
+                            mmd_sigmas=dist_align_kwargs['mmd_sigmas'],
+                            max_pairs=dist_align_kwargs['max_pairs'],
+                        )
+                    )
+                    loss = loss + lambda_align * dist_align_loss_val
 
             # Step 2: backward pass and step
             _enc_norm, _pred_norm = 0., 0.
@@ -986,6 +1071,20 @@ def train(args: dict,
                         adv_loss.detach())
                     log_payload["adv/batch_classifier_accuracy"] = float(
                         adv_accuracy)
+                # Distribution-alignment diagnostics. Target: loss
+                # decreasing over training. n_batches_in_minibatch
+                # shows how many distinct batches the alignment loss
+                # actually had to work with -- if it's small, the
+                # signal is weak (consider increasing batch_size).
+                if dist_align_loss_val is not None:
+                    log_payload[
+                        f"align/{dist_align_kwargs['method']}_loss"
+                    ] = float(dist_align_loss_val.detach())
+                    if dist_align_info is not None:
+                        log_payload["align/n_batches_in_minibatch"] = int(
+                            dist_align_info["n_batches_in_minibatch"])
+                        log_payload["align/n_pairs"] = int(
+                            dist_align_info["n_pairs"])
                 wandb.log(log_payload)
             assert not np.isnan(float(loss)), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:

@@ -34,6 +34,43 @@ def apply_peft(model, peft_method='lora', rank=8):
     return model
 """
 
+def parse_distribution_alignment_kwargs(args: dict) -> dict | None:
+    """Resolve the optional ``batch_correction.distribution_alignment``
+    config block. Returns ``None`` when missing or disabled so the
+    training loop can gate the alignment loss on a simple None check.
+
+    Expected YAML schema (any field can be omitted, defaults shown):
+
+    .. code-block:: yaml
+
+        batch_correction:
+          distribution_alignment:
+            enabled:    True
+            method:     'coral'           # 'coral' or 'mmd'
+            lambda:     0.1               # loss weight
+            mmd_sigmas: [0.1, 1.0, 10.0]  # only used if method='mmd'
+            max_pairs:  null              # cap on pair count per step
+    """
+    bc = args.get('batch_correction', {}) or {}
+    cfg = bc.get('distribution_alignment', None)
+    if not (cfg and cfg.get('enabled', False)):
+        return None
+    method = str(cfg.get('method', 'coral')).lower()
+    if method not in ('coral', 'mmd'):
+        raise ValueError(
+            "batch_correction.distribution_alignment.method must be "
+            f"'coral' or 'mmd' (got {method!r}).")
+    out = {
+        'method':     method,
+        'lambda':     float(cfg.get('lambda', 0.1)),
+        'mmd_sigmas': list(cfg.get('mmd_sigmas', [0.1, 1.0, 10.0])),
+        'max_pairs':  cfg.get('max_pairs', None),
+    }
+    if out['max_pairs'] is not None:
+        out['max_pairs'] = int(out['max_pairs'])
+    return out
+
+
 def parse_arch_kwargs(args: dict) -> dict:
     """Parse architecture hyperparameters that must round-trip from a
     saved ``params.yaml`` into ``init_model`` when rebuilding a
