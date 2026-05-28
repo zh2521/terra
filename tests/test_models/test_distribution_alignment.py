@@ -7,6 +7,7 @@ from nichejepa.models.distribution_alignment import (
     compute_distribution_alignment_loss,
     coral_loss,
     mmd_loss,
+    sinkhorn_loss,
 )
 
 
@@ -94,6 +95,54 @@ def test_mmd_gradient_flows_to_input():
 
 
 # ---------------------------------------------------------------------------
+# Sinkhorn divergence
+# ---------------------------------------------------------------------------
+
+def test_sinkhorn_zero_when_distributions_identical():
+    """Sinkhorn divergence on the SAME tensor twice is exactly zero
+    (debiasing terms cancel)."""
+    torch.manual_seed(0)
+    a = torch.randn(100, 8)
+    out = sinkhorn_loss(a, a, epsilon=0.1, n_iter=50)
+    assert abs(float(out.item())) < 1e-4
+
+
+def test_sinkhorn_positive_for_shifted_distributions():
+    """Mean-shifted batches must give positive Sinkhorn divergence."""
+    torch.manual_seed(0)
+    a = torch.randn(100, 4)
+    b = torch.randn(100, 4) + 3.0
+    out = sinkhorn_loss(a, b, epsilon=0.1, n_iter=100)
+    assert float(out.item()) > 0.01
+
+
+def test_sinkhorn_handles_degenerate_input():
+    a = torch.randn(1, 4)
+    b = torch.randn(50, 4)
+    out = sinkhorn_loss(a, b)
+    assert out.shape == ()
+    assert float(out.item()) == 0.0
+
+
+def test_sinkhorn_gradient_flows_to_input():
+    a = torch.randn(30, 4, requires_grad=True)
+    b = torch.randn(30, 4)
+    out = sinkhorn_loss(a, b, epsilon=0.1, n_iter=50)
+    out.backward()
+    assert a.grad is not None
+    assert torch.isfinite(a.grad).all()
+
+
+def test_sinkhorn_nonnegative_after_clamp():
+    """Numerical residuals must not produce negative loss."""
+    torch.manual_seed(0)
+    a = torch.randn(40, 8)
+    b = a.clone() + 1e-6 * torch.randn(40, 8)
+    out = sinkhorn_loss(a, b, epsilon=0.05, n_iter=50)
+    assert float(out.item()) >= 0.0
+
+
+# ---------------------------------------------------------------------------
 # compute_distribution_alignment_loss (the dispatch / pair-iteration)
 # ---------------------------------------------------------------------------
 
@@ -163,6 +212,26 @@ def test_dispatch_mmd_runs_end_to_end():
     loss, info = compute_distribution_alignment_loss(
         cell_emb, batch_label, method='mmd',
         mmd_sigmas=[0.5, 1.0, 2.0])
+    assert info['n_pairs'] == 1
+    assert torch.isfinite(loss).item()
+    assert float(loss.item()) > 0.0
+
+
+def test_dispatch_sinkhorn_runs_end_to_end():
+    """Sinkhorn path executes without crash and produces finite loss."""
+    torch.manual_seed(0)
+    n_per_batch = 30
+    cell_emb = torch.cat([
+        torch.randn(n_per_batch, 4),
+        torch.randn(n_per_batch, 4) + 1.0,
+    ])
+    batch_label = torch.cat([
+        torch.zeros(n_per_batch, dtype=torch.long),
+        torch.ones(n_per_batch, dtype=torch.long),
+    ])
+    loss, info = compute_distribution_alignment_loss(
+        cell_emb, batch_label, method='sinkhorn',
+        sinkhorn_eps=0.1, sinkhorn_n_iter=50)
     assert info['n_pairs'] == 1
     assert torch.isfinite(loss).item()
     assert float(loss.item()) > 0.0

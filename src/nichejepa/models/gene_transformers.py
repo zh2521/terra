@@ -128,6 +128,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                  rope_freq_scale: float = math.pi,
                  rope_rotation_augment: bool = True,
                  adaln_kwargs: dict | None = None,
+                 rda_kwargs: dict | None = None,
                  **kwargs
                  ):
         super().__init__()
@@ -142,6 +143,25 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.api_version = api_version
         self.sep_gene_tokens_neb = sep_gene_tokens_neb
         self.nz_spc = nz_spc
+
+        # Read-Depth-Aware (RDA) conditioning: scFoundation-style
+        # per-cell depth embedding broadcast across each cell's
+        # gene-token positions. Zero-initialized output head makes
+        # this a no-op at step 0 even when ``enabled=True``, so
+        # backward-compat is preserved.
+        self.rda_enabled = bool(rda_kwargs) and rda_kwargs.get(
+            'enabled', False)
+        if self.rda_enabled:
+            from .rda import DepthConditioning
+            self.rda_module = DepthConditioning(
+                embed_dim=embed_dim,
+                hidden_dim=int((rda_kwargs or {}).get(
+                    'hidden_dim', 32)),
+                use_target_depth=bool((rda_kwargs or {}).get(
+                    'use_target_depth', False)),
+            )
+        else:
+            self.rda_module = None
 
         # Initialize token embeddings. When `protein_init_kwargs` is
         # provided, gene-token rows are sourced from a frozen ESM
@@ -562,6 +582,32 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                 f"Expected `values` to be at least 2-D (B, L); "
                 f"got shape {tuple(values.shape)}.")
         return values[:, 0].long()
+
+    def _apply_rda(self,
+                   x: torch.Tensor,
+                   batch: Mapping[str, torch.Tensor],
+                   ) -> torch.Tensor:
+        """Add the per-cell depth embedding to the input ``x``.
+
+        No-op (returns ``x`` unchanged) when RDA is disabled. When
+        enabled, computes per-cell totals from ``batch['values']``
+        using the standard sequence layout and broadcasts a
+        zero-initialized depth embedding across each cell's
+        gene-token block. The zero-init makes RDA-at-step-0
+        identical to the no-RDA baseline.
+        """
+        if not self.rda_enabled:
+            return x
+        from .rda import build_depth_embedding
+        depth_emb = build_depth_embedding(
+            self.rda_module,
+            batch,
+            n_special_tokens=self.n_special_tokens,
+            n_cells=self.n_segments,
+            seq_len_cell=self.seq_len_cell,
+            seq_len=self.seq_len,
+        )
+        return x + depth_emb.to(x.dtype)
 
     def _compute_cond(self,
                       batch: Mapping[str, torch.Tensor],
@@ -1108,6 +1154,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  rope_freq_scale: float = math.pi,
                  rope_rotation_augment: bool = True,
                  adaln_kwargs: dict | None = None,
+                 protocol_moe_kwargs: dict | None = None,
                  **kwargs
                  ):
         super().__init__()
@@ -1121,6 +1168,26 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.api_version = api_version
         self.nz_spc = nz_spc
         self.new_spc = new_spc
+
+        # Protocol-routed bias head (lightweight MoE). Per-protocol
+        # additive bias on the predictor output, routed by a
+        # configurable values column. Zero-init -> step-0 no-op,
+        # so enabling at train start is bitwise backward-compatible.
+        self.protocol_moe_enabled = (
+            bool(protocol_moe_kwargs)
+            and protocol_moe_kwargs.get('enabled', False)
+        )
+        if self.protocol_moe_enabled:
+            from .protocol_moe import ProtocolBias
+            self.protocol_moe_routing_index = int(
+                protocol_moe_kwargs['routing_index'])
+            self.protocol_moe = ProtocolBias(
+                n_experts=int(protocol_moe_kwargs['n_experts']),
+                embed_dim=predictor_embed_dim,
+            )
+        else:
+            self.protocol_moe_routing_index = -1
+            self.protocol_moe = None
 
         # Initialize segment embeddings. Used by 'segment' mode (full
         # positional signal) and by 'alibi' / 'laplacian' modes at the
@@ -1357,6 +1424,28 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                 f"Expected `values` to be at least 2-D (B, L); "
                 f"got shape {tuple(values.shape)}.")
         return values[:, 0].long()
+
+    def _apply_protocol_moe(self,
+                            z: torch.Tensor,
+                            batch: Mapping[str, torch.Tensor],
+                            n_pred_masks: int,
+                            ) -> torch.Tensor:
+        """Add the per-protocol bias to the predictor output ``z``.
+
+        ``z`` has shape ``(B * n_pred_masks, L_target, D)``. The
+        bias is ``(B, D)`` per-cell; we repeat across the
+        ``n_pred_masks`` outer-batch dimension and broadcast across
+        the target-length dimension before adding. No-op when
+        Protocol-MoE is disabled.
+        """
+        if not self.protocol_moe_enabled:
+            return z
+        from .protocol_moe import extract_protocol_index
+        protocol_idx = extract_protocol_index(
+            batch, self.protocol_moe_routing_index)         # (B,)
+        bias = self.protocol_moe(protocol_idx)              # (B, D)
+        bias = bias.repeat(n_pred_masks, 1).unsqueeze(1)    # (B*M, 1, D)
+        return z + bias.to(z.dtype)
 
     def _compute_cond(self,
                       batch: Mapping[str, torch.Tensor],
@@ -1772,6 +1861,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         # Add gene token and segment embeddings to value embeddings
         x = seg_emb + token_emb + value_emb
+        # RDA depth conditioning (no-op when disabled).
+        x = self._apply_rda(x, batch)
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
         # Compute attention bias (passes through unless ALiBi is on).
@@ -1902,6 +1993,8 @@ class GeneTransformerCountEncoder(GeneTransformerBaseEncoder):
 
         # Add segment and gene token embeddings to value embeddings
         x = seg_emb + token_emb + value_emb # [B, L, D]
+        # RDA depth conditioning (no-op when disabled).
+        x = self._apply_rda(x, batch)
 
         # Remove special token contents
         #if ignore_spc_tokens:
@@ -2102,6 +2195,8 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         # Add positional, segment, and gene embeddings to value embeddings
         x = seg_emb + pos_emb + token_emb + value_emb
+        # RDA depth conditioning (no-op when disabled).
+        x = self._apply_rda(x, batch)
         # B, N, D = x.shape # B: BATCH_SIZE, N: SEQ_LEN, D: EMBED_DIM
 
         # Compute attention bias (passes through unless ALiBi is on).
@@ -2238,6 +2333,8 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
 
         # Add segment, positional, and gene embeddings to value embeddings
         x = seg_emb + pos_emb + token_emb + value_emb # [B, L, D]
+        # RDA depth conditioning (no-op when disabled).
+        x = self._apply_rda(x, batch)
 
         if DEBUG:
 
@@ -2450,6 +2547,10 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # MLP projection layer
             z = self.predictor_proj(z)
 
+            # Protocol-MoE: per-protocol additive bias on the
+            # predictor output (no-op when disabled).
+            z = self._apply_protocol_moe(z, batch, len(masks_pred))
+
             return z
 
 
@@ -2599,6 +2700,10 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
 
         # MLP projection layer
         z = self.predictor_proj(z)
+
+        # Protocol-MoE: per-protocol additive bias on the
+        # predictor output (no-op when disabled).
+        z = self._apply_protocol_moe(z, batch, len(masks_pred))
 
         return z
 
@@ -2795,6 +2900,10 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
 
         # MLP projection layer
         z = self.predictor_proj(z)
+
+        # Protocol-MoE: per-protocol additive bias on the
+        # predictor output (no-op when disabled).
+        z = self._apply_protocol_moe(z, batch, len(masks_pred))
 
         return z
 

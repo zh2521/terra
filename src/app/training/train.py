@@ -44,6 +44,8 @@ from app.utils import (build_batch_classifier_head,
                        parse_protein_init_kwargs)
 from nichejepa.models.batch_classifier import (
     grad_reverse, mean_pool_cell_embedding)
+from nichejepa.models.cycle_consistency import (
+    cycle_consistency_loss, make_swapped_batch)
 from nichejepa.models.distribution_alignment import (
     compute_distribution_alignment_loss)
 from nichejepa.datasets.cell_datasets import init_cell_dataset
@@ -229,6 +231,64 @@ def train(args: dict,
             raise ValueError(
                 "batch_correction.adaln.enabled=True requires "
                 "batch_correction.n_batches (or adaln.n_batches) to be set.")
+        # Validate scope upfront so a typo blows up at config-load time.
+        scope = str(adaln_kwargs.get('scope', 'both')).lower()
+        if scope not in ('encoder', 'predictor', 'both'):
+            raise ValueError(
+                "batch_correction.adaln.scope must be one of "
+                f"'encoder', 'predictor', 'both' (got {scope!r}).")
+        adaln_kwargs['scope'] = scope
+
+    # Read-Depth-Aware (RDA) conditioning (scFoundation-style).
+    # Reads top-level ``rda`` config; encoder-only (no predictor
+    # wiring). Disabled by default; zero-init makes RDA-at-step-0 a
+    # no-op even when enabled.
+    rda_kwargs = args.get('rda', None)
+    if rda_kwargs and not rda_kwargs.get('enabled', False):
+        rda_kwargs = None
+    elif rda_kwargs is not None:
+        rda_kwargs = dict(rda_kwargs)
+
+    # Protocol-MoE predictor head. Adds a per-protocol (e.g.
+    # per-assay) zero-init learnable bias on top of the predictor
+    # output. Routed via a configurable values column.
+    moe_kwargs = bc_cfg.get('protocol_moe', None)
+    if moe_kwargs and not moe_kwargs.get('enabled', False):
+        moe_kwargs = None
+    elif moe_kwargs is not None:
+        moe_kwargs = dict(moe_kwargs)
+        if moe_kwargs.get('routing_index') is None:
+            raise ValueError(
+                "batch_correction.protocol_moe.enabled=True requires "
+                "routing_index (values column for the protocol id).")
+        if moe_kwargs.get('n_experts') is None:
+            raise ValueError(
+                "batch_correction.protocol_moe.enabled=True requires "
+                "n_experts.")
+
+    # Cycle-consistency: re-encode each minibatch with random batch
+    # labels and penalize the MSE between original and swapped
+    # outputs. Encourages batch-invariant encoder features.
+    cycle_kwargs = bc_cfg.get('cycle_consistency', None)
+    if cycle_kwargs and not cycle_kwargs.get('enabled', False):
+        cycle_kwargs = None
+    elif cycle_kwargs is not None:
+        cycle_kwargs = dict(cycle_kwargs)
+        cycle_kwargs.setdefault('n_batches', bc_cfg.get('n_batches'))
+        if cycle_kwargs.get('n_batches') is None:
+            raise ValueError(
+                "batch_correction.cycle_consistency.enabled=True requires "
+                "batch_correction.n_batches (or cycle_consistency.n_batches) "
+                "to be set.")
+    lambda_cycle = float(
+        (cycle_kwargs or {}).get('lambda_cycle', 0.0)
+    ) if cycle_kwargs else 0.0
+    cycle_swap_fraction = float(
+        (cycle_kwargs or {}).get('swap_fraction', 1.0)
+    ) if cycle_kwargs else 0.0
+    cycle_n_batches = int(
+        (cycle_kwargs or {}).get('n_batches', 0)
+    ) if cycle_kwargs else 0
 
     adv_classifier_kwargs = bc_cfg.get('adv_classifier', None)
     if adv_classifier_kwargs and not adv_classifier_kwargs.get(
@@ -436,7 +496,9 @@ def train(args: dict,
         laplacian_sigma=laplacian_sigma,
         rope_freq_scale=rope_freq_scale,
         rope_rotation_augment=rope_rotation_augment,
-        adaln_kwargs=adaln_kwargs)
+        adaln_kwargs=adaln_kwargs,
+        rda_kwargs=rda_kwargs,
+        protocol_moe_kwargs=moe_kwargs)
     # Build the adversarial batch classifier head (returns None when
     # disabled, so default training is unchanged).
     batch_classifier = build_batch_classifier_head(
@@ -972,10 +1034,40 @@ def train(args: dict,
                             batch_label=batch_label_align,
                             method=dist_align_kwargs['method'],
                             mmd_sigmas=dist_align_kwargs['mmd_sigmas'],
+                            sinkhorn_eps=dist_align_kwargs['sinkhorn_eps'],
+                            sinkhorn_n_iter=(
+                                dist_align_kwargs['sinkhorn_n_iter']),
                             max_pairs=dist_align_kwargs['max_pairs'],
                         )
                     )
                     loss = loss + lambda_align * dist_align_loss_val
+
+                # ----------------------------------------------------
+                # Cycle consistency (batch-swap)
+                # ----------------------------------------------------
+                # With probability ``swap_fraction``, re-encode the
+                # current minibatch with random batch labels and
+                # penalize the MSE between original and swapped
+                # encoder outputs. Stochastic gating keeps the
+                # double-forward cost manageable.
+                cycle_loss_val = None
+                cycle_n_changed = 0
+                if (cycle_kwargs is not None
+                        and lambda_cycle > 0
+                        and cycle_swap_fraction > 0
+                        and torch.rand(()).item() < cycle_swap_fraction):
+                    swapped_batch, changed_mask = make_swapped_batch(
+                        udata, n_batches=cycle_n_batches)
+                    cycle_n_changed = int(changed_mask.sum().item())
+                    if cycle_n_changed > 0:
+                        z_swapped, _ = encoder(
+                            batch=swapped_batch,
+                            masks=masks_enc,
+                            masks_attention=None)
+                        cycle_loss_val = cycle_consistency_loss(
+                            z_encoder_output, z_swapped,
+                            changed_mask=changed_mask)
+                        loss = loss + lambda_cycle * cycle_loss_val
 
             # Step 2: backward pass and step
             _enc_norm, _pred_norm = 0., 0.
@@ -1085,6 +1177,10 @@ def train(args: dict,
                             dist_align_info["n_batches_in_minibatch"])
                         log_payload["align/n_pairs"] = int(
                             dist_align_info["n_pairs"])
+                if cycle_loss_val is not None:
+                    log_payload["cycle/loss"] = float(
+                        cycle_loss_val.detach())
+                    log_payload["cycle/n_changed"] = int(cycle_n_changed)
                 wandb.log(log_payload)
             assert not np.isnan(float(loss)), 'loss is nan'
             if itr % checkpoint_freq_iter == 0:

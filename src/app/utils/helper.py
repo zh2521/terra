@@ -45,26 +45,30 @@ def parse_distribution_alignment_kwargs(args: dict) -> dict | None:
 
         batch_correction:
           distribution_alignment:
-            enabled:    True
-            method:     'coral'           # 'coral' or 'mmd'
-            lambda:     0.1               # loss weight
-            mmd_sigmas: [0.1, 1.0, 10.0]  # only used if method='mmd'
-            max_pairs:  null              # cap on pair count per step
+            enabled:         True
+            method:          'coral'           # 'coral', 'mmd', or 'sinkhorn'
+            lambda:          0.1               # loss weight
+            mmd_sigmas:      [0.1, 1.0, 10.0]  # only used if method='mmd'
+            sinkhorn_eps:    0.05              # only used if method='sinkhorn'
+            sinkhorn_n_iter: 100               # only used if method='sinkhorn'
+            max_pairs:       null              # cap on pair count per step
     """
     bc = args.get('batch_correction', {}) or {}
     cfg = bc.get('distribution_alignment', None)
     if not (cfg and cfg.get('enabled', False)):
         return None
     method = str(cfg.get('method', 'coral')).lower()
-    if method not in ('coral', 'mmd'):
+    if method not in ('coral', 'mmd', 'sinkhorn'):
         raise ValueError(
             "batch_correction.distribution_alignment.method must be "
-            f"'coral' or 'mmd' (got {method!r}).")
+            f"'coral', 'mmd', or 'sinkhorn' (got {method!r}).")
     out = {
-        'method':     method,
-        'lambda':     float(cfg.get('lambda', 0.1)),
-        'mmd_sigmas': list(cfg.get('mmd_sigmas', [0.1, 1.0, 10.0])),
-        'max_pairs':  cfg.get('max_pairs', None),
+        'method':          method,
+        'lambda':          float(cfg.get('lambda', 0.1)),
+        'mmd_sigmas':      list(cfg.get('mmd_sigmas', [0.1, 1.0, 10.0])),
+        'sinkhorn_eps':    float(cfg.get('sinkhorn_eps', 0.05)),
+        'sinkhorn_n_iter': int(cfg.get('sinkhorn_n_iter', 100)),
+        'max_pairs':       cfg.get('max_pairs', None),
     }
     if out['max_pairs'] is not None:
         out['max_pairs'] = int(out['max_pairs'])
@@ -102,6 +106,45 @@ def parse_arch_kwargs(args: dict) -> dict:
                 "batch_correction.adaln.enabled=True in the saved "
                 "config but n_batches is missing. Either set "
                 "batch_correction.n_batches or adaln.n_batches.")
+        # Round-trip 'scope' as-is so reloaded checkpoints rebuild
+        # the same encoder/predictor module shapes. Validate early
+        # so a typo blows up at init time rather than at first
+        # forward pass.
+        scope = str(adaln.get('scope', 'both')).lower()
+        if scope not in ('encoder', 'predictor', 'both'):
+            raise ValueError(
+                "batch_correction.adaln.scope must be one of "
+                f"'encoder', 'predictor', 'both' (got {scope!r}).")
+        adaln['scope'] = scope
+    # Read-Depth-Aware (RDA) conditioning. Round-trips as-is so a
+    # checkpoint trained with rda.enabled=True rebuilds the
+    # encoder with the matching depth-conditioning hypernetwork.
+    rda = args.get('rda', None)
+    if rda and not rda.get('enabled', False):
+        rda = None
+    elif rda is not None:
+        rda = dict(rda)
+
+    # Protocol-MoE predictor bias. Reads
+    # ``batch_correction.protocol_moe``. Round-trips so the
+    # predictor's per-protocol Embedding table is recreated with
+    # the same n_experts at checkpoint reload.
+    moe = bc.get('protocol_moe', None)
+    if moe and not moe.get('enabled', False):
+        moe = None
+    elif moe is not None:
+        moe = dict(moe)
+        if moe.get('routing_index') is None:
+            raise ValueError(
+                "batch_correction.protocol_moe.enabled=True but "
+                "routing_index is missing. Set it to the values "
+                "column index of the routing metadata (e.g. the "
+                "assay_value or gene_panel_value spv_* slot).")
+        if moe.get('n_experts') is None:
+            raise ValueError(
+                "batch_correction.protocol_moe.enabled=True but "
+                "n_experts is missing. Set it to at least 1 + the "
+                "max routing-id observed in the training data.")
     return {
         'laplacian_k': int(meta.get('laplacian_k', 8)),
         'laplacian_sigma': float(meta.get('laplacian_sigma', 1.0)),
@@ -109,6 +152,8 @@ def parse_arch_kwargs(args: dict) -> dict:
         'rope_rotation_augment': bool(
             meta.get('rope_rotation_augment', True)),
         'adaln_kwargs': adaln,
+        'rda_kwargs': rda,
+        'protocol_moe_kwargs': moe,
     }
 
 
@@ -325,6 +370,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                rope_freq_scale: float | None = None,
                rope_rotation_augment: bool = True,
                adaln_kwargs: dict | None = None,
+               rda_kwargs: dict | None = None,
+               protocol_moe_kwargs: dict | None = None,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -377,6 +424,52 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
     predictor:
         Initialized GeneTransformerPredictor module.
     """
+    # AdaLN scope: choose whether the conditioning hypernetwork is
+    # applied in the encoder, the predictor, or both. Default 'both'
+    # preserves the original behavior; 'predictor' follows the
+    # scGPT-spatial / LLOKI pattern (encoder learns batch-invariant
+    # representations; only the decoder/predictor uses batch
+    # conditioning).
+    adaln_kwargs_enc = None
+    adaln_kwargs_pred = None
+    if adaln_kwargs is not None:
+        adaln_inner = dict(adaln_kwargs)
+        scope = str(adaln_inner.pop('scope', 'both')).lower()
+        if scope not in ('encoder', 'predictor', 'both'):
+            raise ValueError(
+                "batch_correction.adaln.scope must be one of "
+                f"'encoder', 'predictor', 'both' (got {scope!r}).")
+        if scope in ('encoder', 'both'):
+            adaln_kwargs_enc = dict(adaln_inner)
+        if scope in ('predictor', 'both'):
+            adaln_kwargs_pred = dict(adaln_inner)
+        logger.info(
+            f"[AdaLN] scope='{scope}' "
+            f"(encoder: {'on' if adaln_kwargs_enc else 'off'}, "
+            f"predictor: {'on' if adaln_kwargs_pred else 'off'})")
+
+    # RDA depth conditioning is encoder-only (predictor doesn't see
+    # raw counts). Banner mirrors AdaLN's style.
+    if rda_kwargs and rda_kwargs.get('enabled', False):
+        logger.info(
+            f"[RDA] enabled (hidden_dim="
+            f"{rda_kwargs.get('hidden_dim', 32)}, "
+            f"use_target_depth="
+            f"{bool(rda_kwargs.get('use_target_depth', False))}). "
+            "Per-cell log(1+T) is broadcast across gene-token "
+            "positions; zero-init output head -> step-0 no-op.")
+
+    # Protocol-MoE predictor bias is predictor-only (encoder
+    # remains protocol-agnostic). Zero-init bias -> step-0 no-op.
+    if protocol_moe_kwargs and protocol_moe_kwargs.get('enabled', False):
+        logger.info(
+            f"[Protocol-MoE] enabled (n_experts="
+            f"{protocol_moe_kwargs.get('n_experts')}, "
+            f"routing_index="
+            f"{protocol_moe_kwargs.get('routing_index')}). "
+            "Per-protocol additive bias on predictor output; "
+            "zero-init -> step-0 no-op.")
+
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
         n_special_values=n_special_values,
@@ -404,7 +497,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
                          else math.pi),
         rope_rotation_augment=rope_rotation_augment,
-        adaln_kwargs=adaln_kwargs)
+        adaln_kwargs=adaln_kwargs_enc,
+        rda_kwargs=rda_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         encoder = EncoderMultiMaskWrapper(encoder)
     predictor = gt.__dict__["init_gt_predictor"](
@@ -429,7 +523,8 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
         rope_freq_scale=(rope_freq_scale if rope_freq_scale is not None
                          else math.pi),
         rope_rotation_augment=rope_rotation_augment,
-        adaln_kwargs=adaln_kwargs)
+        adaln_kwargs=adaln_kwargs_pred,
+        protocol_moe_kwargs=protocol_moe_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         predictor = PredictorMultiMaskWrapper(predictor)
 
