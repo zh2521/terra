@@ -412,20 +412,15 @@ def train(args: dict,
             "optimization.vicreg_granularity must be 'token' or 'cell' "
             f"(got {vicreg_granularity!r}).")
     if lambda_var > 0 or lambda_cov > 0:
+        # Note: this fires BEFORE init_distributed() so we can't
+        # reference world_size here. The DDP-aware cell-mode
+        # diagnostic (and the rank-deficiency sanity check) live
+        # below init_distributed.
         logger.info(
             f"[VICReg] lambda_var={lambda_var}, lambda_cov={lambda_cov}, "
             f"granularity='{vicreg_granularity}'. Computed on encoder "
             "output, gene tokens only, float32-cast for numerical "
             "stability under bfloat16 autocast.")
-        if vicreg_granularity == 'cell':
-            logger.info(
-                "[VICReg] cell mode: per-cell embeddings are "
-                "all-gathered across DDP ranks before var/cov so "
-                f"the effective batch is world_size ({world_size}) x "
-                "local_batch. Watch vicreg/n_samples in WandB; if "
-                "it is < ~2*enc_emb_dim, the cov estimate is still "
-                "rank-deficient and cov_loss may be noisy -- either "
-                "raise batch size, use more GPUs, or set lambda_cov=0.")
 
     log_freq = args['state']['log_freq']
     checkpoint_freq = args['state']['checkpoint_freq']
@@ -485,17 +480,40 @@ def train(args: dict,
     if rank > 0:
         logger.setLevel(logging.ERROR)
 
-    # VICReg cell-mode sample-size sanity check.
-    # In 'cell' granularity, the covariance loss requires the
-    # effective sample count (world_size * batch_size, post-gather)
-    # to exceed the feature dimension; otherwise the empirical cov
-    # is rank-deficient and the off-diagonal gradient is noise.
-    # The previous failure mode here was silent: training would
-    # appear to run but the encoder learned nothing useful. Hard-
-    # error so misconfigured runs fail loud. To override (e.g. you
-    # know you need lambda_cov for variance regularization context
-    # even at small N), set ``vicreg_allow_underdetermined_cov:
-    # True`` in the optimization block.
+    # VICReg cell-mode DDP behavior + sample-size sanity check.
+    # The variance hinge is well-conditioned at any N>=2, so we
+    # ONLY all-gather across ranks when lambda_cov > 0 (cov is the
+    # sample-hungry term). When cov is off, each rank computes the
+    # variance loss on its own local batch and DDP all-reduces the
+    # gradient -- equivalent in expectation to global var and saves
+    # the extra communication round.
+    if vicreg_granularity == 'cell' and (
+            lambda_var > 0 or lambda_cov > 0):
+        if lambda_cov > 0:
+            logger.info(
+                "[VICReg] cell mode + lambda_cov>0: per-cell "
+                "embeddings are all-gathered across DDP ranks so "
+                f"the cov estimator sees effective_N = "
+                f"world_size ({world_size}) * batch_size "
+                f"({batch_size}) = {world_size * batch_size} "
+                "samples. Watch vicreg/n_samples in WandB.")
+        else:
+            logger.info(
+                "[VICReg] cell mode + lambda_cov=0 (variance "
+                "hinge only): no cross-rank gather, var loss is "
+                f"computed per-rank on local batch_size ({batch_size}) "
+                "samples; DDP all-reduces the gradient.")
+
+    # In 'cell' granularity with lambda_cov > 0, the covariance
+    # loss requires the effective sample count to exceed the
+    # feature dimension; otherwise the empirical cov is
+    # rank-deficient and the off-diagonal gradient is noise. The
+    # previous failure mode here was silent: training would appear
+    # to run but the encoder learned nothing useful. Hard-error so
+    # misconfigured runs fail loud. To override (e.g. you know you
+    # need lambda_cov for variance regularization context even at
+    # small N), set ``vicreg_allow_underdetermined_cov: True`` in
+    # the optimization block.
     if vicreg_granularity == 'cell' and lambda_cov > 0:
         effective_n = world_size * batch_size
         allow_underdetermined = bool(args['optimization'].get(
@@ -1061,38 +1079,40 @@ def train(args: dict,
                             mean_per_cell = sum_per_cell / denom     # (B, D)
                             valid_local = (gene_count > 0)           # (B,) bool
 
-                            # Cast to float32 BEFORE all-gather so
-                            # NCCL ops + downstream var/cov accumulate
-                            # in stable precision. (Encoder output is
-                            # bfloat16 under autocast.)
+                            # Cast to float32 for stable downstream
+                            # var/cov accumulation. (Encoder output
+                            # is bfloat16 under autocast.)
                             mean_per_cell_fp32 = mean_per_cell.float()
 
-                            # Critical for DDP: with B = per-GPU
-                            # batch size (typically 32-64) and
-                            # D = enc_emb_dim (e.g. 768), the empirical
-                            # covariance is rank-deficient and the
-                            # off-diagonal entries are dominated by
-                            # sampling noise. All-gather across ranks
-                            # so var/cov see the full global batch
-                            # (B * world_size). Same pattern MoCo /
-                            # SimCLR / VICReg / Barlow Twins use to
-                            # make decorrelation losses work under
-                            # DDP. Gradients flow only through this
-                            # rank's slot (DDP all-reduce then
-                            # averages across ranks).
-                            #
-                            # NOTE: even with gather, if
-                            # B*world_size < ~2*D, the cov estimate
-                            # is still rank-deficient and ``lambda_cov``
-                            # should be very small (or zero). The
-                            # ``vicreg/n_samples`` WandB metric tells
-                            # you the effective sample count.
-                            mean_gathered = _all_gather_with_local_grad(
-                                mean_per_cell_fp32)                   # (B*ws, D)
-                            valid_gathered = _all_gather_with_local_grad(
-                                valid_local.to(torch.float32)
-                            ) > 0.5                                   # (B*ws,)
-                            samples_list.append(mean_gathered[valid_gathered])
+                            if lambda_cov > 0:
+                                # Cov needs large N. All-gather
+                                # across ranks so the cov estimator
+                                # sees (B * world_size) samples,
+                                # matching MoCo / SimCLR / VICReg /
+                                # Barlow Twins DDP convention.
+                                # Gradients flow only through this
+                                # rank's slot (DDP all-reduce then
+                                # averages). If B*world_size < ~2*D
+                                # the cov is still rank-deficient --
+                                # see startup sanity check.
+                                mean_gathered = _all_gather_with_local_grad(
+                                    mean_per_cell_fp32)               # (B*ws, D)
+                                valid_gathered = _all_gather_with_local_grad(
+                                    valid_local.to(torch.float32)
+                                ) > 0.5                               # (B*ws,)
+                                samples_list.append(
+                                    mean_gathered[valid_gathered])
+                            else:
+                                # Variance-only: per-feature std is
+                                # well-conditioned at any N>=2 so we
+                                # compute locally. DDP all-reduces
+                                # the gradient (effectively averaging
+                                # per-rank std gradients), which
+                                # is equivalent in expectation to a
+                                # global var hinge -- no cross-rank
+                                # communication needed.
+                                samples_list.append(
+                                    mean_per_cell_fp32[valid_local])
 
                     # Concatenate samples across context masks, then
                     # cast to float32 for numerically stable reductions.
