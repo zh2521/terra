@@ -572,16 +572,30 @@ class CellGraphDataset(CellBaseDataset):
         # Add special tokens
         if self.n_special_tokens > 0:
             if self.pad_special_tokens:
+                # IMPORTANT: each special token slot is ONE sequence
+                # position. `_add_special_seq` iterates over
+                # ``self.special_tokens`` and prepends
+                # ``item[f'{spc_tk}_token']`` per iteration; the total
+                # number of prepended tokens is therefore
+                # ``len(special_tokens) * len(item[f'{spc_tk}_token'])``.
+                # Per-slot vectors must be length 1 (not
+                # n_special_tokens) so the prepend count matches the
+                # n_special_tokens entries prepended to coords /
+                # segments / positions. Using
+                # `[0] * self.n_special_tokens` here happens to work
+                # at n_special_tokens=1 (1*1=1) but produces an
+                # n_special_tokens**2-sized prepend for >1, which
+                # misaligns tokens vs coords at inference.
                 for spc_tk in self.special_tokens:
-                    item[f'{spc_tk}_token'] = torch.tensor([0] * self.n_special_tokens)
-                    item[f'{spc_tk}_value'] = torch.tensor([0] * self.n_special_tokens)
+                    item[f'{spc_tk}_token'] = torch.tensor([0])
+                    item[f'{spc_tk}_value'] = torch.tensor([0])
             item_dict = self._add_special_seq(item=item,
                                               item_dict=item_dict)
 
         # Add cell ID
         if self.include_cell_id:
             item_dict['cell_id'] = item['cell_id']
-            
+
         if self.nz_spc:
             item_dict['segments'][
                 (item_dict['segments'] != 0) & (
@@ -784,9 +798,14 @@ class CellNeighborhoodDataset(CellBaseDataset):
         # Add special tokens
         if self.n_special_tokens > 0:
             if self.pad_special_tokens:
+                # See CellGraphDataset for the rationale: each
+                # special-token slot is ONE sequence position, so the
+                # per-slot vector must have length 1. Using
+                # `[0] * n_special_tokens` here was the same off-by-N
+                # bug -- works at n_special_tokens=1, breaks for >1.
                 for spc_tk in self.special_tokens:
-                    item[f'{spc_tk}_token'] = torch.tensor([0] * self.n_special_tokens)
-                    item[f'{spc_tk}_value'] = torch.tensor([0] * self.n_special_tokens)
+                    item[f'{spc_tk}_token'] = torch.tensor([0])
+                    item[f'{spc_tk}_value'] = torch.tensor([0])
             item_dict = self._add_special_seq(item=item,
                                               item_dict=item_dict)
 
