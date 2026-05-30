@@ -106,6 +106,25 @@ def make_swapped_batch(
             f"make_swapped_batch: offsets length {len(offsets)} "
             f"does not match n_classes_per_key length {n_slots}.")
 
+    # Multiple slots that ALL fall back to the legacy ``values[:, 0]``
+    # path would overwrite each other's swaps -- only the last slot's
+    # write survives, but ``changed_mask`` would still claim earlier
+    # slots changed. That makes the cycle loss silently incoherent.
+    # Forbid it: each slot must have a distinct destination (either a
+    # unique metadata key, or at most ONE legacy slot using
+    # values[:, 0]). Misconfigurations should fail loud.
+    legacy_slot_count = sum(
+        1 for k in keys if k is None or k not in batch)
+    if legacy_slot_count > 1:
+        raise RuntimeError(
+            "make_swapped_batch: multiple routing slots are falling "
+            "back to the legacy values[:, 0] path "
+            f"({legacy_slot_count} of {n_slots}). Each slot must "
+            "write to a distinct destination -- supply a unique "
+            "metadata key per slot (and make sure each is present in "
+            f"the batch dict). keys={keys}, "
+            f"available batch fields={sorted(batch.keys())}.")
+
     swapped_batch = dict(batch)
     # Track per-cell "did ANY key change" using bitwise OR.
     combined_changed = None
@@ -124,9 +143,9 @@ def make_swapped_batch(
             new_raw = (swap + int(offset)).to(raw.dtype)
             swapped_batch[key] = new_raw
         else:
-            # Legacy path: swap values[:, 0].
-            values = swapped_batch.get(
-                'values', batch.get('values'))
+            # Legacy path: swap values[:, 0]. Guarded above so this
+            # branch can only fire for at most one slot per call.
+            values = batch.get('values')
             if values is None or values.dim() < 2:
                 raise RuntimeError(
                     "make_swapped_batch legacy path expected `values` "
@@ -138,12 +157,9 @@ def make_swapped_batch(
                 low=0, high=int(n_cls), size=(B,),
                 device=device, dtype=torch.long, generator=generator)
             changed = swap != original
-            # Clone once on first legacy write so subsequent legacy
-            # swaps (if any) operate on the same cloned tensor.
-            if swapped_batch.get('values') is batch.get('values'):
-                values = values.clone()
-            values[:, 0] = (swap + int(offset)).to(values.dtype)
-            swapped_batch['values'] = values
+            new_values = values.clone()
+            new_values[:, 0] = (swap + int(offset)).to(values.dtype)
+            swapped_batch['values'] = new_values
 
         combined_changed = (
             changed if combined_changed is None

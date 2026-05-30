@@ -274,7 +274,25 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             # (legacy ``values[:, 0]`` path) if no ``keys`` set.
             spec = resolve_label_spec(adaln_kwargs)
             if not spec['keys']:
-                # Legacy single-slot using values[:, 0].
+                # Legacy single-slot using values[:, 0]. CAVEAT: at
+                # inference with ``pad_special_tokens=True`` (the
+                # default for embed_dataset / infer.py), the spv_*
+                # positions of the values tensor are zeroed, so
+                # AdaLN would silently condition on batch_label=0
+                # for every cell -- different from training. Migrate
+                # to the metadata key path
+                # (``adaln.keys=['batch_value']``) for inference-safe
+                # behavior.
+                import logging as _adaln_logging
+                _adaln_logging.getLogger(
+                    "nichejepa.models.gene_transformers"
+                ).warning(
+                    "[AdaLN] using LEGACY single-key path "
+                    "(reads values[:, 0]). At inference with "
+                    "pad_special_tokens=True this silently "
+                    "conditions on batch_label=0. Recommend "
+                    "migrating to ``adaln.keys=['batch_value']`` + "
+                    "matching n_classes / offsets.")
                 self.adaln_keys = [None]
                 self.adaln_offsets = [0]
                 self.adaln_n_classes_per_key = [
@@ -638,6 +656,15 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
             return _NO_COND
         from .batch_labels import extract_batch_label
 
+        # Range-check labels only on the first call (one-shot CUDA
+        # sync). After that, trust the spec and trade defensive
+        # checks for throughput. CUDA's own indexSelect would surface
+        # OOB later anyway as an async assertion -- but with a less
+        # actionable error message. The first-batch sync gives a
+        # clean Python traceback for misconfig diagnosis.
+        do_range_check = not getattr(
+            self, "_adaln_label_range_logged", False)
+
         cond = None
         for slot_i, (key, offset, n_cls, emb) in enumerate(zip(
                 self.adaln_keys,
@@ -647,28 +674,36 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         )):
             label = extract_batch_label(
                 batch, key=key, offset=offset)
-            with torch.no_grad():
-                max_obs = int(label.max().item())
-                min_obs = int(label.min().item())
-            if max_obs >= n_cls or min_obs < 0:
-                raise RuntimeError(
-                    f"AdaLN slot {slot_i} (key={key!r}) batch_label "
-                    f"out of range: observed [{min_obs}, {max_obs}] "
-                    f"but n_classes[{slot_i}]={n_cls}. "
-                    "Set the matching ``n_classes`` entry to at "
-                    f"least {max_obs + 1}, or set ``offsets[{slot_i}]"
-                    f"`` to {min_obs} so the lookup is 0-indexed.")
+            if do_range_check:
+                with torch.no_grad():
+                    max_obs = int(label.max().item())
+                    min_obs = int(label.min().item())
+                if max_obs >= n_cls or min_obs < 0:
+                    raise RuntimeError(
+                        f"AdaLN slot {slot_i} (key={key!r}) "
+                        f"batch_label out of range: observed "
+                        f"[{min_obs}, {max_obs}] but "
+                        f"n_classes[{slot_i}]={n_cls}. Set the "
+                        "matching ``n_classes`` entry to at least "
+                        f"{max_obs + 1}, or set ``offsets"
+                        f"[{slot_i}]`` to {min_obs} so the lookup "
+                        "is 0-indexed.")
             this = emb(label)
             cond = this if cond is None else cond + this
 
         # One-time multi-slot diagnostic log on the first call.
-        if not getattr(self, "_adaln_label_range_logged", False):
+        # Combined with the range check above so we pay the CUDA
+        # sync at most once per process.
+        if do_range_check:
             import logging as _logging
             _logging.getLogger(
                 "nichejepa.models.gene_transformers"
             ).info(
                 "AdaLN multi-key diagnostic on first batch: "
-                "keys=%s, n_classes=%s, offsets=%s. cond_dim=%d.",
+                "keys=%s, n_classes=%s, offsets=%s. cond_dim=%d. "
+                "Subsequent steps skip the range check for speed; "
+                "any OOB would surface as a CUDA indexSelect "
+                "assertion.",
                 self.adaln_keys, self.adaln_n_classes_per_key,
                 self.adaln_offsets, self.adaln_batch_embed_dim,
             )
@@ -1335,7 +1370,25 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             # (legacy ``values[:, 0]`` path) if no ``keys`` set.
             spec = resolve_label_spec(adaln_kwargs)
             if not spec['keys']:
-                # Legacy single-slot using values[:, 0].
+                # Legacy single-slot using values[:, 0]. CAVEAT: at
+                # inference with ``pad_special_tokens=True`` (the
+                # default for embed_dataset / infer.py), the spv_*
+                # positions of the values tensor are zeroed, so
+                # AdaLN would silently condition on batch_label=0
+                # for every cell -- different from training. Migrate
+                # to the metadata key path
+                # (``adaln.keys=['batch_value']``) for inference-safe
+                # behavior.
+                import logging as _adaln_logging
+                _adaln_logging.getLogger(
+                    "nichejepa.models.gene_transformers"
+                ).warning(
+                    "[AdaLN] using LEGACY single-key path "
+                    "(reads values[:, 0]). At inference with "
+                    "pad_special_tokens=True this silently "
+                    "conditions on batch_label=0. Recommend "
+                    "migrating to ``adaln.keys=['batch_value']`` + "
+                    "matching n_classes / offsets.")
                 self.adaln_keys = [None]
                 self.adaln_offsets = [0]
                 self.adaln_n_classes_per_key = [
@@ -1565,6 +1618,12 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
             return None
         from .batch_labels import extract_batch_label
 
+        # One-shot range check on the first call (one CUDA sync per
+        # slot, once per process). After that, trust the spec for
+        # throughput; OOB would surface as an async CUDA assertion.
+        do_range_check = not getattr(
+            self, "_adaln_label_range_logged", False)
+
         cond = None
         for slot_i, (key, offset, n_cls, emb) in enumerate(zip(
                 self.adaln_keys,
@@ -1574,17 +1633,22 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         )):
             label = extract_batch_label(
                 batch, key=key, offset=offset)
-            with torch.no_grad():
-                max_obs = int(label.max().item())
-                min_obs = int(label.min().item())
-            if max_obs >= n_cls or min_obs < 0:
-                raise RuntimeError(
-                    f"AdaLN (predictor) slot {slot_i} (key={key!r}) "
-                    f"batch_label out of range: observed "
-                    f"[{min_obs}, {max_obs}] but n_classes[{slot_i}]"
-                    f"={n_cls}.")
+            if do_range_check:
+                with torch.no_grad():
+                    max_obs = int(label.max().item())
+                    min_obs = int(label.min().item())
+                if max_obs >= n_cls or min_obs < 0:
+                    raise RuntimeError(
+                        f"AdaLN (predictor) slot {slot_i} "
+                        f"(key={key!r}) batch_label out of range: "
+                        f"observed [{min_obs}, {max_obs}] but "
+                        f"n_classes[{slot_i}]={n_cls}.")
             this = emb(label)
             cond = this if cond is None else cond + this
+
+        if do_range_check:
+            self._adaln_label_range_logged = True
+
         return cond
 
     def _compose_predictor_coords(
