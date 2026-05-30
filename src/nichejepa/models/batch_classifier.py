@@ -73,52 +73,71 @@ class BatchClassifierHead(nn.Module):
     """A small MLP head that predicts a batch ID from a cell embedding.
 
     Architecture: ``Linear(embed_dim, hidden_dim) -> GELU -> Dropout ->
-    Linear(hidden_dim, n_batches)``. The gradient-reversal layer is
+    Linear(hidden_dim, n_classes)``. The gradient-reversal layer is
     NOT included here -- it's applied by the caller right before the
-    head so that the same head can be used for diagnostic
-    batch-prediction without gradient reversal.
+    head so the same head can be used for diagnostic prediction
+    without gradient reversal.
+
+    Multi-key support
+    -----------------
+    If ``n_classes_per_key`` is a list, the head becomes multi-output:
+    one independent classifier per key, sharing the hidden trunk.
+    Forward returns a **list** of logits tensors, one per key
+    (shape ``(B, n_classes[k])``). Single-key reduces to a single
+    tensor in the list. The caller is responsible for summing
+    cross-entropy losses across keys.
 
     Parameters
     ----------
     embed_dim:
-        Cell embedding dimension at the input. Matches ``enc_emb_dim``.
-    n_batches:
-        Output dimension. Must be ``> max(batch_label) for all
-        training data``.
+        Cell embedding dimension at the input.
+    n_classes_per_key:
+        Either a single int (single-key, legacy) or a list of ints
+        (multi-key, one classifier per key).
     hidden_dim:
-        Hidden-layer width. Default 256 -- the head is intentionally
-        small so it converges fast on batch (low signal) while the
-        encoder slowly learns to remove it.
+        Hidden-layer width. Shared across all keys.
     dropout:
-        Dropout between hidden layer and output, helps prevent the
-        classifier from memorizing rare batches.
+        Dropout between hidden layer and output heads.
     """
 
     def __init__(self,
                  embed_dim: int,
-                 n_batches: int,
+                 n_classes_per_key: int | list[int] | tuple[int, ...],
                  hidden_dim: int = 256,
                  dropout: float = 0.1,
                  ):
         super().__init__()
-        if n_batches < 2:
+        if isinstance(n_classes_per_key, int):
+            n_classes_per_key = [n_classes_per_key]
+        else:
+            n_classes_per_key = list(n_classes_per_key)
+        if not n_classes_per_key:
             raise ValueError(
-                f"n_batches must be >= 2, got {n_batches}.")
+                "BatchClassifierHead requires at least one key.")
+        for k, n in enumerate(n_classes_per_key):
+            if int(n) < 2:
+                raise ValueError(
+                    f"n_classes_per_key[{k}] must be >= 2, got {n}.")
         self.embed_dim = embed_dim
-        self.n_batches = n_batches
-        self.mlp = nn.Sequential(
+        self.n_classes_per_key = [int(n) for n in n_classes_per_key]
+        # Shared trunk -> per-key linear heads.
+        self.trunk = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim, n_batches),
         )
+        self.heads = nn.ModuleList([
+            nn.Linear(hidden_dim, int(n))
+            for n in self.n_classes_per_key
+        ])
 
-    def forward(self, cell_emb: torch.Tensor) -> torch.Tensor:
-        """Returns batch-prediction logits of shape
-        ``(batch_size, n_batches)`` for an input cell embedding of
-        shape ``(batch_size, embed_dim)``.
+    def forward(self, cell_emb: torch.Tensor) -> list[torch.Tensor]:
+        """Returns a list of logits tensors, one per key. Shape per
+        entry: ``(B, n_classes[k])``. Single-key returns a
+        one-element list.
         """
-        return self.mlp(cell_emb)
+        h = self.trunk(cell_emb)
+        return [head(h) for head in self.heads]
 
 
 def mean_pool_cell_embedding(

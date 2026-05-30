@@ -13,12 +13,13 @@ from nichejepa.models.cycle_consistency import (
 # make_swapped_batch
 # ---------------------------------------------------------------------------
 
-def test_make_swapped_batch_replaces_first_column():
+def test_make_swapped_batch_legacy_path_replaces_values_first_column():
+    """When no key is given, falls back to swapping values[:, 0]."""
     torch.manual_seed(0)
     values = torch.zeros(8, 4)
     values[:, 0] = torch.tensor([0, 1, 2, 3, 0, 1, 2, 3])
     batch = {'values': values}
-    swapped, changed = make_swapped_batch(batch, n_batches=8)
+    swapped, changed = make_swapped_batch(batch, n_classes_per_key=8)
 
     # Other columns must be untouched.
     assert torch.allclose(swapped['values'][:, 1:], values[:, 1:])
@@ -29,7 +30,6 @@ def test_make_swapped_batch_replaces_first_column():
     # The original batch must not have been mutated.
     assert torch.equal(batch['values'][:, 0],
                        torch.tensor([0, 1, 2, 3, 0, 1, 2, 3]).float())
-    # changed_mask shape sanity.
     assert changed.shape == (8,)
     assert changed.dtype == torch.bool
 
@@ -39,24 +39,75 @@ def test_make_swapped_batch_changed_mask_matches_diff():
     values = torch.zeros(50, 2)
     values[:, 0] = torch.randint(0, 5, (50,))
     batch = {'values': values}
-    swapped, changed = make_swapped_batch(batch, n_batches=5)
+    swapped, changed = make_swapped_batch(batch, n_classes_per_key=5)
     expected = swapped['values'][:, 0].long() != values[:, 0].long()
     assert torch.equal(changed, expected)
 
 
-def test_make_swapped_batch_respects_n_batches():
+def test_make_swapped_batch_respects_n_classes():
     torch.manual_seed(0)
     values = torch.zeros(100, 2)
     batch = {'values': values}
-    swapped, _ = make_swapped_batch(batch, n_batches=3)
+    swapped, _ = make_swapped_batch(batch, n_classes_per_key=3)
     new_labels = swapped['values'][:, 0].long()
     assert int(new_labels.max().item()) < 3
     assert int(new_labels.min().item()) >= 0
 
 
-def test_make_swapped_batch_raises_on_1d_values():
+def test_make_swapped_batch_legacy_raises_on_1d_values():
     with pytest.raises(RuntimeError, match="at least 2-D"):
-        make_swapped_batch({'values': torch.zeros(8)}, n_batches=4)
+        make_swapped_batch(
+            {'values': torch.zeros(8)}, n_classes_per_key=4)
+
+
+def test_make_swapped_batch_metadata_key_path():
+    """When a key is given AND present in the batch, the metadata
+    field is swapped instead of values[:, 0]."""
+    torch.manual_seed(0)
+    batch = {
+        'values': torch.zeros(8, 4),
+        'batch_value': torch.tensor([0, 1, 2, 3, 0, 1, 2, 3]),
+    }
+    swapped, changed = make_swapped_batch(
+        batch, n_classes_per_key=8, keys='batch_value')
+    # values untouched.
+    assert torch.allclose(swapped['values'], batch['values'])
+    # batch_value replaced and in range.
+    assert (swapped['batch_value'] >= 0).all()
+    assert (swapped['batch_value'] < 8).all()
+    assert changed.shape == (8,)
+
+
+def test_make_swapped_batch_multi_key_or_mask():
+    """changed_mask is True if ANY key swapped for that cell."""
+    torch.manual_seed(0)
+    batch = {
+        'values': torch.zeros(8, 4),
+        'batch_value': torch.randint(0, 5, (8,)),
+        'assay_value': torch.randint(0, 7, (8,)),
+    }
+    swapped, changed = make_swapped_batch(
+        batch,
+        n_classes_per_key=[5, 7],
+        keys=['batch_value', 'assay_value'],
+    )
+    # Compute expected: True where either key changed.
+    expected = (
+        (swapped['batch_value'] != batch['batch_value'])
+        | (swapped['assay_value'] != batch['assay_value'])
+    )
+    assert torch.equal(changed, expected)
+
+
+def test_make_swapped_batch_mismatched_lengths_raises():
+    batch = {'values': torch.zeros(4, 3),
+             'batch_value': torch.zeros(4, dtype=torch.long)}
+    with pytest.raises(RuntimeError, match="length"):
+        make_swapped_batch(
+            batch,
+            n_classes_per_key=[5, 7],
+            keys=['batch_value'],   # length mismatch
+        )
 
 
 # ---------------------------------------------------------------------------

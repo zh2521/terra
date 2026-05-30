@@ -35,15 +35,22 @@ def apply_peft(model, peft_method='lora', rank=8):
 """
 
 def parse_distribution_alignment_kwargs(args: dict) -> dict | None:
-    """Resolve the optional ``batch_correction.distribution_alignment``
-    config block. Returns ``None`` when missing or disabled so the
-    training loop can gate the alignment loss on a simple None check.
+    """Resolve the optional
+    ``special_token_correction.distribution_alignment`` config block
+    (or the legacy alias ``batch_correction.distribution_alignment``).
+    Returns ``None`` when missing or disabled so the training loop
+    can gate the alignment loss on a simple None check.
+
+    Returned dict also propagates any per-mechanism multi-key spec
+    (``keys`` / ``n_classes`` / ``offsets``) so the runtime loop in
+    train.py can route distribution_alignment by one or more
+    metadata fields.
 
     Expected YAML schema (any field can be omitted, defaults shown):
 
     .. code-block:: yaml
 
-        batch_correction:
+        special_token_correction:
           distribution_alignment:
             enabled:         True
             method:          'coral'           # 'coral', 'mmd', or 'sinkhorn'
@@ -52,15 +59,22 @@ def parse_distribution_alignment_kwargs(args: dict) -> dict | None:
             sinkhorn_eps:    0.05              # only used if method='sinkhorn'
             sinkhorn_n_iter: 100               # only used if method='sinkhorn'
             max_pairs:       null              # cap on pair count per step
+            # Optional per-mechanism multi-key override (otherwise
+            # inherited from the top-level spec):
+            keys:            ['batch_value']
+            offsets:         [2]
     """
-    bc = args.get('batch_correction', {}) or {}
+    # Accept either the new block name or the legacy alias.
+    bc = (args.get('special_token_correction', None)
+          or args.get('batch_correction', None)
+          or {})
     cfg = bc.get('distribution_alignment', None)
     if not (cfg and cfg.get('enabled', False)):
         return None
     method = str(cfg.get('method', 'coral')).lower()
     if method not in ('coral', 'mmd', 'sinkhorn'):
         raise ValueError(
-            "batch_correction.distribution_alignment.method must be "
+            "distribution_alignment.method must be "
             f"'coral', 'mmd', or 'sinkhorn' (got {method!r}).")
     out = {
         'method':          method,
@@ -72,6 +86,24 @@ def parse_distribution_alignment_kwargs(args: dict) -> dict | None:
     }
     if out['max_pairs'] is not None:
         out['max_pairs'] = int(out['max_pairs'])
+
+    # Propagate multi-key spec (keys/offsets) so train.py can route
+    # distribution_alignment by one or more metadata fields. If the
+    # per-mechanism cfg doesn't set them, inherit from the top-level
+    # ``special_token_correction`` block.
+    from nichejepa.models.batch_labels import resolve_label_spec
+    spec = resolve_label_spec(cfg, shared={
+        'keys': bc.get('keys'),
+        'n_classes': bc.get('n_classes'),
+        'offsets': bc.get('offsets'),
+    })
+    if spec['keys']:
+        out['keys'] = spec['keys']
+        out['offsets'] = spec['offsets']
+        # n_classes is not needed for dist_align (it auto-detects
+        # unique values per minibatch) but pass it through for
+        # consistency / round-trip.
+        out['n_classes'] = spec['n_classes']
     return out
 
 
@@ -94,18 +126,40 @@ def parse_arch_kwargs(args: dict) -> dict:
     adjacency -> wrong embeddings).
     """
     meta = args.get('meta', {}) or {}
-    bc = args.get('batch_correction', {}) or {}
+    # Accept both 'special_token_correction' (new, recommended) and
+    # 'batch_correction' (legacy alias) as the block name.
+    bc = (args.get('special_token_correction', None)
+          or args.get('batch_correction', None)
+          or {})
     adaln = bc.get('adaln', None)
     if adaln and not adaln.get('enabled', False):
         adaln = None
     elif adaln is not None:
+        from nichejepa.models.batch_labels import resolve_label_spec
         adaln = dict(adaln)
-        adaln.setdefault('n_batches', bc.get('n_batches'))
-        if adaln.get('n_batches') is None:
-            raise ValueError(
-                "batch_correction.adaln.enabled=True in the saved "
-                "config but n_batches is missing. Either set "
-                "batch_correction.n_batches or adaln.n_batches.")
+        # Resolve the multi-key spec for round-trip. Falls back to
+        # shared top-level keys/n_classes/offsets if the per-
+        # mechanism block doesn't have them. If still empty, fall
+        # back to the legacy single-key ``n_batches`` field.
+        spec = resolve_label_spec(adaln, shared={
+            'keys': bc.get('keys'),
+            'n_classes': bc.get('n_classes'),
+            'offsets': bc.get('offsets'),
+        })
+        if spec['keys']:
+            adaln.setdefault('keys', spec['keys'])
+            adaln.setdefault('n_classes', spec['n_classes'])
+            adaln.setdefault('offsets', spec['offsets'])
+        else:
+            adaln.setdefault('n_batches', bc.get('n_batches'))
+            if adaln.get('n_batches') is None:
+                raise ValueError(
+                    "adaln.enabled=True in the saved config but "
+                    "neither a multi-key spec (keys/n_classes/"
+                    "offsets) nor the legacy n_batches scalar is "
+                    "set. Either set keys + n_classes + offsets "
+                    "(at the adaln or top-level block), or set "
+                    "n_batches.")
         # Round-trip 'scope' as-is so reloaded checkpoints rebuild
         # the same encoder/predictor module shapes. Validate early
         # so a typo blows up at init time rather than at first
@@ -125,26 +179,38 @@ def parse_arch_kwargs(args: dict) -> dict:
     elif rda is not None:
         rda = dict(rda)
 
-    # Protocol-MoE predictor bias. Reads
-    # ``batch_correction.protocol_moe``. Round-trips so the
-    # predictor's per-protocol Embedding table is recreated with
-    # the same n_experts at checkpoint reload.
-    moe = bc.get('protocol_moe', None)
+    # Special-token-MoE predictor bias. Reads
+    # ``batch_correction.special_token_moe`` (or the legacy alias
+    # ``batch_correction.protocol_moe`` for backward compat).
+    # Round-trips so the predictor's per-slot Embedding tables are
+    # recreated with the same n_experts at checkpoint reload. The
+    # multi-slot schema accepts lists for routing_indices,
+    # n_experts, and routing_offsets; single-slot scalars are also
+    # accepted (and treated as one-element lists internally).
+    moe = bc.get('special_token_moe', None)
+    if moe is None:
+        moe = bc.get('protocol_moe', None)  # legacy alias
     if moe and not moe.get('enabled', False):
         moe = None
     elif moe is not None:
         moe = dict(moe)
-        if moe.get('routing_index') is None:
+        # Accept either the new 'routing_indices' or the legacy
+        # 'routing_index' field.
+        if (moe.get('routing_indices') is None
+                and moe.get('routing_index') is None):
             raise ValueError(
-                "batch_correction.protocol_moe.enabled=True but "
-                "routing_index is missing. Set it to the values "
-                "column index of the routing metadata (e.g. the "
-                "assay_value or gene_panel_value spv_* slot).")
+                "batch_correction.special_token_moe.enabled=True "
+                "but neither routing_indices nor routing_index is "
+                "set. Set routing_indices to a list of values-column "
+                "indices (e.g. [0, 1] for batch+assay) or a scalar "
+                "for single-slot routing.")
         if moe.get('n_experts') is None:
             raise ValueError(
-                "batch_correction.protocol_moe.enabled=True but "
-                "n_experts is missing. Set it to at least 1 + the "
-                "max routing-id observed in the training data.")
+                "batch_correction.special_token_moe.enabled=True "
+                "but n_experts is missing. Set it (scalar for "
+                "single-slot, list-per-slot for multi-slot) to at "
+                "least 1 + the max routing-id observed for each "
+                "slot.")
     return {
         'laplacian_k': int(meta.get('laplacian_k', 8)),
         'laplacian_sigma': float(meta.get('laplacian_sigma', 1.0)),
@@ -153,7 +219,7 @@ def parse_arch_kwargs(args: dict) -> dict:
             meta.get('rope_rotation_augment', True)),
         'adaln_kwargs': adaln,
         'rda_kwargs': rda,
-        'protocol_moe_kwargs': moe,
+        'special_token_moe_kwargs': moe,
     }
 
 
@@ -371,7 +437,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                rope_rotation_augment: bool = True,
                adaln_kwargs: dict | None = None,
                rda_kwargs: dict | None = None,
-               protocol_moe_kwargs: dict | None = None,
+               special_token_moe_kwargs: dict | None = None,
                ) -> tuple[gt.GeneTransformerBaseEncoder,
                           gt.GeneTransformerBasePredictor]:
     """
@@ -459,22 +525,28 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
             "Per-cell log(1+T) is broadcast across gene-token "
             "positions; zero-init output head -> step-0 no-op.")
 
-    # Protocol-MoE predictor bias is predictor-only (encoder
-    # remains protocol-agnostic). Zero-init bias -> step-0 no-op.
-    if protocol_moe_kwargs and protocol_moe_kwargs.get('enabled', False):
+    # Special-token MoE predictor bias is predictor-only (encoder
+    # remains protocol/batch-agnostic). Zero-init biases -> step-0
+    # no-op. Multi-slot routing sums per-slot biases (e.g. batch +
+    # assay contributes both per-batch and per-assay biases summed).
+    if special_token_moe_kwargs and special_token_moe_kwargs.get(
+            'enabled', False):
+        ri = (special_token_moe_kwargs.get('routing_indices')
+              if special_token_moe_kwargs.get('routing_indices') is not None
+              else special_token_moe_kwargs.get('routing_index'))
+        ne = special_token_moe_kwargs.get('n_experts')
+        ro = (special_token_moe_kwargs.get('routing_offsets')
+              if special_token_moe_kwargs.get('routing_offsets') is not None
+              else special_token_moe_kwargs.get('routing_offset', 0))
         logger.info(
-            f"[Protocol-MoE] enabled (n_experts="
-            f"{protocol_moe_kwargs.get('n_experts')}, "
-            f"routing_index="
-            f"{protocol_moe_kwargs.get('routing_index')}, "
-            f"routing_offset="
-            f"{protocol_moe_kwargs.get('routing_offset', 0)}). "
-            "Per-protocol additive bias on predictor output; "
-            "zero-init -> step-0 no-op. NOTE: "
+            f"[Special-Token-MoE] enabled (routing_indices={ri}, "
+            f"n_experts={ne}, routing_offsets={ro}). Per-slot "
+            "additive bias on predictor output (summed across "
+            "slots); zero-init -> step-0 no-op. NOTE: each "
             "values[:, routing_index] is offset-subtracted across "
-            "ALL spv_* slots; set routing_offset to the cumulative "
-            "size of preceding slots (or set n_experts large "
-            "enough to cover the full range).")
+            "ALL spv_* slots; set routing_offset per slot to the "
+            "cumulative size of preceding slots, or set n_experts "
+            "large enough to cover the full global range.")
 
     encoder = gt.__dict__["init_gt_encoder"](
         encoder_type=gt_type,
@@ -530,7 +602,7 @@ def init_model(gt_type: Literal['rank', 'count', 'combined'],
                          else math.pi),
         rope_rotation_augment=rope_rotation_augment,
         adaln_kwargs=adaln_kwargs_pred,
-        protocol_moe_kwargs=protocol_moe_kwargs)
+        special_token_moe_kwargs=special_token_moe_kwargs)
     if api_version == 'v3' or api_version == 'v4':
         predictor = PredictorMultiMaskWrapper(predictor)
 
@@ -605,9 +677,17 @@ def build_batch_classifier_head(
     if not (adv_classifier_kwargs
             and adv_classifier_kwargs.get('enabled', False)):
         return None
+    from nichejepa.models.batch_labels import resolve_label_spec
+    spec = resolve_label_spec(adv_classifier_kwargs)
+    if not spec['n_classes']:
+        # Legacy single-key without an explicit ``keys`` field.
+        n_classes_per_key = [
+            int(adv_classifier_kwargs['n_batches'])]
+    else:
+        n_classes_per_key = spec['n_classes']
     head = BatchClassifierHead(
         embed_dim=embed_dim,
-        n_batches=int(adv_classifier_kwargs['n_batches']),
+        n_classes_per_key=n_classes_per_key,
         hidden_dim=int(adv_classifier_kwargs.get('hidden_dim', 256)),
         dropout=float(adv_classifier_kwargs.get('dropout', 0.1)),
     ).to(device)
@@ -623,7 +703,7 @@ def build_batch_classifier_head(
     n_params = sum(p.numel() for p in head.parameters() if p.requires_grad)
     logger.info(
         f'Adversarial batch classifier head: {n_params} params, '
-        f'n_batches={adv_classifier_kwargs["n_batches"]}.')
+        f'n_classes_per_key={n_classes_per_key}.')
     return head
 
     

@@ -252,22 +252,78 @@ def train(args: dict,
     # Both read the per-cell batch label directly from the
     # ``batch_value`` column that the dataset (CellGraphDataset /
     # CellNeighborhoodDataset) exposes in every item.
-    bc_cfg = args.get('batch_correction', {}) or {}
+    # Accept either ``special_token_correction`` (new, recommended
+    # name -- decoupled from ``special_tokens`` in the input
+    # sequence) or ``batch_correction`` (legacy alias).
+    bc_cfg = (
+        args.get('special_token_correction', None)
+        or args.get('batch_correction', None)
+        or {}
+    )
+
+    # SHARED multi-key spec at the top of the bc_cfg block. Each
+    # mechanism inherits unless it provides its own ``keys`` /
+    # ``n_classes`` / ``offsets``. This is what lets you write the
+    # routing once and have AdaLN + adv_classifier +
+    # distribution_alignment + cycle_consistency + special_token_moe
+    # all use the same set of metadata fields.
+    from nichejepa.models.batch_labels import (
+        extract_batch_label as _xb,
+        extract_batch_labels as _xbs,
+        resolve_label_spec as _rspec,
+    )
+    shared_spec = _rspec(bc_cfg)
+    shared_keys = shared_spec['keys']
+    shared_n_classes = shared_spec['n_classes']
+    shared_offsets = shared_spec['offsets']
+    if shared_keys:
+        logger.info(
+            f"[special_token_correction] shared spec: "
+            f"keys={shared_keys}, n_classes={shared_n_classes}, "
+            f"offsets={shared_offsets}. All mechanisms inherit "
+            "unless they specify their own keys.")
+
+    # Legacy single-key fallback for backward compat with the
+    # previous ``batch_label_key`` API.
+    shared_batch_label_key = bc_cfg.get('batch_label_key', None)
+    shared_batch_label_offset = int(
+        bc_cfg.get('batch_label_offset', 0))
+    if shared_batch_label_key is not None and not shared_keys:
+        # Promote the legacy single-key fields into the shared list.
+        shared_keys = [shared_batch_label_key]
+        shared_offsets = [shared_batch_label_offset]
+        if bc_cfg.get('n_batches') is not None:
+            shared_n_classes = [int(bc_cfg['n_batches'])]
+
     adaln_kwargs = bc_cfg.get('adaln', None)
     if adaln_kwargs and not adaln_kwargs.get('enabled', False):
         adaln_kwargs = None
     elif adaln_kwargs is not None:
         adaln_kwargs = dict(adaln_kwargs)
-        adaln_kwargs.setdefault('n_batches', bc_cfg.get('n_batches'))
-        if adaln_kwargs.get('n_batches') is None:
-            raise ValueError(
-                "batch_correction.adaln.enabled=True requires "
-                "batch_correction.n_batches (or adaln.n_batches) to be set.")
+        # Resolve per-mechanism spec with fallback to shared.
+        ad_spec = _rspec(adaln_kwargs, shared={
+            'keys': shared_keys,
+            'n_classes': shared_n_classes,
+            'offsets': shared_offsets,
+        })
+        if ad_spec['keys']:
+            adaln_kwargs.setdefault('keys', ad_spec['keys'])
+            adaln_kwargs.setdefault('n_classes', ad_spec['n_classes'])
+            adaln_kwargs.setdefault('offsets', ad_spec['offsets'])
+        else:
+            # Single-key legacy path: still require n_batches.
+            adaln_kwargs.setdefault(
+                'n_batches', bc_cfg.get('n_batches'))
+            if adaln_kwargs.get('n_batches') is None:
+                raise ValueError(
+                    "adaln.enabled=True requires either a multi-key "
+                    "spec (keys/n_classes/offsets) at the mechanism "
+                    "or shared level, or the legacy n_batches scalar.")
         # Validate scope upfront so a typo blows up at config-load time.
         scope = str(adaln_kwargs.get('scope', 'both')).lower()
         if scope not in ('encoder', 'predictor', 'both'):
             raise ValueError(
-                "batch_correction.adaln.scope must be one of "
+                "adaln.scope must be one of "
                 f"'encoder', 'predictor', 'both' (got {scope!r}).")
         adaln_kwargs['scope'] = scope
 
@@ -281,22 +337,31 @@ def train(args: dict,
     elif rda_kwargs is not None:
         rda_kwargs = dict(rda_kwargs)
 
-    # Protocol-MoE predictor head. Adds a per-protocol (e.g.
-    # per-assay) zero-init learnable bias on top of the predictor
-    # output. Routed via a configurable values column.
-    moe_kwargs = bc_cfg.get('protocol_moe', None)
+    # Special-token MoE predictor head. Adds a summed per-slot
+    # zero-init learnable bias on top of the predictor output,
+    # routed by one or more values columns (e.g. batch slot,
+    # assay slot, or both). Accepts both the new ``special_token_moe``
+    # block name and the legacy ``protocol_moe`` block name for
+    # backward compat.
+    moe_kwargs = bc_cfg.get('special_token_moe', None)
+    if moe_kwargs is None:
+        moe_kwargs = bc_cfg.get('protocol_moe', None)
     if moe_kwargs and not moe_kwargs.get('enabled', False):
         moe_kwargs = None
     elif moe_kwargs is not None:
         moe_kwargs = dict(moe_kwargs)
-        if moe_kwargs.get('routing_index') is None:
+        if (moe_kwargs.get('routing_indices') is None
+                and moe_kwargs.get('routing_index') is None):
             raise ValueError(
-                "batch_correction.protocol_moe.enabled=True requires "
-                "routing_index (values column for the protocol id).")
+                "batch_correction.special_token_moe.enabled=True "
+                "requires routing_indices (list) or routing_index "
+                "(scalar) -- the values column(s) for the routing "
+                "id(s).")
         if moe_kwargs.get('n_experts') is None:
             raise ValueError(
-                "batch_correction.protocol_moe.enabled=True requires "
-                "n_experts.")
+                "batch_correction.special_token_moe.enabled=True "
+                "requires n_experts (scalar for single-slot or list "
+                "for multi-slot).")
 
     # Cycle-consistency: re-encode each minibatch with random batch
     # labels and penalize the MSE between original and swapped
@@ -306,21 +371,52 @@ def train(args: dict,
         cycle_kwargs = None
     elif cycle_kwargs is not None:
         cycle_kwargs = dict(cycle_kwargs)
-        cycle_kwargs.setdefault('n_batches', bc_cfg.get('n_batches'))
-        if cycle_kwargs.get('n_batches') is None:
-            raise ValueError(
-                "batch_correction.cycle_consistency.enabled=True requires "
-                "batch_correction.n_batches (or cycle_consistency.n_batches) "
-                "to be set.")
+        cy_spec = _rspec(cycle_kwargs, shared={
+            'keys': shared_keys,
+            'n_classes': shared_n_classes,
+            'offsets': shared_offsets,
+        })
+        if cy_spec['keys']:
+            cycle_kwargs.setdefault('keys', cy_spec['keys'])
+            cycle_kwargs.setdefault('n_classes', cy_spec['n_classes'])
+            cycle_kwargs.setdefault('offsets', cy_spec['offsets'])
+        else:
+            cycle_kwargs.setdefault(
+                'n_batches', bc_cfg.get('n_batches'))
+            if cycle_kwargs.get('n_batches') is None:
+                raise ValueError(
+                    "cycle_consistency.enabled=True requires either "
+                    "a multi-key spec (keys/n_classes/offsets) or "
+                    "the legacy n_batches scalar.")
     lambda_cycle = float(
         (cycle_kwargs or {}).get('lambda_cycle', 0.0)
     ) if cycle_kwargs else 0.0
     cycle_swap_fraction = float(
         (cycle_kwargs or {}).get('swap_fraction', 1.0)
     ) if cycle_kwargs else 0.0
-    cycle_n_batches = int(
-        (cycle_kwargs or {}).get('n_batches', 0)
-    ) if cycle_kwargs else 0
+    # Multi-key cycle spec; falls back to single-key legacy
+    # n_batches with the FIRST shared key (or the legacy
+    # batch_label_key, or None for the values[:,0] fallback).
+    if cycle_kwargs and cycle_kwargs.get('keys'):
+        cycle_keys = list(cycle_kwargs['keys'])
+        cycle_n_classes_per_key = list(cycle_kwargs['n_classes'])
+        cycle_offsets = list(cycle_kwargs['offsets'])
+    elif cycle_kwargs:
+        # Prefer the new shared multi-key spec's first slot when the
+        # user set ``special_token_correction.keys`` but only used
+        # legacy single-key ``n_batches`` in cycle. Fall back to the
+        # legacy ``batch_label_key`` field, then to None (values[:,0]).
+        if shared_keys:
+            cycle_keys = [shared_keys[0]]
+            cycle_offsets = [shared_offsets[0]]
+        else:
+            cycle_keys = [shared_batch_label_key]
+            cycle_offsets = [shared_batch_label_offset]
+        cycle_n_classes_per_key = [int(cycle_kwargs['n_batches'])]
+    else:
+        cycle_keys = []
+        cycle_n_classes_per_key = []
+        cycle_offsets = []
 
     adv_classifier_kwargs = bc_cfg.get('adv_classifier', None)
     if adv_classifier_kwargs and not adv_classifier_kwargs.get(
@@ -328,13 +424,26 @@ def train(args: dict,
         adv_classifier_kwargs = None
     elif adv_classifier_kwargs is not None:
         adv_classifier_kwargs = dict(adv_classifier_kwargs)
-        adv_classifier_kwargs.setdefault(
-            'n_batches', bc_cfg.get('n_batches'))
-        if adv_classifier_kwargs.get('n_batches') is None:
-            raise ValueError(
-                "batch_correction.adv_classifier.enabled=True requires "
-                "batch_correction.n_batches (or adv_classifier.n_batches) "
-                "to be set.")
+        # Resolve multi-key spec with fallback to shared.
+        adv_spec = _rspec(adv_classifier_kwargs, shared={
+            'keys': shared_keys,
+            'n_classes': shared_n_classes,
+            'offsets': shared_offsets,
+        })
+        if adv_spec['keys']:
+            adv_classifier_kwargs.setdefault('keys', adv_spec['keys'])
+            adv_classifier_kwargs.setdefault(
+                'n_classes', adv_spec['n_classes'])
+            adv_classifier_kwargs.setdefault(
+                'offsets', adv_spec['offsets'])
+        else:
+            adv_classifier_kwargs.setdefault(
+                'n_batches', bc_cfg.get('n_batches'))
+            if adv_classifier_kwargs.get('n_batches') is None:
+                raise ValueError(
+                    "adv_classifier.enabled=True requires either a "
+                    "multi-key spec (keys/n_classes/offsets) or the "
+                    "legacy n_batches scalar.")
 
     lambda_adv = float(
         (adv_classifier_kwargs or {}).get('lambda_adv', 0.1))
@@ -622,7 +731,7 @@ def train(args: dict,
         rope_rotation_augment=rope_rotation_augment,
         adaln_kwargs=adaln_kwargs,
         rda_kwargs=rda_kwargs,
-        protocol_moe_kwargs=moe_kwargs)
+        special_token_moe_kwargs=moe_kwargs)
     # Build the adversarial batch classifier head (returns None when
     # disabled, so default training is unchanged).
     batch_classifier = build_batch_classifier_head(
@@ -1219,38 +1328,51 @@ def train(args: dict,
                         n_special_tokens=n_special_tokens,
                     )
                     cell_emb_rev = grad_reverse(cell_emb, alpha=grl_alpha)
-                    batch_logits = batch_classifier(cell_emb_rev)
-                    # Per-cell batch label from the values tensor.
-                    # By convention the batch token is the first
-                    # special token in the sequence, so its value
-                    # (an 0-indexed batch class id) lives at index 0.
-                    batch_label = udata['values'][:, 0].long()
-                    n_cls = batch_logits.size(-1)
-                    # Hard range check. Silent clamping collapsed all
-                    # out-of-range cells into the last class and let
-                    # bugs go undetected. Raise loudly so the user
-                    # can fix n_batches in their config. Note that
-                    # values[:, 0] is offset-subtracted across all
-                    # spv_* tokens (NOT 0-indexed across batches), so
-                    # for a small dataset n_batches typically needs
-                    # to be ~n_special_values + 2.
-                    with torch.no_grad():
-                        max_obs = int(batch_label.max().item())
-                        min_obs = int(batch_label.min().item())
-                    if max_obs >= n_cls or min_obs < 0:
-                        raise RuntimeError(
-                            "Adversarial batch classifier: batch labels "
-                            f"in range [{min_obs}, {max_obs}] but "
-                            f"n_batches (classifier output dim) = {n_cls}. "
-                            "Set batch_correction.n_batches to at least "
-                            f"{max_obs + 1}."
-                        )
-                    adv_loss = F.cross_entropy(batch_logits, batch_label)
+                    # Multi-head classifier: returns list of logits
+                    # (one per key). Single-key returns a one-element
+                    # list to keep the codepath uniform.
+                    batch_logits_per_key = batch_classifier(cell_emb_rev)
+                    # Per-key batch labels.
+                    bc_keys = (
+                        adv_classifier_kwargs.get('keys')
+                        if adv_classifier_kwargs else None
+                    ) or [shared_batch_label_key]
+                    bc_offsets = (
+                        adv_classifier_kwargs.get('offsets')
+                        if adv_classifier_kwargs else None
+                    ) or [shared_batch_label_offset]
+                    labels_per_key = _xbs(
+                        udata, keys=bc_keys, offsets=bc_offsets)
+                    # Sum CE over heads; range-check each head's
+                    # labels against that head's output dim.
+                    adv_loss = 0.0
+                    adv_accuracy_per_key = []
+                    for k, (logits, label) in enumerate(zip(
+                            batch_logits_per_key, labels_per_key)):
+                        n_cls = logits.size(-1)
+                        with torch.no_grad():
+                            max_obs = int(label.max().item())
+                            min_obs = int(label.min().item())
+                        if max_obs >= n_cls or min_obs < 0:
+                            raise RuntimeError(
+                                f"adv_classifier head {k} "
+                                f"(key={bc_keys[k]!r}): labels in "
+                                f"[{min_obs}, {max_obs}] but "
+                                f"n_classes={n_cls}. Increase "
+                                f"n_classes[{k}] (or set "
+                                f"offsets[{k}]={min_obs}).")
+                        ce = F.cross_entropy(logits, label)
+                        adv_loss = adv_loss + ce
+                        with torch.no_grad():
+                            adv_accuracy_per_key.append(float(
+                                (logits.argmax(dim=-1) == label)
+                                .float().mean().item()))
                     loss = loss + lambda_adv * adv_loss
-                    with torch.no_grad():
-                        adv_accuracy = (
-                            batch_logits.argmax(dim=-1) == batch_label
-                        ).float().mean().item()
+                    # Report mean accuracy across heads for the WandB
+                    # log; per-head values are also logged below.
+                    adv_accuracy = (
+                        sum(adv_accuracy_per_key)
+                        / len(adv_accuracy_per_key))
 
                 # ----------------------------------------------------
                 # Distribution alignment (CORAL / MMD)
@@ -1274,19 +1396,50 @@ def train(args: dict,
                         )
                     else:
                         cell_emb_for_align = cell_emb
-                    batch_label_align = udata['values'][:, 0].long()
-                    dist_align_loss_val, dist_align_info = (
-                        compute_distribution_alignment_loss(
-                            cell_emb=cell_emb_for_align,
-                            batch_label=batch_label_align,
-                            method=dist_align_kwargs['method'],
-                            mmd_sigmas=dist_align_kwargs['mmd_sigmas'],
-                            sinkhorn_eps=dist_align_kwargs['sinkhorn_eps'],
-                            sinkhorn_n_iter=(
-                                dist_align_kwargs['sinkhorn_n_iter']),
-                            max_pairs=dist_align_kwargs['max_pairs'],
-                        )
+                    # Multi-key: compute one alignment loss per key
+                    # and sum. Each key defines its own grouping of
+                    # cells in the minibatch.
+                    da_keys = (
+                        dist_align_kwargs.get('keys')
+                        or shared_keys
+                        or [shared_batch_label_key]
                     )
+                    da_offsets = (
+                        dist_align_kwargs.get('offsets')
+                        or shared_offsets
+                        or [shared_batch_label_offset]
+                    )
+                    labels_per_key = _xbs(
+                        udata, keys=da_keys, offsets=da_offsets)
+                    dist_align_loss_val = None
+                    dist_align_info = {'per_key': []}
+                    for label_align in labels_per_key:
+                        per_key_loss, per_key_info = (
+                            compute_distribution_alignment_loss(
+                                cell_emb=cell_emb_for_align,
+                                batch_label=label_align,
+                                method=dist_align_kwargs['method'],
+                                mmd_sigmas=dist_align_kwargs['mmd_sigmas'],
+                                sinkhorn_eps=(
+                                    dist_align_kwargs['sinkhorn_eps']),
+                                sinkhorn_n_iter=(
+                                    dist_align_kwargs['sinkhorn_n_iter']),
+                                max_pairs=dist_align_kwargs['max_pairs'],
+                            )
+                        )
+                        dist_align_loss_val = (
+                            per_key_loss if dist_align_loss_val is None
+                            else dist_align_loss_val + per_key_loss)
+                        dist_align_info['per_key'].append(per_key_info)
+                    # Backward-compat: also surface aggregate stats
+                    # under the keys the WandB logger already reads.
+                    if dist_align_info['per_key']:
+                        dist_align_info['n_batches_in_minibatch'] = sum(
+                            d['n_batches_in_minibatch']
+                            for d in dist_align_info['per_key'])
+                        dist_align_info['n_pairs'] = sum(
+                            d['n_pairs']
+                            for d in dist_align_info['per_key'])
                     loss = loss + lambda_align * dist_align_loss_val
 
                 # ----------------------------------------------------
@@ -1304,7 +1457,11 @@ def train(args: dict,
                         and cycle_swap_fraction > 0
                         and torch.rand(()).item() < cycle_swap_fraction):
                     swapped_batch, changed_mask = make_swapped_batch(
-                        udata, n_batches=cycle_n_batches)
+                        udata,
+                        n_classes_per_key=cycle_n_classes_per_key,
+                        keys=cycle_keys,
+                        offsets=cycle_offsets,
+                    )
                     cycle_n_changed = int(changed_mask.sum().item())
                     if cycle_n_changed > 0:
                         z_swapped, _ = encoder(
@@ -1407,9 +1564,19 @@ def train(args: dict,
                 # batch-invariant representations.
                 if adv_loss is not None:
                     log_payload["adv/batch_classifier_loss"] = float(
-                        adv_loss.detach())
+                        adv_loss.detach()
+                        if hasattr(adv_loss, 'detach') else adv_loss)
                     log_payload["adv/batch_classifier_accuracy"] = float(
                         adv_accuracy)
+                    # Per-key accuracy when adv runs multi-head.
+                    if (adv_classifier_kwargs
+                            and adv_classifier_kwargs.get('keys')):
+                        for k, (key, acc) in enumerate(zip(
+                                adv_classifier_kwargs['keys'],
+                                adv_accuracy_per_key)):
+                            slot = key if key else f"slot{k}"
+                            log_payload[
+                                f"adv/accuracy/{slot}"] = float(acc)
                 # Distribution-alignment diagnostics. Target: loss
                 # decreasing over training. n_batches_in_minibatch
                 # shows how many distinct batches the alignment loss

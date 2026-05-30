@@ -73,15 +73,36 @@ def test_grad_reverse_alpha_zero_blocks_grad():
 # Batch classifier head
 # ---------------------------------------------------------------------------
 
-def test_batch_classifier_head_shape():
-    head = BatchClassifierHead(embed_dim=32, n_batches=10, hidden_dim=16)
+def test_batch_classifier_head_shape_single_key():
+    head = BatchClassifierHead(
+        embed_dim=32, n_classes_per_key=10, hidden_dim=16)
     out = head(torch.randn(7, 32))
-    assert out.shape == (7, 10)
+    # Multi-head API: forward returns list[Tensor], one per key.
+    assert isinstance(out, list)
+    assert len(out) == 1
+    assert out[0].shape == (7, 10)
 
 
-def test_batch_classifier_n_batches_validated():
-    with pytest.raises(ValueError, match="n_batches"):
-        BatchClassifierHead(embed_dim=32, n_batches=1)
+def test_batch_classifier_head_shape_multi_key():
+    head = BatchClassifierHead(
+        embed_dim=32, n_classes_per_key=[10, 5], hidden_dim=16)
+    out = head(torch.randn(7, 32))
+    assert isinstance(out, list)
+    assert len(out) == 2
+    assert out[0].shape == (7, 10)
+    assert out[1].shape == (7, 5)
+
+
+def test_batch_classifier_n_classes_validated():
+    with pytest.raises(ValueError, match="must be >= 2"):
+        BatchClassifierHead(embed_dim=32, n_classes_per_key=1)
+    with pytest.raises(ValueError, match="must be >= 2"):
+        BatchClassifierHead(embed_dim=32, n_classes_per_key=[5, 1])
+
+
+def test_batch_classifier_empty_keys_raises():
+    with pytest.raises(ValueError, match="at least one key"):
+        BatchClassifierHead(embed_dim=32, n_classes_per_key=[])
 
 
 def test_mean_pool_cell_embedding_excludes_special_tokens():
@@ -333,23 +354,44 @@ def test_encoder_default_no_adaln_attrs():
     is created. Backward-compat invariant for existing configs."""
     enc = _make_encoder(adaln_kwargs=None)
     assert enc.adaln_enabled is False
-    assert enc.batch_emb_table is None
+    assert enc.batch_emb_tables is None
     for blk in enc.blocks:
         assert blk.uses_adaln is False
 
 
-def test_encoder_with_adaln_creates_batch_emb_table():
+def test_encoder_with_adaln_creates_batch_emb_tables():
+    """Single-key (legacy n_batches) creates a ModuleList of one
+    Embedding table."""
     enc = _make_encoder(adaln_kwargs={
         'enabled': True,
         'n_batches': 5,
         'batch_embed_dim': 16,
     })
     assert enc.adaln_enabled is True
-    assert isinstance(enc.batch_emb_table, nn.Embedding)
-    assert enc.batch_emb_table.num_embeddings == 5
-    assert enc.batch_emb_table.embedding_dim == 16
+    assert isinstance(enc.batch_emb_tables, nn.ModuleList)
+    assert len(enc.batch_emb_tables) == 1
+    assert isinstance(enc.batch_emb_tables[0], nn.Embedding)
+    assert enc.batch_emb_tables[0].num_embeddings == 5
+    assert enc.batch_emb_tables[0].embedding_dim == 16
     for blk in enc.blocks:
         assert blk.uses_adaln is True
+
+
+def test_encoder_with_adaln_multi_key():
+    """Multi-key adaln creates one Embedding per key."""
+    enc = _make_encoder(adaln_kwargs={
+        'enabled': True,
+        'keys': ['batch_value', 'assay_value'],
+        'n_classes': [5, 12],
+        'offsets': [0, 0],
+        'batch_embed_dim': 16,
+    })
+    assert enc.adaln_enabled is True
+    assert len(enc.batch_emb_tables) == 2
+    assert enc.batch_emb_tables[0].num_embeddings == 5
+    assert enc.batch_emb_tables[1].num_embeddings == 12
+    for emb in enc.batch_emb_tables:
+        assert emb.embedding_dim == 16
 
 
 def test_encoder_disabled_adaln_block_doesnt_get_cond_dim():
@@ -369,7 +411,7 @@ def test_encoder_compute_cond_shape_when_enabled():
     enc = _make_encoder(adaln_kwargs={
         'enabled': True, 'n_batches': 5, 'batch_embed_dim': 16,
     })
-    # values[:, 0] holds the per-cell batch label by convention.
+    # Legacy single-key: values[:, 0] holds the per-cell batch label.
     batch = {'values': torch.tensor([[1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                                      [3.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])}
     cond = enc._compute_cond(batch)
@@ -377,14 +419,32 @@ def test_encoder_compute_cond_shape_when_enabled():
     assert cond.shape == (2, 16)
 
 
-def test_encoder_compute_cond_clamps_out_of_range_labels():
-    """A batch label outside [0, n_batches) must be clamped to
-    n_batches-1 rather than raising or OOB-indexing the table."""
+def test_encoder_compute_cond_raises_on_out_of_range_labels():
+    """A batch label outside [0, n_classes) now raises -- silent
+    clamping was the old behavior and was bug-prone."""
     enc = _make_encoder(adaln_kwargs={
         'enabled': True, 'n_batches': 3, 'batch_embed_dim': 16,
     })
-    # Label 99 should be clamped to 2.
     batch = {'values': torch.tensor([[99.0] + [0]*11])}
+    with pytest.raises(RuntimeError, match="out of range"):
+        enc._compute_cond(batch)
+
+
+def test_encoder_compute_cond_sums_per_key_in_multi_key():
+    """Multi-key cond = sum of per-key embedding lookups."""
+    enc = _make_encoder(adaln_kwargs={
+        'enabled': True,
+        'keys': ['batch_value', 'assay_value'],
+        'n_classes': [5, 6],
+        'offsets': [0, 0],
+        'batch_embed_dim': 8,
+    })
+    batch = {
+        'values': torch.zeros(1, 12),
+        'batch_value': torch.tensor([2]),
+        'assay_value': torch.tensor([3]),
+    }
     cond = enc._compute_cond(batch)
-    expected = enc.batch_emb_table(torch.tensor([2]))
-    torch.testing.assert_close(cond, expected, atol=0, rtol=0)
+    expected = (enc.batch_emb_tables[0](torch.tensor([2]))
+                + enc.batch_emb_tables[1](torch.tensor([3])))
+    torch.testing.assert_close(cond, expected)

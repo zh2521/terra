@@ -121,6 +121,22 @@ class CellBaseDataset(Dataset):
         self.nz_spc = nz_spc
         self.pad_special_tokens = pad_special_tokens
 
+        # Auto-detect per-cell metadata columns (anything ending in
+        # ``_value`` in the HF dataset features). These are exposed
+        # as scalar fields in the per-cell item_dict independently of
+        # ``special_tokens``, so downstream batch-correction code can
+        # read batch / assay / etc. labels even when nothing is
+        # concatenated into the encoder's input sequence. The
+        # encoder-side ``special_tokens`` config is now strictly
+        # about what gets INTO the token stream; this metadata path
+        # is what gets used by AdaLN / adv_classifier /
+        # distribution_alignment / cycle_consistency /
+        # special_token_moe for their batch-label needs.
+        self.metadata_keys = [
+            col for col in self.dataset.features.keys()
+            if col.endswith('_value')
+        ]
+
     def __len__(self) -> int:
         return self.len
 
@@ -204,6 +220,42 @@ class CellBaseDataset(Dataset):
                  float('-inf'), dtype=torch.float),
                  item_dict['rel_y_coords']])
 
+        return item_dict
+
+    def _attach_metadata(self,
+                         item: dict,
+                         item_dict: dict,
+                         ) -> dict:
+        """Expose per-cell metadata (``*_value`` columns from the HF
+        dataset) as scalar fields in ``item_dict``. These are the
+        offset-subtracted spv_*_<id> token IDs for batch / assay /
+        gene_panel / tissue / ... -- one integer per cell.
+
+        Importantly this happens REGARDLESS of ``self.special_tokens``,
+        so batch_correction mechanisms downstream can read the labels
+        even when no special tokens are concatenated into the
+        sequence. The encoder-side input is decoupled from the
+        loss-side label source.
+
+        The collator stacks across cells; scalar 0-d tensors become
+        ``(B,)`` LongTensors per metadata key. The encoder ignores
+        these keys; batch_correction code reads them by name.
+        """
+        for key in self.metadata_keys:
+            if key not in item:
+                continue
+            val = item[key]
+            # HF dataset usually returns 1-element lists / tensors.
+            # Normalize to a 0-d long tensor so the collator stacks
+            # into a clean (B,) per key.
+            if isinstance(val, list):
+                val = val[0] if len(val) > 0 else 0
+            if not isinstance(val, torch.Tensor):
+                val = torch.tensor(val)
+            val = val.reshape(-1)
+            if val.numel() == 0:
+                continue
+            item_dict[key] = val[0].long()
         return item_dict
 
     def _sample_seq(self,
@@ -605,7 +657,11 @@ class CellGraphDataset(CellBaseDataset):
         #print(item_dict['values'])
         #print(item_dict['segments'])
         #print(item_dict['positions'])
-        
+
+        # Expose per-cell metadata (batch_value, assay_value, ...) as
+        # scalar fields independent of self.special_tokens.
+        item_dict = self._attach_metadata(item=item, item_dict=item_dict)
+
         return item_dict
 
 
@@ -822,7 +878,11 @@ class CellNeighborhoodDataset(CellBaseDataset):
         #print(item_dict['values'])
         #print(item_dict['segments'])
         #print(item_dict['positions'])
-        
+
+        # Expose per-cell metadata (batch_value, assay_value, ...) as
+        # scalar fields independent of self.special_tokens.
+        item_dict = self._attach_metadata(item=item, item_dict=item_dict)
+
         return item_dict
 
 

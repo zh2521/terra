@@ -267,16 +267,44 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         self.adaln_enabled = bool(adaln_kwargs) and adaln_kwargs.get(
             'enabled', False)
         if self.adaln_enabled:
-            self.adaln_n_batches = int(adaln_kwargs['n_batches'])
+            from .batch_labels import resolve_label_spec
             self.adaln_batch_embed_dim = int(adaln_kwargs.get(
                 'batch_embed_dim', 64))
-            self.batch_emb_table = nn.Embedding(
-                self.adaln_n_batches, self.adaln_batch_embed_dim)
+            # Resolve multi-key spec. Falls back to single-key
+            # (legacy ``values[:, 0]`` path) if no ``keys`` set.
+            spec = resolve_label_spec(adaln_kwargs)
+            if not spec['keys']:
+                # Legacy single-slot using values[:, 0].
+                self.adaln_keys = [None]
+                self.adaln_offsets = [0]
+                self.adaln_n_classes_per_key = [
+                    int(adaln_kwargs['n_batches'])]
+            else:
+                if not spec['n_classes'] or any(
+                        n <= 0 for n in spec['n_classes']):
+                    raise ValueError(
+                        "AdaLN multi-key spec: ``n_classes`` must be "
+                        "set per key (one positive int per "
+                        f"key). Got n_classes={spec['n_classes']} "
+                        f"for keys={spec['keys']}.")
+                self.adaln_keys = spec['keys']
+                self.adaln_offsets = spec['offsets']
+                self.adaln_n_classes_per_key = spec['n_classes']
+            # One embedding table per key; per-key lookups are summed
+            # to form the AdaLN cond vector. This is the same
+            # additive-bias-by-slot structure as special_token_moe
+            # but used as conditioning input instead of output bias.
+            self.batch_emb_tables = nn.ModuleList([
+                nn.Embedding(n, self.adaln_batch_embed_dim)
+                for n in self.adaln_n_classes_per_key
+            ])
             _block_cond_dim = self.adaln_batch_embed_dim
         else:
-            self.adaln_n_batches = 0
+            self.adaln_keys = []
+            self.adaln_offsets = []
+            self.adaln_n_classes_per_key = []
             self.adaln_batch_embed_dim = 0
-            self.batch_emb_table = None
+            self.batch_emb_tables = None
             _block_cond_dim = None
 
         # Initialize encoder blocks and norm layer
@@ -563,26 +591,6 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         return torch.stack(
             [batch['rel_x_coords'], batch['rel_y_coords']], dim=-1)
 
-    def _extract_batch_label(self,
-                             batch: Mapping[str, torch.Tensor]
-                             ) -> torch.Tensor:
-        """Pull a per-cell long-tensor batch label from the data batch.
-
-        Reads from ``batch['values'][:, 0]``. By convention the
-        batch token is always the first special token in the
-        sequence, so its value (the encoded ``spv_batch_<id>`` token
-        ID) lives at index 0 of every cell's value tensor and is
-        already 0-indexed across batches in the corpus.
-
-        Returns a ``LongTensor`` of shape ``(B,)``.
-        """
-        values = batch['values']
-        if values.dim() < 2:
-            raise RuntimeError(
-                f"Expected `values` to be at least 2-D (B, L); "
-                f"got shape {tuple(values.shape)}.")
-        return values[:, 0].long()
-
     def _apply_rda(self,
                    x: torch.Tensor,
                    batch: Mapping[str, torch.Tensor],
@@ -614,63 +622,59 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                       ) -> torch.Tensor | None:
         """Return the per-cell conditioning embedding for AdaLN.
 
-        Shape ``(B, adaln_batch_embed_dim)`` when AdaLN is on,
-        ``None`` otherwise. The forwards pass ``cond=None`` through
-        Block.forward whose AdaLN-off branch ignores it -- the same
-        codepath therefore works in both modes without branching at
-        every block.
+        With multi-key AdaLN, the conditioning is the **sum** of
+        per-key embedding lookups (one table per metadata key).
+        Single-key reduces to the original behavior.
 
-        Diagnostic + safety: on the first call (rank-agnostic, but
-        only logged once per process) we record the observed range of
-        batch labels and raise a hard error if any label is >=
-        n_batches. The earlier silent ``clamp`` collapsed all
-        out-of-range labels to the last embedding row, which is
-        usually catastrophic on datasets where the dataset-level
-        ``values[:, 0]`` is offset-subtracted across ALL spv_*
-        tokens rather than 0-indexed across batches. Better to fail
-        loud than to silently degrade.
+        Shape: ``(B, adaln_batch_embed_dim)`` when AdaLN is on,
+        ``_NO_COND`` (None sentinel) otherwise.
+
+        Each key's lookup index is range-checked against its
+        embedding table size; mismatches raise actionable errors
+        rather than silently clamping (which would collapse
+        out-of-range cells to a single row).
         """
         if not self.adaln_enabled:
             return _NO_COND
-        batch_label = self._extract_batch_label(batch)
+        from .batch_labels import extract_batch_label
 
-        # Hard range check. If the user set n_batches smaller than
-        # the actual range of values[:, 0], every out-of-range cell
-        # used to be silently clamped to the last row, defeating
-        # AdaLN's purpose. Fail with actionable guidance.
-        with torch.no_grad():
-            max_observed = int(batch_label.max().item())
-            min_observed = int(batch_label.min().item())
-        if max_observed >= self.adaln_n_batches or min_observed < 0:
-            raise RuntimeError(
-                "AdaLN batch_label out of range: observed values in "
-                f"[{min_observed}, {max_observed}] but n_batches="
-                f"{self.adaln_n_batches}. The labels are extracted "
-                "from values[:, 0] which is offset-subtracted across "
-                "ALL spv_* tokens (not 0-indexed across batches). "
-                "Set batch_correction.n_batches to at least "
-                f"{max_observed + 1} (a safe choice is "
-                "n_special_values + 2 from your data config)."
-            )
+        cond = None
+        for slot_i, (key, offset, n_cls, emb) in enumerate(zip(
+                self.adaln_keys,
+                self.adaln_offsets,
+                self.adaln_n_classes_per_key,
+                self.batch_emb_tables,
+        )):
+            label = extract_batch_label(
+                batch, key=key, offset=offset)
+            with torch.no_grad():
+                max_obs = int(label.max().item())
+                min_obs = int(label.min().item())
+            if max_obs >= n_cls or min_obs < 0:
+                raise RuntimeError(
+                    f"AdaLN slot {slot_i} (key={key!r}) batch_label "
+                    f"out of range: observed [{min_obs}, {max_obs}] "
+                    f"but n_classes[{slot_i}]={n_cls}. "
+                    "Set the matching ``n_classes`` entry to at "
+                    f"least {max_obs + 1}, or set ``offsets[{slot_i}]"
+                    f"`` to {min_obs} so the lookup is 0-indexed.")
+            this = emb(label)
+            cond = this if cond is None else cond + this
 
-        # One-time diagnostic log on the first call after construction.
+        # One-time multi-slot diagnostic log on the first call.
         if not getattr(self, "_adaln_label_range_logged", False):
-            n_unique = int(torch.unique(batch_label).numel())
             import logging as _logging
-            _logging.getLogger("nichejepa.models.gene_transformers").info(
-                "AdaLN batch_label diagnostic on first batch: "
-                "min=%d, max=%d, unique=%d, n_batches=%d. If "
-                "max+1 is close to n_special_values, the encoding is "
-                "the offset-subtracted spv_* token ID (correct). If "
-                "max+1 equals the actual number of batches, the "
-                "encoding is 0-indexed (also correct). Otherwise the "
-                "n_batches setting may be wasteful or wrong.",
-                min_observed, max_observed, n_unique,
-                self.adaln_n_batches,
+            _logging.getLogger(
+                "nichejepa.models.gene_transformers"
+            ).info(
+                "AdaLN multi-key diagnostic on first batch: "
+                "keys=%s, n_classes=%s, offsets=%s. cond_dim=%d.",
+                self.adaln_keys, self.adaln_n_classes_per_key,
+                self.adaln_offsets, self.adaln_batch_embed_dim,
             )
             self._adaln_label_range_logged = True
 
-        return self.batch_emb_table(batch_label)
+        return cond
 
     def _compute_laplacian_pe(self, batch: dict) -> torch.Tensor:
         """Per-token Laplacian positional encoding.
@@ -1154,7 +1158,7 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                  rope_freq_scale: float = math.pi,
                  rope_rotation_augment: bool = True,
                  adaln_kwargs: dict | None = None,
-                 protocol_moe_kwargs: dict | None = None,
+                 special_token_moe_kwargs: dict | None = None,
                  **kwargs
                  ):
         super().__init__()
@@ -1169,33 +1173,93 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         self.nz_spc = nz_spc
         self.new_spc = new_spc
 
-        # Protocol-routed bias head (lightweight MoE). Per-protocol
-        # additive bias on the predictor output, routed by a
-        # configurable values column. Zero-init -> step-0 no-op,
-        # so enabling at train start is bitwise backward-compatible.
-        self.protocol_moe_enabled = (
-            bool(protocol_moe_kwargs)
-            and protocol_moe_kwargs.get('enabled', False)
+        # Special-token-routed bias head (lightweight MoE). Per-slot
+        # additive biases on the predictor output, routed by one or
+        # more values columns. Zero-init -> step-0 no-op, so enabling
+        # at train start is bitwise backward-compatible. Multiple
+        # routing slots (e.g. batch + assay) sum their bias
+        # contributions -- this is equivalent to a per-(batch, assay)
+        # bias but with O(n_batches + n_assays) params instead of
+        # O(n_batches * n_assays).
+        self.special_token_moe_enabled = (
+            bool(special_token_moe_kwargs)
+            and special_token_moe_kwargs.get('enabled', False)
         )
-        if self.protocol_moe_enabled:
-            from .protocol_moe import ProtocolBias
-            self.protocol_moe_routing_index = int(
-                protocol_moe_kwargs['routing_index'])
-            # routing_offset: subtract from values[:, routing_index]
-            # so the lookup index is 0-indexed by the chosen
-            # protocol slot. Default 0 (assume already 0-indexed,
-            # which is rare -- typically you want to set this to
-            # the cumulative size of preceding spv_* slots).
-            self.protocol_moe_routing_offset = int(
-                protocol_moe_kwargs.get('routing_offset', 0))
-            self.protocol_moe = ProtocolBias(
-                n_experts=int(protocol_moe_kwargs['n_experts']),
+        if self.special_token_moe_enabled:
+            from .special_token_moe import (
+                SpecialTokenMoE, _as_list)
+            # Accept scalar or list for each field; both metadata-key
+            # routing (``routing_keys``) and sequence-index routing
+            # (``routing_indices``) are supported. Key-mode is
+            # preferred because it works regardless of
+            # ``special_tokens``; index-mode is kept for backward
+            # compat.
+            routing_keys = _as_list(
+                special_token_moe_kwargs.get('routing_keys'))
+            routing_indices = _as_list(
+                special_token_moe_kwargs.get('routing_indices'))
+            if not routing_indices:
+                # Backward-compat: also accept legacy 'routing_index'.
+                routing_indices = _as_list(
+                    special_token_moe_kwargs.get('routing_index'))
+            if not routing_keys and not routing_indices:
+                raise ValueError(
+                    "special_token_moe.enabled=True but neither "
+                    "routing_keys (metadata-field names, recommended) "
+                    "nor routing_indices/routing_index (values "
+                    "columns) is set.")
+            # Determine slot count from whichever list is set; the
+            # other defaults to all-None of matching length.
+            if routing_keys:
+                n_slots = len(routing_keys)
+                if routing_indices and len(routing_indices) != n_slots:
+                    raise ValueError(
+                        "special_token_moe: routing_keys and "
+                        "routing_indices must have the same length "
+                        "if both are provided.")
+                if not routing_indices:
+                    routing_indices = [None] * n_slots
+            else:
+                n_slots = len(routing_indices)
+                routing_keys = [None] * n_slots
+
+            n_experts = _as_list(
+                special_token_moe_kwargs.get('n_experts'))
+            if not n_experts:
+                raise ValueError(
+                    "special_token_moe.enabled=True but n_experts "
+                    "is not set.")
+            routing_offsets = _as_list(
+                special_token_moe_kwargs.get('routing_offsets'),
+                fallback_len=n_slots)
+            if not routing_offsets:
+                routing_offsets = _as_list(
+                    special_token_moe_kwargs.get('routing_offset'),
+                    fallback_len=n_slots)
+
+            if not (n_slots == len(n_experts) == len(routing_offsets)):
+                raise ValueError(
+                    "special_token_moe: routing_keys/"
+                    "routing_indices, n_experts, and routing_offsets "
+                    "must all have the same length. Got "
+                    f"n_slots={n_slots}, n_experts={n_experts}, "
+                    f"routing_offsets={routing_offsets}.")
+
+            self.special_token_moe_routing_keys = [
+                None if x is None else str(x) for x in routing_keys]
+            self.special_token_moe_routing_indices = [
+                None if x is None else int(x) for x in routing_indices]
+            self.special_token_moe_routing_offsets = [
+                int(x) for x in routing_offsets]
+            self.special_token_moe = SpecialTokenMoE(
+                n_experts_per_slot=[int(x) for x in n_experts],
                 embed_dim=predictor_embed_dim,
             )
         else:
-            self.protocol_moe_routing_index = -1
-            self.protocol_moe_routing_offset = 0
-            self.protocol_moe = None
+            self.special_token_moe_routing_keys = []
+            self.special_token_moe_routing_indices = []
+            self.special_token_moe_routing_offsets = []
+            self.special_token_moe = None
 
         # Initialize segment embeddings. Used by 'segment' mode (full
         # positional signal) and by 'alibi' / 'laplacian' modes at the
@@ -1258,22 +1322,50 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         # embedding lookup table whose output is fed to every Block's
         # two AdaLN modules. Predictor uses its own embedding table
         # (predictor_embed_dim != encoder_embed_dim in general), so
-        # there's no parameter sharing between encoder.batch_emb_table
-        # and predictor.batch_emb_table. They're updated independently
+        # there's no parameter sharing between encoder.batch_emb_tables
+        # and predictor.batch_emb_tables. They're updated independently
         # by gradient descent.
         self.adaln_enabled = bool(adaln_kwargs) and adaln_kwargs.get(
             'enabled', False)
         if self.adaln_enabled:
-            self.adaln_n_batches = int(adaln_kwargs['n_batches'])
+            from .batch_labels import resolve_label_spec
             self.adaln_batch_embed_dim = int(adaln_kwargs.get(
                 'batch_embed_dim', 64))
-            self.batch_emb_table = nn.Embedding(
-                self.adaln_n_batches, self.adaln_batch_embed_dim)
+            # Resolve multi-key spec. Falls back to single-key
+            # (legacy ``values[:, 0]`` path) if no ``keys`` set.
+            spec = resolve_label_spec(adaln_kwargs)
+            if not spec['keys']:
+                # Legacy single-slot using values[:, 0].
+                self.adaln_keys = [None]
+                self.adaln_offsets = [0]
+                self.adaln_n_classes_per_key = [
+                    int(adaln_kwargs['n_batches'])]
+            else:
+                if not spec['n_classes'] or any(
+                        n <= 0 for n in spec['n_classes']):
+                    raise ValueError(
+                        "AdaLN multi-key spec: ``n_classes`` must be "
+                        "set per key (one positive int per "
+                        f"key). Got n_classes={spec['n_classes']} "
+                        f"for keys={spec['keys']}.")
+                self.adaln_keys = spec['keys']
+                self.adaln_offsets = spec['offsets']
+                self.adaln_n_classes_per_key = spec['n_classes']
+            # One embedding table per key; per-key lookups are summed
+            # to form the AdaLN cond vector. This is the same
+            # additive-bias-by-slot structure as special_token_moe
+            # but used as conditioning input instead of output bias.
+            self.batch_emb_tables = nn.ModuleList([
+                nn.Embedding(n, self.adaln_batch_embed_dim)
+                for n in self.adaln_n_classes_per_key
+            ])
             _block_cond_dim = self.adaln_batch_embed_dim
         else:
-            self.adaln_n_batches = 0
+            self.adaln_keys = []
+            self.adaln_offsets = []
+            self.adaln_n_classes_per_key = []
             self.adaln_batch_embed_dim = 0
-            self.batch_emb_table = None
+            self.batch_emb_tables = None
             _block_cond_dim = None
 
         # Initialize predictor blocks, norm layer, and predictor
@@ -1433,41 +1525,30 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
         return torch.stack(
             [batch['rel_x_coords'], batch['rel_y_coords']], dim=-1)
 
-    def _extract_batch_label(
-            self,
-            batch: Mapping[str, torch.Tensor]) -> torch.Tensor:
-        """Same convention as the encoder: read the per-cell long
-        batch label from ``batch['values'][:, 0]``.
-        """
-        values = batch['values']
-        if values.dim() < 2:
-            raise RuntimeError(
-                f"Expected `values` to be at least 2-D (B, L); "
-                f"got shape {tuple(values.shape)}.")
-        return values[:, 0].long()
-
-    def _apply_protocol_moe(self,
-                            z: torch.Tensor,
-                            batch: Mapping[str, torch.Tensor],
-                            n_pred_masks: int,
-                            ) -> torch.Tensor:
-        """Add the per-protocol bias to the predictor output ``z``.
+    def _apply_special_token_moe(self,
+                                 z: torch.Tensor,
+                                 batch: Mapping[str, torch.Tensor],
+                                 n_pred_masks: int,
+                                 ) -> torch.Tensor:
+        """Add the summed per-slot special-token biases to the
+        predictor output ``z``.
 
         ``z`` has shape ``(B * n_pred_masks, L_target, D)``. The
-        bias is ``(B, D)`` per-cell; we repeat across the
-        ``n_pred_masks`` outer-batch dimension and broadcast across
-        the target-length dimension before adding. No-op when
-        Protocol-MoE is disabled.
+        total bias is ``(B, D)`` per-cell (sum of per-slot lookups);
+        we repeat across the ``n_pred_masks`` outer-batch dimension
+        and broadcast across the target-length dimension before
+        adding. No-op when SpecialTokenMoE is disabled.
         """
-        if not self.protocol_moe_enabled:
+        if not self.special_token_moe_enabled:
             return z
-        from .protocol_moe import extract_protocol_index
-        protocol_idx = extract_protocol_index(
+        from .special_token_moe import extract_special_token_indices
+        indices_per_slot = extract_special_token_indices(
             batch,
-            self.protocol_moe_routing_index,
-            routing_offset=self.protocol_moe_routing_offset,
-        )                                                    # (B,)
-        bias = self.protocol_moe(protocol_idx)              # (B, D)
+            routing_indices=self.special_token_moe_routing_indices,
+            routing_offsets=self.special_token_moe_routing_offsets,
+            routing_keys=self.special_token_moe_routing_keys,
+        )                                                    # list of (B,)
+        bias = self.special_token_moe(indices_per_slot)     # (B, D)
         bias = bias.repeat(n_pred_masks, 1).unsqueeze(1)    # (B*M, 1, D)
         return z + bias.to(z.dtype)
 
@@ -1475,25 +1556,36 @@ class GeneTransformerBasePredictor(ABC, nn.Module):
                       batch: Mapping[str, torch.Tensor],
                       ) -> torch.Tensor | None:
         """Return the per-cell conditioning embedding for AdaLN. The
-        predictor's table is independent of the encoder's; both are
-        looked up by the same batch label. Same hard range check as
-        the encoder side -- see encoder._compute_cond docstring.
+        predictor's tables are independent of the encoder's; both
+        are sized identically (mirror config). Multi-key: sum of
+        per-key embedding lookups. See encoder ``_compute_cond``
+        docstring for the multi-key semantics.
         """
         if not self.adaln_enabled:
             return None
-        batch_label = self._extract_batch_label(batch)
-        with torch.no_grad():
-            max_observed = int(batch_label.max().item())
-            min_observed = int(batch_label.min().item())
-        if max_observed >= self.adaln_n_batches or min_observed < 0:
-            raise RuntimeError(
-                "AdaLN batch_label out of range (predictor side): "
-                f"observed [{min_observed}, {max_observed}] but "
-                f"n_batches={self.adaln_n_batches}. Set "
-                f"batch_correction.n_batches to at least "
-                f"{max_observed + 1}."
-            )
-        return self.batch_emb_table(batch_label)
+        from .batch_labels import extract_batch_label
+
+        cond = None
+        for slot_i, (key, offset, n_cls, emb) in enumerate(zip(
+                self.adaln_keys,
+                self.adaln_offsets,
+                self.adaln_n_classes_per_key,
+                self.batch_emb_tables,
+        )):
+            label = extract_batch_label(
+                batch, key=key, offset=offset)
+            with torch.no_grad():
+                max_obs = int(label.max().item())
+                min_obs = int(label.min().item())
+            if max_obs >= n_cls or min_obs < 0:
+                raise RuntimeError(
+                    f"AdaLN (predictor) slot {slot_i} (key={key!r}) "
+                    f"batch_label out of range: observed "
+                    f"[{min_obs}, {max_obs}] but n_classes[{slot_i}]"
+                    f"={n_cls}.")
+            this = emb(label)
+            cond = this if cond is None else cond + this
+        return cond
 
     def _compose_predictor_coords(
             self,
@@ -2571,9 +2663,9 @@ class GeneTransformerRankPredictor(GeneTransformerBasePredictor):
             # MLP projection layer
             z = self.predictor_proj(z)
 
-            # Protocol-MoE: per-protocol additive bias on the
+            # Special-token MoE: summed per-slot additive bias on the
             # predictor output (no-op when disabled).
-            z = self._apply_protocol_moe(z, batch, len(masks_pred))
+            z = self._apply_special_token_moe(z, batch, len(masks_pred))
 
             return z
 
@@ -2725,9 +2817,9 @@ class GeneTransformerCountPredictor(GeneTransformerBasePredictor):
         # MLP projection layer
         z = self.predictor_proj(z)
 
-        # Protocol-MoE: per-protocol additive bias on the
+        # Special-token MoE: summed per-slot additive bias on the
         # predictor output (no-op when disabled).
-        z = self._apply_protocol_moe(z, batch, len(masks_pred))
+        z = self._apply_special_token_moe(z, batch, len(masks_pred))
 
         return z
 
@@ -2925,9 +3017,9 @@ class GeneTransformerCombinedPredictor(GeneTransformerBasePredictor):
         # MLP projection layer
         z = self.predictor_proj(z)
 
-        # Protocol-MoE: per-protocol additive bias on the
+        # Special-token MoE: summed per-slot additive bias on the
         # predictor output (no-op when disabled).
-        z = self._apply_protocol_moe(z, batch, len(masks_pred))
+        z = self._apply_special_token_moe(z, batch, len(masks_pred))
 
         return z
 

@@ -37,52 +37,119 @@ import torch
 
 def make_swapped_batch(
         batch: dict,
-        n_batches: int,
+        n_classes_per_key: int | list[int],
+        keys: str | list[str | None] | None = None,
+        offsets: int | list[int] | None = None,
         generator: torch.Generator | None = None,
         ) -> tuple[dict, torch.Tensor]:
-    """Return a shallow-copied batch dict with ``values[:, 0]``
-    replaced by random batch labels in ``[0, n_batches)``.
+    """Return a shallow-copied batch dict with one or more
+    batch-label slots replaced by random labels.
+
+    Multi-key semantics: when multiple ``keys`` are given, ALL
+    keys are swapped simultaneously per cell. ``changed_mask[i]``
+    is True iff at least one of the cell's labels actually
+    changed -- the cycle-consistency loss then only averages over
+    those cells where the swap was non-trivial.
 
     Args
     ----
     batch:
         Original batch dict. Not mutated.
-    n_batches:
-        Upper bound (exclusive) on the swapped labels. Must match
-        what AdaLN / batch-token embedding expect; values outside
-        this range would otherwise crash the AdaLN range check.
+    n_classes_per_key:
+        Per-key upper bound (exclusive) on swapped labels.
+        Scalar for single-key, list for multi-key.
+    keys:
+        Per-key metadata field name. ``None`` (or scalar None)
+        triggers the legacy path: swap ``values[:, 0]``.
+    offsets:
+        Per-key offset applied when reading + writing the label,
+        so the stored encoding round-trips unchanged.
     generator:
         Optional torch.Generator for reproducibility.
 
     Returns
     -------
     swapped_batch:
-        Shallow copy of ``batch`` whose ``'values'`` tensor has been
-        cloned and the first column replaced.
+        Shallow copy of ``batch`` with the relevant tensors cloned
+        and the per-key slots replaced.
     changed_mask:
-        Bool tensor ``(B,)``. ``True`` for cells whose label
-        actually changed (i.e. the random draw differed from the
-        original). The loss should be averaged only over these
-        cells so identical-label cycles don't dilute the signal.
+        Bool tensor ``(B,)`` -- True for cells where *any* of the
+        swapped keys differs from the original.
     """
-    values = batch['values']
-    if values.dim() < 2:
-        raise RuntimeError(
-            "make_swapped_batch expected `values` to be at least 2-D "
-            f"(B, L); got shape {tuple(values.shape)}.")
-    B = values.size(0)
-    device = values.device
-    original = values[:, 0].long()
-    swap = torch.randint(
-        low=0, high=int(n_batches), size=(B,),
-        device=device, dtype=torch.long, generator=generator)
-    changed_mask = swap != original
+    # Normalize to lists. Scalars are broadcast / wrapped explicitly;
+    # mismatched lengths raise so silent bugs don't sneak through.
+    if isinstance(n_classes_per_key, int):
+        n_classes_per_key = [n_classes_per_key]
+    n_classes_per_key = list(n_classes_per_key)
+    n_slots = len(n_classes_per_key)
 
-    new_values = values.clone()
-    new_values[:, 0] = swap.to(values.dtype)
+    if keys is None:
+        keys = [None] * n_slots
+    elif isinstance(keys, str):
+        # Broadcast a single string to all slots.
+        keys = [keys] * n_slots
+    else:
+        keys = list(keys)
+    if len(keys) != n_slots:
+        raise RuntimeError(
+            f"make_swapped_batch: keys length {len(keys)} does not "
+            f"match n_classes_per_key length {n_slots}.")
+
+    if offsets is None:
+        offsets = [0] * n_slots
+    elif isinstance(offsets, int):
+        offsets = [offsets] * n_slots
+    else:
+        offsets = list(offsets)
+    if len(offsets) != n_slots:
+        raise RuntimeError(
+            f"make_swapped_batch: offsets length {len(offsets)} "
+            f"does not match n_classes_per_key length {n_slots}.")
+
     swapped_batch = dict(batch)
-    swapped_batch['values'] = new_values
-    return swapped_batch, changed_mask
+    # Track per-cell "did ANY key change" using bitwise OR.
+    combined_changed = None
+
+    for n_cls, key, offset in zip(n_classes_per_key, keys, offsets):
+        if key is not None and key in batch:
+            # Metadata-key path.
+            raw = batch[key]
+            B = raw.size(0)
+            device = raw.device
+            original = raw.long() - int(offset)
+            swap = torch.randint(
+                low=0, high=int(n_cls), size=(B,),
+                device=device, dtype=torch.long, generator=generator)
+            changed = swap != original
+            new_raw = (swap + int(offset)).to(raw.dtype)
+            swapped_batch[key] = new_raw
+        else:
+            # Legacy path: swap values[:, 0].
+            values = swapped_batch.get(
+                'values', batch.get('values'))
+            if values is None or values.dim() < 2:
+                raise RuntimeError(
+                    "make_swapped_batch legacy path expected `values` "
+                    "to be at least 2-D (B, L).")
+            B = values.size(0)
+            device = values.device
+            original = values[:, 0].long() - int(offset)
+            swap = torch.randint(
+                low=0, high=int(n_cls), size=(B,),
+                device=device, dtype=torch.long, generator=generator)
+            changed = swap != original
+            # Clone once on first legacy write so subsequent legacy
+            # swaps (if any) operate on the same cloned tensor.
+            if swapped_batch.get('values') is batch.get('values'):
+                values = values.clone()
+            values[:, 0] = (swap + int(offset)).to(values.dtype)
+            swapped_batch['values'] = values
+
+        combined_changed = (
+            changed if combined_changed is None
+            else combined_changed | changed)
+
+    return swapped_batch, combined_changed
 
 
 def cycle_consistency_loss(
