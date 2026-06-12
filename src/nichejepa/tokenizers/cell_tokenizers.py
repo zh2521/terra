@@ -85,6 +85,7 @@ from ..preprocessors.normalizers import normalize_by_factor
 from ..preprocessors.normalizers import normalize_by_read_depth
 from ..preprocessors.normalizers import normalize_by_seurat
 from ..preprocessors.normalizers import normalize_by_shifted_log
+from ..preprocessors.normalizers import normalize_by_pflog1ppf
 from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
 
 
@@ -169,6 +170,7 @@ class CellBaseTokenizer(ABC):
             rank_count_norm_method: Literal[
                 'analytic_pearson_residuals',
                 'shifted_log',
+                'pflog1ppf',
                 ] | None = None,
             count_cell_norm_method: Literal[
                 'read_depth',
@@ -183,6 +185,7 @@ class CellBaseTokenizer(ABC):
             count_count_norm_method: Literal[
                 'analytic_pearson_residuals',
                 'shifted_log',
+                'pflog1ppf',
                 ] | None = 'shifted_log',
             norm_factor_file_path: Path | str = norm_factor_file_path,
             token_dictionary_file_path: Path | str = token_dictionary_file_path,
@@ -640,7 +643,17 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 normalize_by_analytic_pearson_residuals(adata.layers['X_rank'])           
         elif self.rank_count_norm_method == 'shifted_log':
             adata.layers['X_rank'] = normalize_by_shifted_log(
-                adata.layers['X_rank'])               
+                adata.layers['X_rank'])
+        elif self.rank_count_norm_method == 'pflog1ppf':
+            # PFlog1pPF does its own depth normalization (two internal
+            # PF steps), so it must not be stacked on a separate cell-/
+            # gene-level norm -- same constraint as
+            # analytic_pearson_residuals.
+            if (self.rank_cell_norm_method is not None) or (
+                self.rank_gene_norm_method is not None):
+                raise ValueError('Invalid combination of norm methods.')
+            adata.layers['X_rank'] = normalize_by_pflog1ppf(
+                adata.layers['X_rank'])
         else:
             if self.rank_count_norm_method is None:
                 pass
@@ -657,7 +670,17 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 normalize_by_analytic_pearson_residuals(adata.layers['X_count'])            
         elif self.count_count_norm_method == 'shifted_log':
             adata.layers['X_count'] = normalize_by_shifted_log(
-                adata.layers['X_count'])               
+                adata.layers['X_count'])
+        elif self.count_count_norm_method == 'pflog1ppf':
+            # PFlog1pPF does its own depth normalization (two internal
+            # PF steps), so it must not be stacked on a separate cell-/
+            # gene-level norm -- same constraint as
+            # analytic_pearson_residuals.
+            if (self.count_cell_norm_method is not None) or (
+                self.count_gene_norm_method is not None):
+                raise ValueError('Invalid combination of norm methods.')
+            adata.layers['X_count'] = normalize_by_pflog1ppf(
+                adata.layers['X_count'])
         else:
             if self.count_count_norm_method is None:
                 pass

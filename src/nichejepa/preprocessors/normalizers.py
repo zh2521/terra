@@ -272,3 +272,100 @@ def normalize_by_shifted_log(x: sp.csr_matrix) -> sp.csr_matrix:
     y = sc.pp.log1p(x)
 
     return y
+
+
+def normalize_by_pflog1ppf(x: sp.csr_matrix,
+                           target_size: float | None = None,
+                           pseudocount: float = 1.0,
+                           ) -> sp.csr_matrix:
+    """
+    Normalize gene expression counts per cell using PFlog1pPF
+    (proportional fitting -> log1p -> proportional fitting).
+
+    Implements the depth-normalization transform of "Booeshaghi, A. S.,
+    Hallgrímsdóttir, I. B., Gálvez-Merchán, Á. & Pachter, L. Depth
+    normalization for single-cell genomics count data. bioRxiv
+    2022.05.06.490859". The authors show this is the only feature-
+    relabeling-equivariant transform that jointly satisfies variance
+    stabilization, depth normalization, and monotonicity, and that it
+    is equivalent to a shifted centered-log-ratio transform.
+
+    Three steps, all monotonic within a cell (so within-cell gene
+    rankings are preserved) and all sparsity-preserving:
+      1. PF: scale each cell's counts to a common depth (the mean total
+         count across cells, or ``target_size`` if given). This is the
+         first proportional fitting -- the depth-equalization step that
+         ``log1pPF`` also has.
+      2. log1p: ``log(u + pseudocount)`` applied to nonzero entries
+         (``log1p(0) = 0`` keeps zeros zero).
+      3. PF again: scale each cell's log-values to a common total (the
+         mean of the per-cell log-sums). This second proportional
+         fitting removes the residual depth structure that the
+         logarithm reintroduces -- the key addition over ``log1pPF``.
+
+    Because every step is a per-cell scalar rescale or a monotone
+    elementwise map, the within-cell gene ordering is identical to the
+    raw counts, so this is safe to use as either a ``rank`` or
+    ``count`` count-norm method. It does its OWN depth normalization
+    (steps 1 and 3), so it must NOT be combined with a separate
+    cell-/gene-level norm method (that would double-normalize depth) --
+    same constraint as ``analytic_pearson_residuals``.
+
+    Parameters
+    ----------
+    x:
+        A sparse matrix where each row represents an observation and
+        each column represents a feature, containing raw counts as
+        features (i.e. not scaled or normalized).
+    target_size:
+        Common depth for the FIRST proportional fitting. ``None``
+        (default) uses the mean total count across cells, matching the
+        paper's PF convention; pass e.g. ``1e4`` for a CP10k-style
+        fixed size factor (only rescales globally, does not change the
+        geometry).
+    pseudocount:
+        Pseudocount ``c`` added inside the log, i.e. ``log(u + c)``.
+        Defaults to ``1.0`` (``log1p``), matching the paper's ``c = 1``.
+
+    Returns
+    ----------
+    y:
+        A sparse CSR matrix containing the PFlog1pPF-normalized
+        features (non-negative, same sparsity pattern as ``x``).
+    """
+    if pseudocount <= 0:
+        raise ValueError('PFlog1pPF requires pseudocount > 0.')
+
+    if sp.issparse(x):
+        x = x.tocsr().astype(np.float32)
+    else:
+        x = sp.csr_matrix(np.asarray(x, dtype=np.float32))
+
+    # --- Step 1: proportional fitting (depth equalization) ---------
+    cell_sums = np.asarray(x.sum(axis=1)).ravel()        # (n_obs,)
+    # Cells with zero total counts stay all-zero; avoid div-by-zero.
+    safe_cell_sums = np.where(cell_sums > 0, cell_sums, 1.0)
+    s1 = (float(target_size) if target_size is not None
+          else float(cell_sums.mean()))
+    # Row-scale while staying sparse: x.multiply broadcasts an (n, 1)
+    # column vector across columns (per-cell scalar multiply).
+    x_pf = x.multiply((s1 / safe_cell_sums).reshape(-1, 1)).tocsr()
+
+    # --- Step 2: log1p (or log(u + c)) on nonzero entries ----------
+    # log(0 + c) handling: for c == 1, log1p(0) = 0 keeps zeros zero
+    # (sparsity preserved). For c != 1, log(c) != 0 in general, but the
+    # paper uses c = 1, so we keep the sparse fast path and only map
+    # the stored (nonzero) entries.
+    x_log = x_pf.copy()
+    if pseudocount == 1.0:
+        x_log.data = np.log1p(x_pf.data)
+    else:
+        x_log.data = np.log(x_pf.data + pseudocount)
+
+    # --- Step 3: second proportional fitting on the log-values -----
+    log_sums = np.asarray(x_log.sum(axis=1)).ravel()     # (n_obs,)
+    safe_log_sums = np.where(log_sums > 0, log_sums, 1.0)
+    s2 = float(log_sums.mean())
+    y = x_log.multiply((s2 / safe_log_sums).reshape(-1, 1)).tocsr()
+
+    return y.astype(np.float32)
