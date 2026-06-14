@@ -48,6 +48,12 @@ export TOTAL_NUM_CORES=$TOTAL_NUM_CORES
 export NCCL_DEBUG=INFO
 export NCCL_TOPO_DUMP_FILE="${LOG_DIR}/nccl_topo_dump-%J.xml"
 export NCCL_DEBUG_FILE="${LOG_DIR}/nccl_debug-%J.log"
+# Disable NVLink-multicast (NVLS) collectives. NCCL >=2.2x enables NVLS by
+# default on NVSwitch GPUs, but the cuMulticast* setup fails on this node's
+# driver/fabric with "transport/nvls.cc Cuda failure 1 'invalid argument'".
+# Falling back to ring/tree collectives is correct (marginally slower
+# allreduce on NVSwitch nodes). Remove if the driver/NCCL combo is fixed.
+export NCCL_NVLS_ENABLE=0
 
 # Check if NCCL_IB_DISABLE is set
 . "${ADVANCED_BASH_SCRIPT_PATH}/nccl_setup.sh"
