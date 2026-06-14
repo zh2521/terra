@@ -244,8 +244,15 @@ class CellBaseTokenizer(ABC):
         if (
             self.rank_cell_norm_method == self.count_cell_norm_method
             and self.rank_gene_norm_method == self.count_gene_norm_method
-            and self.count_count_norm_method == 'shifted_log'
+            and self.count_count_norm_method in ('shifted_log', 'pflog1ppf')
         ):
+            # shifted_log and pflog1ppf are both monotonic within a cell
+            # (they preserve the raw-count ranking) and sparsity-preserving,
+            # so ranking by X_rank == ranking by X_count. Use the sparse path:
+            # it stores only the nonzero genes per cell -- which keeps
+            # n_nonzero_tokens correct (the dense path stores the full panel
+            # with non-expressed genes masked to token 0, inflating the count)
+            # and is more memory-efficient.
             self.rank_differs_from_count = False
 
         # Load token dictionary
