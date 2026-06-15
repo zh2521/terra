@@ -86,35 +86,35 @@ def tokenize_adata(adata: ad.AnnData,
     print('==================================================')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
-    norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
-    # Frozen PFlog1pPF corpus targets (s1, s2). Sourcing them from the model
-    # folder -- like norm_factors.csv -- guarantees inference applies the SAME
-    # normalization the model was TRAINED with. If absent, the tokenizer falls
-    # back to per-file targets, which matches a model trained without frozen
-    # targets. Either way, train and inference stay consistent.
-    pf_targets_file_path = Path(model_folder_path) / 'pf_targets.csv'
 
     # Load model config
     with open(model_config_file_path, 'r') as file:
         model_config = yaml.safe_load(file)
 
-    # Loud warning for the silent-mismatch trap: if the model uses pflog1ppf
-    # but no pf_targets.csv is in the model folder, inference falls back to
-    # PER-FILE PF targets. That is correct ONLY if the model was trained with
-    # per-file targets; if it was trained with FROZEN corpus targets, the
-    # normalization will mismatch training and embeddings will be wrong.
-    _uses_pflog1ppf = 'pflog1ppf' in (
-        model_config['data'].get('rank_count_norm_method'),
-        model_config['data'].get('count_count_norm_method'))
-    if _uses_pflog1ppf and not pf_targets_file_path.exists():
-        print(
-            "WARNING: model uses 'pflog1ppf' normalization but no "
-            f"'pf_targets.csv' was found in the model folder "
-            f"({model_folder_path}). Inference will use PER-FILE PFlog1pPF "
-            "targets. If this model was TRAINED with FROZEN corpus targets, "
-            "this WILL mismatch training and yield incorrect embeddings -- "
-            "copy the training pf_targets.csv into the model folder. (Safe to "
-            "ignore only if the model was trained with per-file targets.)")
+    # Normalization-artifact paths are read FROM THE MODEL CONFIG (recorded at
+    # training time under config['data']). If a path is specified, it is used
+    # and logged; if it is absent, it is not read and a warning notes the
+    # per-file fallback. This keeps the inference normalization explicit and
+    # matched to how the model was trained -- no silent mismatch.
+    norm_factor_file_path = model_config['data'].get('norm_factor_file_path')
+    pf_targets_file_path = model_config['data'].get('pf_targets_file_path')
+
+    if norm_factor_file_path:
+        print("Gene norm factors: reading from config path "
+              f"'{norm_factor_file_path}'.")
+    else:
+        print("WARNING: 'norm_factor_file_path' is not set in the model "
+              "config['data'] -> gene-level norm factors will NOT be loaded. "
+              "This is correct only if the model uses no gene-level norm "
+              "method (e.g. shifted_log / pflog1ppf).")
+
+    if pf_targets_file_path:
+        print("PFlog1pPF: reading FROZEN corpus targets from config path "
+              f"'{pf_targets_file_path}'.")
+    else:
+        print("WARNING: 'pf_targets_file_path' is not set in the model "
+              "config['data'] -> PFlog1pPF will use PER-FILE targets. This is "
+              "correct only if the model was trained with per-file targets.")
 
     print('==================================================')
     print('STEP 2: TOKENIZING ANNDATA OBJECT...')
@@ -138,8 +138,7 @@ def tokenize_adata(adata: ad.AnnData,
         count_gene_norm_method=model_config['data']['count_gene_norm_method'],
         count_count_norm_method=model_config['data']['count_count_norm_method'],
         norm_factor_file_path=norm_factor_file_path,
-        pf_targets_file_path=(pf_targets_file_path
-                              if pf_targets_file_path.exists() else None),
+        pf_targets_file_path=pf_targets_file_path,
         token_dictionary_file_path=token_dictionary_file_path,
         add_neigh_cell_ids=add_neigh_cell_ids,
         include_special_tokens=include_special_tokens)

@@ -233,6 +233,21 @@ class CellBaseTokenizer(ABC):
         self.include_special_tokens = include_special_tokens
         self.stream_per_file = stream_per_file
 
+        # Make the PFlog1pPF target source explicit (frozen-corpus vs per-file)
+        # so a missing path can never silently mismatch a frozen-trained model.
+        if 'pflog1ppf' in (self.rank_count_norm_method,
+                           self.count_count_norm_method):
+            if self.pf_targets_file_path is not None:
+                logger.info(
+                    "PFlog1pPF: using FROZEN corpus targets from "
+                    f"'{self.pf_targets_file_path}'.")
+            else:
+                logger.warning(
+                    "PFlog1pPF: no 'pf_targets_file_path' provided -> using "
+                    "PER-FILE targets. This is correct only if the model was "
+                    "trained with per-file targets; a frozen-trained model "
+                    "will be mismatched.")
+
         # Define whether ranking differs from count-based ranking
         self.rank_differs_from_count = True
         if (
