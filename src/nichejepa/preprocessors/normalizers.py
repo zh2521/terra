@@ -354,32 +354,40 @@ def normalize_by_pflog1ppf(x: sp.csr_matrix,
     else:
         x = sp.csr_matrix(np.asarray(x, dtype=np.float32))
 
+    # Work ENTIRELY on the .data array so the output keeps x's EXACT CSR
+    # structure (.indices / .indptr unchanged). This is essential: the
+    # sparse tokenization path aligns X_rank and X_count element-wise by
+    # storage order, so X_count (this output) must share X_rank's (= x's)
+    # per-row index order. Building new matrices via x.multiply(...).tocsr()
+    # does NOT guarantee that order is preserved, which would attach
+    # PFlog1pPF values to the wrong gene tokens.
+    y = x.copy()
+    n_obs = x.shape[0]
+    # Row index of each stored (nonzero) entry, so per-cell scalars can be
+    # broadcast onto .data without changing the sparsity structure.
+    row_of = np.repeat(np.arange(n_obs), np.diff(x.indptr))
+
     # --- Step 1: proportional fitting (depth equalization) ---------
-    cell_sums = np.asarray(x.sum(axis=1)).ravel()        # (n_obs,)
+    cell_sums = np.bincount(row_of, weights=x.data, minlength=n_obs)
     # Cells with zero total counts stay all-zero; avoid div-by-zero.
     safe_cell_sums = np.where(cell_sums > 0, cell_sums, 1.0)
     s1 = (float(target_size) if target_size is not None
           else float(cell_sums.mean()))
-    # Row-scale while staying sparse: x.multiply broadcasts an (n, 1)
-    # column vector across columns (per-cell scalar multiply).
-    x_pf = x.multiply((s1 / safe_cell_sums).reshape(-1, 1)).tocsr()
+    y.data = x.data * (s1 / safe_cell_sums)[row_of]
 
-    # --- Step 2: log1p (or log(u + c)) on nonzero entries ----------
+    # --- Step 2: log1p (or log(u + c)) on the stored (nonzero) entries -
     # log(0 + c) handling: for c == 1, log1p(0) = 0 keeps zeros zero
-    # (sparsity preserved). For c != 1, log(c) != 0 in general, but the
-    # paper uses c = 1, so we keep the sparse fast path and only map
-    # the stored (nonzero) entries.
-    x_log = x_pf.copy()
+    # (sparsity preserved). The paper uses c = 1.
     if pseudocount == 1.0:
-        x_log.data = np.log1p(x_pf.data)
+        y.data = np.log1p(y.data)
     else:
-        x_log.data = np.log(x_pf.data + pseudocount)
+        y.data = np.log(y.data + pseudocount)
 
     # --- Step 3: second proportional fitting on the log-values -----
-    log_sums = np.asarray(x_log.sum(axis=1)).ravel()     # (n_obs,)
+    log_sums = np.bincount(row_of, weights=y.data, minlength=n_obs)
     safe_log_sums = np.where(log_sums > 0, log_sums, 1.0)
     s2 = (float(logsum_target) if logsum_target is not None
           else float(log_sums.mean()))
-    y = x_log.multiply((s2 / safe_log_sums).reshape(-1, 1)).tocsr()
+    y.data = y.data * (s2 / safe_log_sums)[row_of]
 
     return y.astype(np.float32)

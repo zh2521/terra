@@ -87,6 +87,12 @@ def tokenize_adata(adata: ad.AnnData,
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
     norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
+    # Frozen PFlog1pPF corpus targets (s1, s2). Sourcing them from the model
+    # folder -- like norm_factors.csv -- guarantees inference applies the SAME
+    # normalization the model was TRAINED with. If absent, the tokenizer falls
+    # back to per-file targets, which matches a model trained without frozen
+    # targets. Either way, train and inference stay consistent.
+    pf_targets_file_path = Path(model_folder_path) / 'pf_targets.csv'
 
     # Load model config
     with open(model_config_file_path, 'r') as file:
@@ -114,6 +120,8 @@ def tokenize_adata(adata: ad.AnnData,
         count_gene_norm_method=model_config['data']['count_gene_norm_method'],
         count_count_norm_method=model_config['data']['count_count_norm_method'],
         norm_factor_file_path=norm_factor_file_path,
+        pf_targets_file_path=(pf_targets_file_path
+                              if pf_targets_file_path.exists() else None),
         token_dictionary_file_path=token_dictionary_file_path,
         add_neigh_cell_ids=add_neigh_cell_ids,
         include_special_tokens=include_special_tokens)
