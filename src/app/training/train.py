@@ -6,6 +6,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/train.py (05.06.2024).
 """
 
 import os
+import shutil
 
 """
 # -- FOR DISTRIBUTED TRAINING ENSURE ONLY 1 DEVICE VISIBLE PER PROCESS
@@ -702,11 +703,40 @@ def train(args: dict,
     if rank==0:
         os.makedirs(save_folder_path, exist_ok=True)
 
+    # Record the normalization-artifact source paths under args['data'] so they
+    # are saved in the model config (allow them to be configured under 'data'
+    # or a top-level 'paths' section). These let inference re-apply the SAME
+    # normalization the model was trained with.
+    for _src_key in ('norm_factor_file_path', 'pf_targets_file_path'):
+        args['data'][_src_key] = (
+            args['data'].get(_src_key)
+            or args.get('paths', {}).get(_src_key))
+
     # Store config file with model
     if rank==0:
         dump = os.path.join(save_folder_path, 'params.yaml')
         with open(dump, 'w') as f:
             yaml.dump(args, f)
+
+        # Copy the normalization artifacts INTO the model folder so inference
+        # finds them by name (<model_folder>/norm_factors.csv and
+        # /pf_targets.csv) and applies the same normalization as training.
+        # pf_targets is optional: per-file-trained models have none, and
+        # inference then correctly falls back to per-file targets.
+        for _src_key, _dst_name in (
+                ('norm_factor_file_path', 'norm_factors.csv'),
+                ('pf_targets_file_path', 'pf_targets.csv')):
+            _src = args['data'].get(_src_key)
+            if _src and os.path.exists(_src):
+                shutil.copyfile(
+                    _src, os.path.join(save_folder_path, _dst_name))
+                logger.info(
+                    f"Copied normalization artifact '{_src}' -> "
+                    f"{os.path.join(save_folder_path, _dst_name)}.")
+            elif _src:
+                logger.warning(
+                    f"'{_src_key}' = '{_src}' does not exist; NOT copied into "
+                    "the model folder -- inference may mismatch training.")
 
     # Define log/checkpointing paths
     log_file = os.path.join(save_folder_path, f'{write_tag}_r{rank}.csv')

@@ -98,6 +98,24 @@ def tokenize_adata(adata: ad.AnnData,
     with open(model_config_file_path, 'r') as file:
         model_config = yaml.safe_load(file)
 
+    # Loud warning for the silent-mismatch trap: if the model uses pflog1ppf
+    # but no pf_targets.csv is in the model folder, inference falls back to
+    # PER-FILE PF targets. That is correct ONLY if the model was trained with
+    # per-file targets; if it was trained with FROZEN corpus targets, the
+    # normalization will mismatch training and embeddings will be wrong.
+    _uses_pflog1ppf = 'pflog1ppf' in (
+        model_config['data'].get('rank_count_norm_method'),
+        model_config['data'].get('count_count_norm_method'))
+    if _uses_pflog1ppf and not pf_targets_file_path.exists():
+        print(
+            "WARNING: model uses 'pflog1ppf' normalization but no "
+            f"'pf_targets.csv' was found in the model folder "
+            f"({model_folder_path}). Inference will use PER-FILE PFlog1pPF "
+            "targets. If this model was TRAINED with FROZEN corpus targets, "
+            "this WILL mismatch training and yield incorrect embeddings -- "
+            "copy the training pf_targets.csv into the model folder. (Safe to "
+            "ignore only if the model was trained with per-file targets.)")
+
     print('==================================================')
     print('STEP 2: TOKENIZING ANNDATA OBJECT...')
     print('==================================================')
