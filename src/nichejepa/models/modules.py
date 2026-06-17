@@ -128,6 +128,7 @@ class Attention(nn.Module):
                     SDPBackend.MATH,
                 ]
             except ImportError:
+                print("Failed to import SDPBackend. Flash attention will be used without backend selection, which may hurt training stability. Consider upgrading to PyTorch 2.3+ for better flash attention support.")
                 # PyTorch < 2.3 — no backend selector API. Fall back
                 # to plain SDPA and accept whatever backend it picks.
                 sdpa_kernel = None

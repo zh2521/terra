@@ -1,16 +1,17 @@
 data:
   dataset_name: 'mmb0-1b_smb1-1b_2p'
-  model_input_size: 704 # 2816, 704, 11264
+  model_input_size: 704 # 2816, 704, 11264, 1088
   n_neighs: 10
   rank_cell_norm_method: null
   rank_gene_norm_method: null
   rank_count_norm_method: null
   count_cell_norm_method: null
   count_gene_norm_method: null
-  count_count_norm_method: null
+  count_count_norm_method: 'pflog1ppf'
   raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/mmb0-1b_smb1-1b_2p'
-  token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_mus_musculus.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_2p/mmb0-1b_smb1-1b_2p_32_None_None_None_None_None_None_knn_10_704.dataset' # '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_2816.dataset', '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_704.dataset', '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_11264.dataset'
+  token_dict_folder_path: '/nfs/team361/sb75/DATASETS/tokenizer/token_dictionary_mus_musculus.pkl'
+  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_2p/mmb0-1b_smb1-1b_2p_32_None_None_None_None_None_pflog1ppf_knn_10_704.dataset' # '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_2816.dataset', '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_704.dataset', '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_1p/mmb0-1b_smb1-1b_1p_32_None_None_None_None_None_shifted_log_knn_10_11264.dataset'
+  pf_targets_file_path: /nfs/team361/sb75/nichejepa-reproducibility/artifacts/data/mst_corpus_10m_pf_targets.csv
   precomputed_split: null
   precomputed_n_nonzero_tokens: null
   test_batch_ids: null
@@ -21,15 +22,15 @@ data:
   split: 0
   stratify: False
   seq_len_cell: 64 # 256, 64, 1024
-  seq_len_neighborhood: 640 # 2560, 640, 10240
-  n_segments: 11
+  seq_len_neighborhood: 640 # 2560, 640, 10240, 1024
+  n_segments: 11 # 11
   sampling_strategy: null
-  batch_size: 256 # 32 # 32
+  batch_size: 32 # 32
   num_workers: 16 
   pin_memory: True
   sep_gene_tokens_neb: False
   use_sampler: True
-  n_special_values: 200
+  n_special_values: 2000
   vocab_size: 23407
   nz_spc: True
   mega_batch_mult_max: 1000
@@ -40,9 +41,9 @@ meta:
   gt_type: 'combined' # 'rank', 'counts', 'combined'
   count_encoding: 'mlp' # 'value_bins', 'mlp'
   n_value_bins: 20
-  cell_pos_enc: 'segment' # 'rope'
+  cell_pos_enc: 'segment'
   enc_depth: 3
-  enc_emb_dim: 768 # 1152
+  enc_emb_dim: 768
   pred_depth: 1
   pred_emb_dim: 768 # 384
   num_heads: 8
@@ -51,16 +52,13 @@ meta:
   pos_learnable: False
   seg_learnable: False
   use_bfloat16: True
-  use_flash_attention: False
+  use_flash_attention: True
   use_layer_norm: True
   predict_gene: True
   new_spc: True # True, False
   excl_spc_from_loss: True # True, False
   target_enc_layer_norm: True
   restrict_special_attention: False
-  rope_freq_scale: 3.141592653589793  # π — the default, keep it
-  rope_rotation_augment: True
-  rope_coord_normalization: 'none'
 mask:
   n_contexts: 1 # 1
   n_targets: 1 # 5 # 1 =, this is the number of blocks in block masking
@@ -97,37 +95,3 @@ state:
   load_checkpoint: False # true, false
   read_checkpoint: null # null, 'nichejepa-ep5.pth.tar'
   checkpoint_freq_iter: 50000
-protein_init:
-  enabled: False
-  mode: warm_start
-  embedding_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.pt
-  mapping_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.json
-  #proj_bias: False
-  #use_layer_norm: True
-  #freeze_esm: False
-batch_correction:
-  n_batches: 104          # only used when at least one feature is on
-  adaln:
-    enabled: False
-    batch_embed_dim: 64
-  adv_classifier:
-    enabled: False
-    hidden_dim: 64
-    dropout: 0.1
-    lambda_adv: 1.0
-    grl_alpha: 1.0
-  distribution_alignment:
-    enabled: False
-    method: 'coral' # 'mmd', 'sinkhorn'
-    lambda: 1.0 # 0.1
-    mmd_sigmas: [0.5, 1.0, 2.0, 5.0]
-    sinkhorn_eps: 0.05
-    sinkhorn_n_iter: 100
-  cycle_consistency:
-    enabled: False
-    lambda_cycle: 0.1
-    swap_fraction: 0.25
-  protocol_moe:
-    enabled: False
-    routing_index: 2          # e.g. assay_value slot in values[:, k]
-    n_experts: 10

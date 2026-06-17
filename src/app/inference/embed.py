@@ -573,23 +573,23 @@ def harmonize_tokenize_embed_pipeline(
 
 @torch.inference_mode()
 def gene_embed_dataset(dataset: Dataset,
-                  model_folder_path: str,
-                  emb_layer: int | None = None,
-                  cell_gene_ids: list = [],
-                  neighborhood_gene_ids: list = [],
-                  batch_size: int = 128,
-                  pin_memory: bool = False,
-                  num_workers: int = 12,
-                  return_gene: bool=False,
-                  return_gene_per_data: bool=False,
-                  compute_cosine_with_list:  list[str] = [],
-                  return_distance: bool=False,
-                  return_cosine_sim: bool=False,
-                  return_receptor_average: bool=False,
-                  include_spatial_cell_emb: bool = True,
-                  description: str='',
-                  ignore_spc_tokens: bool = True,
-                  ) -> dict:
+                       model_folder_path: str,
+                       emb_layer: int | None = None,
+                       cell_gene_ids: list = [],
+                       neighborhood_gene_ids: list = [],
+                       batch_size: int = 128,
+                       pin_memory: bool = False,
+                       num_workers: int = 12,
+                       return_gene: bool=False,
+                       return_gene_per_data: bool=False,
+                       compute_cosine_with_list:  list[str] = [],
+                       return_distance: bool=False,
+                       return_cosine_sim: bool=False,
+                       return_receptor_average: bool=False,
+                       include_spatial_cell_emb: bool = True,
+                       description: str='',
+                       ignore_spc_tokens: bool = True,
+                       ) -> dict:
     
     """
     Parameters

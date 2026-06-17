@@ -21,7 +21,7 @@ artifact:
   OUTPUT_DIR: "/nfs/team361/sb75/nichejepa-reproducibility/artifacts/hst_corpus_110m"  # Path to store the artifacts.
   LOG_DIR: "/nfs/team361/sb75/nichejepa-reproducibility/artifacts/hst_corpus_110m"
   EXPERIMENT_NAME: "nichejepa_pretraining"  # Name of the experiment.
-  RUN_NAME: "hst_corpus_110m_train_split_run_16_32batch_192preddim_1gpu"  # Name of the run.
+  RUN_NAME: "hst_corpus_110m_train_split_run_24_impv_flash_attn_192preddim_1gpu"  # Name of the run.
 
 runner_script:
   RUNNER_SCRIPT: "/nfs/team361/sb75/nichejepa/src/app/training/train_model_lsf_mpirun_sanger.sh"  # Path to the runner script.
