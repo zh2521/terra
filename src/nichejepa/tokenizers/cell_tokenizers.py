@@ -74,7 +74,7 @@ try:
     import squidpy as sq
 except:
     print("Could not import squidpy...")
-from datasets import Dataset
+from datasets import Dataset, concatenate_datasets
 
 from ..preprocessors.filters import filter_cells
 from ..preprocessors.graph import construct_neighbor_graph
@@ -85,6 +85,7 @@ from ..preprocessors.normalizers import normalize_by_factor
 from ..preprocessors.normalizers import normalize_by_read_depth
 from ..preprocessors.normalizers import normalize_by_seurat
 from ..preprocessors.normalizers import normalize_by_shifted_log
+from ..preprocessors.normalizers import normalize_by_pflog1ppf
 from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
 
 
@@ -139,12 +140,30 @@ class CellBaseTokenizer(ABC):
         Normalization method on count level for gene expression.
     norm_factor_file_path:
         File path to '.csv' file containing norm factors per gene.
+    pf_targets_file_path:
+        Optional file path to the '{cohort}_pf_targets.csv' produced by
+        `compute_cohort_norm_factors.py`, holding the corpus-wide
+        PFlog1pPF targets ('pf_depth_target', 'pf_logsum_target'). When
+        set, the 'pflog1ppf' count-norm method uses these FROZEN corpus
+        scales (s1, s2) instead of recomputing them per file -- keeping
+        the value scale consistent across shards and between train and
+        inference. When `None` (default), per-file PF targets are used.
     token_dictionary_file_path:
         File path to the '.pkl' file containing the token dictionary.
     add_neigh_cell_ids:
         If `True`, add neighbor cell IDs.
     include_special_tokens:
         If `True`, include special tokens.
+    stream_per_file:
+        If `True`, assemble the output dataset by building and formatting
+        one HF dataset PER input file and concatenating them, instead of
+        accumulating every file's cells into a single in-memory dict
+        first. This bounds the per-file Python dict to one file at a time
+        and uses Arrow-backed storage for the rest, substantially lowering
+        peak memory for multi-file corpora. Row order is preserved
+        (identical to the default for `processing_mode='sequential'`).
+        Default `False` (legacy behaviour). NOTE: verify output
+        equivalence on a 2-file sample before corpus-scale use.
     """
     def __init__(
             self,
@@ -169,6 +188,7 @@ class CellBaseTokenizer(ABC):
             rank_count_norm_method: Literal[
                 'analytic_pearson_residuals',
                 'shifted_log',
+                'pflog1ppf',
                 ] | None = None,
             count_cell_norm_method: Literal[
                 'read_depth',
@@ -183,11 +203,14 @@ class CellBaseTokenizer(ABC):
             count_count_norm_method: Literal[
                 'analytic_pearson_residuals',
                 'shifted_log',
+                'pflog1ppf',
                 ] | None = 'shifted_log',
             norm_factor_file_path: Path | str = norm_factor_file_path,
+            pf_targets_file_path: Path | str | None = None,
             token_dictionary_file_path: Path | str = token_dictionary_file_path,
             add_neigh_cell_ids: bool = False,
             include_special_tokens: bool = True,
+            stream_per_file: bool = False,
             ):
         self.nproc = nproc
         self.processing_mode = processing_mode
@@ -204,9 +227,26 @@ class CellBaseTokenizer(ABC):
         self.count_gene_norm_method = count_gene_norm_method
         self.count_count_norm_method = count_count_norm_method
         self.norm_factor_file_path = norm_factor_file_path
+        self.pf_targets_file_path = pf_targets_file_path
         self.token_dictionary_file_path = token_dictionary_file_path
         self.add_neigh_cell_ids = add_neigh_cell_ids
         self.include_special_tokens = include_special_tokens
+        self.stream_per_file = stream_per_file
+
+        # Make the PFlog1pPF target source explicit (frozen-corpus vs per-file)
+        # so a missing path can never silently mismatch a frozen-trained model.
+        if 'pflog1ppf' in (self.rank_count_norm_method,
+                           self.count_count_norm_method):
+            if self.pf_targets_file_path is not None:
+                logger.info(
+                    "PFlog1pPF: using FROZEN corpus targets from "
+                    f"'{self.pf_targets_file_path}'.")
+            else:
+                logger.warning(
+                    "PFlog1pPF: no 'pf_targets_file_path' provided -> using "
+                    "PER-FILE targets. This is correct only if the model was "
+                    "trained with per-file targets; a frozen-trained model "
+                    "will be mismatched.")
 
         # Define whether ranking differs from count-based ranking
         self.rank_differs_from_count = True
@@ -219,8 +259,15 @@ class CellBaseTokenizer(ABC):
         if (
             self.rank_cell_norm_method == self.count_cell_norm_method
             and self.rank_gene_norm_method == self.count_gene_norm_method
-            and self.count_count_norm_method == 'shifted_log'
+            and self.count_count_norm_method in ('shifted_log', 'pflog1ppf')
         ):
+            # shifted_log and pflog1ppf are both monotonic within a cell
+            # (they preserve the raw-count ranking) and sparsity-preserving,
+            # so ranking by X_rank == ranking by X_count. Use the sparse path:
+            # it stores only the nonzero genes per cell -- which keeps
+            # n_nonzero_tokens correct (the dense path stores the full panel
+            # with non-expressed genes masked to token 0, inflating the count)
+            # and is more memory-efficient.
             self.rank_differs_from_count = False
 
         # Load token dictionary
@@ -239,6 +286,43 @@ class CellBaseTokenizer(ABC):
             key for key in list(self.vocab) if 'ENS' in key]
         self.coding_miRNA_dict = dict(
             zip(self.coding_miRNA_ids, [True] * len(self.vocab)))
+
+    def _load_pf_targets(self) -> tuple[float | None, float | None]:
+        """Load the frozen corpus-wide PFlog1pPF targets (s1, s2).
+
+        Reads `pf_targets_file_path` (produced by
+        `compute_cohort_norm_factors.py`) once and caches the result.
+        Returns ``(target_size, logsum_target)`` to pass to
+        `normalize_by_pflog1ppf`, or ``(None, None)`` when no path is
+        configured -- in which case the normalizer falls back to its
+        per-file (per-call) PF targets.
+
+        Raises
+        ------
+        ValueError
+            If `pf_targets_file_path` is set but the file is missing the
+            required 'pf_depth_target' / 'pf_logsum_target' columns.
+        """
+        if self.pf_targets_file_path is None:
+            return None, None
+        if not hasattr(self, '_pf_targets_cache'):
+            pf_df = pd.read_csv(self.pf_targets_file_path)
+            missing = {'pf_depth_target', 'pf_logsum_target'} - set(
+                pf_df.columns)
+            if missing:
+                raise ValueError(
+                    f"PF targets file '{self.pf_targets_file_path}' is "
+                    f"missing required column(s) {sorted(missing)}; it must "
+                    "be produced by compute_cohort_norm_factors.py.")
+            self._pf_targets_cache = (
+                float(pf_df['pf_depth_target'].iloc[0]),
+                float(pf_df['pf_logsum_target'].iloc[0]))
+            logger.info(
+                'Loaded frozen PFlog1pPF corpus targets from '
+                f'{self.pf_targets_file_path}: '
+                f's1(depth)={self._pf_targets_cache[0]:.6f}, '
+                f's2(logsum)={self._pf_targets_cache[1]:.6f}.')
+        return self._pf_targets_cache
 
     def tokenize_data(self,
                       input_directory: Path | str,
@@ -274,13 +358,29 @@ class CellBaseTokenizer(ABC):
         keep_in_memory:
             If `True`, keep dataset in memory when using generator.
         """
-        dataset_dict = self._tokenize_files(Path(input_directory), file_format)
-
-        tokenized_dataset = self._create_dataset(
-            dataset_dict=dataset_dict,
-            use_generator=use_generator,
-            cache_directory_path=cache_directory_path,
-            keep_in_memory=keep_in_memory)
+        if self.stream_per_file:
+            # Memory-bounded assembly: build + format ONE HF dataset per
+            # input file and concatenate them, so only a single file's
+            # Python dict is held at a time (the rest is Arrow-backed).
+            # Row order matches the default for sequential processing.
+            logger.info('Assembling dataset with per-file streaming...')
+            per_file_datasets = [
+                self._create_dataset(
+                    dataset_dict=file_dataset_dict,
+                    use_generator=use_generator,
+                    cache_directory_path=cache_directory_path,
+                    keep_in_memory=keep_in_memory)
+                for file_dataset_dict in self._iter_file_dicts(
+                    Path(input_directory), file_format)]
+            tokenized_dataset = concatenate_datasets(per_file_datasets)
+        else:
+            dataset_dict = self._tokenize_files(
+                Path(input_directory), file_format)
+            tokenized_dataset = self._create_dataset(
+                dataset_dict=dataset_dict,
+                use_generator=use_generator,
+                cache_directory_path=cache_directory_path,
+                keep_in_memory=keep_in_memory)
 
         output_path = str(
             (Path(output_directory) / output_file_prefix).with_suffix(
@@ -358,24 +458,42 @@ class CellBaseTokenizer(ABC):
             Dictionary containing the cell IDs and tokens for the
             tokenized files.
         """
-        file_found = 0
-
-        tokenize_file_fn = self._tokenize_adata
-
         # Initialize dict to add results from individual files
         dataset_dict = {}
 
-        # Loop through data directory to tokenize `.h5ad`` files
+        # Accumulate every file's per-cell lists into a single dict (legacy
+        # behaviour). Order matches _iter_file_dicts (glob order for
+        # sequential, completion order for parallel).
+        for file_dataset_dict in self._iter_file_dicts(
+                data_directory, file_format):
+            for k in file_dataset_dict.keys():
+                if k not in dataset_dict:
+                    dataset_dict[k] = []
+                dataset_dict[k] += file_dataset_dict[k]
+
+        return dataset_dict
+
+    def _iter_file_dicts(self,
+                         data_directory: Path | str,
+                         file_format: Literal['h5ad'] = 'h5ad',
+                         ):
+        """
+        Yield the tokenized dict for each `.h5ad` file in `data_directory`,
+        honouring `processing_mode`. Shared by the default accumulating
+        assembly (`_tokenize_files`) and the per-file streaming assembly
+        (`tokenize_data` when `stream_per_file=True`).
+        """
+        data_directory = Path(data_directory)
+        file_found = 0
+        tokenize_file_fn = self._tokenize_adata
+
+        # Loop through data directory to tokenize `.h5ad` files
         if self.processing_mode == 'sequential':
             logger.info('Tokenizing files sequentially...')
             for file_path in data_directory.glob(f'**/*.{file_format}'):
                 file_found = 1
                 logger.info(f"Tokenizing '{file_path}'...")
-                file_dataset_dict = tokenize_file_fn(file_path)
-                for k in file_dataset_dict.keys():
-                    if k not in dataset_dict:
-                        dataset_dict[k] = []
-                    dataset_dict[k] += file_dataset_dict[k]
+                yield tokenize_file_fn(file_path)
         elif self.processing_mode == 'parallel':
             logger.info('Tokenizing files in parallel...')
             with concurrent.futures.ProcessPoolExecutor(
@@ -384,14 +502,10 @@ class CellBaseTokenizer(ABC):
                 for file_path in data_directory.glob(f'**/*.{file_format}'):
                     file_found = 1
                     logger.info(f"Tokenizing '{file_path}'...")
-                    future = executor.submit(tokenize_file_fn, file_path)
-                    futures.append(future)
+                    futures.append(
+                        executor.submit(tokenize_file_fn, file_path))
                 for future in concurrent.futures.as_completed(futures):
-                    file_dataset_dict = future.result()
-                    for k in file_dataset_dict.keys():
-                        if k not in dataset_dict:
-                            dataset_dict[k] = []
-                        dataset_dict[k] += file_dataset_dict[k]
+                    yield future.result()
 
         if file_found == 0:
             logger.error(
@@ -400,8 +514,6 @@ class CellBaseTokenizer(ABC):
             raise FileNotFoundError(
                 f"No '.{file_format}' files found in directory "
                 f"'{data_directory}'.")
-
-        return dataset_dict
 
     @abstractmethod
     def _tokenize_adata(self):
@@ -640,7 +752,20 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 normalize_by_analytic_pearson_residuals(adata.layers['X_rank'])           
         elif self.rank_count_norm_method == 'shifted_log':
             adata.layers['X_rank'] = normalize_by_shifted_log(
-                adata.layers['X_rank'])               
+                adata.layers['X_rank'])
+        elif self.rank_count_norm_method == 'pflog1ppf':
+            # PFlog1pPF does its own depth normalization (two internal
+            # PF steps), so it must not be stacked on a separate cell-/
+            # gene-level norm -- same constraint as
+            # analytic_pearson_residuals.
+            if (self.rank_cell_norm_method is not None) or (
+                self.rank_gene_norm_method is not None):
+                raise ValueError('Invalid combination of norm methods.')
+            pf_target_size, pf_logsum_target = self._load_pf_targets()
+            adata.layers['X_rank'] = normalize_by_pflog1ppf(
+                adata.layers['X_rank'],
+                target_size=pf_target_size,
+                logsum_target=pf_logsum_target)
         else:
             if self.rank_count_norm_method is None:
                 pass
@@ -657,7 +782,20 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 normalize_by_analytic_pearson_residuals(adata.layers['X_count'])            
         elif self.count_count_norm_method == 'shifted_log':
             adata.layers['X_count'] = normalize_by_shifted_log(
-                adata.layers['X_count'])               
+                adata.layers['X_count'])
+        elif self.count_count_norm_method == 'pflog1ppf':
+            # PFlog1pPF does its own depth normalization (two internal
+            # PF steps), so it must not be stacked on a separate cell-/
+            # gene-level norm -- same constraint as
+            # analytic_pearson_residuals.
+            if (self.count_cell_norm_method is not None) or (
+                self.count_gene_norm_method is not None):
+                raise ValueError('Invalid combination of norm methods.')
+            pf_target_size, pf_logsum_target = self._load_pf_targets()
+            adata.layers['X_count'] = normalize_by_pflog1ppf(
+                adata.layers['X_count'],
+                target_size=pf_target_size,
+                logsum_target=pf_logsum_target)
         else:
             if self.count_count_norm_method is None:
                 pass
@@ -691,56 +829,72 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict['gene_expr_cell'] = []
         adata_dict['gene_tokens_neighborhood'] = []
         adata_dict['gene_expr_neighborhood'] = []
-            
+
+        # Subset to the coding/miRNA gene columns ONCE. Previously every chunk
+        # re-sliced the AnnData with a fancy column index
+        # (adata[rows, coding_miRNA_idx]), rebuilding an AnnData view and
+        # re-indexing the sparse layer twice per chunk. Row-slicing these
+        # precomputed matrices per chunk is cheap.
+        X_rank_coding = adata.layers['X_rank'][:, coding_miRNA_idx]
+        X_count_coding = adata.layers['X_count'][:, coding_miRNA_idx]
+        # Free the full-width normalized layers: only the coding/miRNA column
+        # subsets are needed from here on, and the layers are not referenced
+        # again in this method. (X_rank/X_count may alias adata.X when no
+        # cell-norm is applied; deleting the layer key leaves adata.X intact.)
+        del adata.layers['X_rank']
+        del adata.layers['X_count']
+
         if not self.rank_differs_from_count: # save memory by working with sparse arrays
             print('Ranking gene tokens based on normalized counts (sparse version).')
             for i in range(0, len(adata), self.chunk_size):
                 if self.include_zero_expr_genes:
-                    norm_counts_cell_rank = adata[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_rank'].toarray()
-                    norm_counts_cell_count = adata[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_count'].toarray()
+                    norm_counts_cell_rank = X_rank_coding[
+                        i : i + self.chunk_size].toarray()
+                    norm_counts_cell_count = X_count_coding[
+                        i : i + self.chunk_size].toarray()
 
-                    # Rank gene tokens and append across chunks
+                    # Rank gene tokens and append across chunks (capped at
+                    # model_input_size -- the most any segment can consume).
                     adata_dict['gene_tokens_cell'] += [
                         rank_gene_tokens(norm_counts_cell_rank[j],
-                        coding_miRNA_tokens_cell)
+                        coding_miRNA_tokens_cell,
+                        n_tokens=self.model_input_size)
                         for j in range(norm_counts_cell_rank.shape[0])]
 
                     # Rank gene expression and append across chunks
                     adata_dict['gene_expr_cell'] += [
                         norm_counts_cell_count[j][
-                            np.argsort(-norm_counts_cell_rank[j])]
+                            np.argsort(-norm_counts_cell_rank[j])][
+                                :self.model_input_size]
                         for j in range(norm_counts_cell_count.shape[0])]
 
                 else:
-                    norm_counts_cell_rank = sp.csr_matrix(adata[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_rank'])
-                    norm_counts_cell_count = sp.csr_matrix(adata[
-                        i : i + self.chunk_size, coding_miRNA_idx].layers[
-                            'X_count'])              
+                    norm_counts_cell_rank = sp.csr_matrix(
+                        X_rank_coding[i : i + self.chunk_size])
+                    norm_counts_cell_count = sp.csr_matrix(
+                        X_count_coding[i : i + self.chunk_size])
 
-                    # Rank gene tokens and append across chunks
+                    # Rank gene tokens and append across chunks (capped at
+                    # model_input_size -- the most any segment can consume).
                     adata_dict['gene_tokens_cell'] += [
                         rank_gene_tokens(
                             norm_counts_cell_rank[j].data,
-                            coding_miRNA_tokens_cell[norm_counts_cell_rank[j].indices])
+                            coding_miRNA_tokens_cell[norm_counts_cell_rank[j].indices],
+                            n_tokens=self.model_input_size)
                         for j in range(norm_counts_cell_rank.shape[0])]
 
                     # Rank gene expression and append across chunks
                     adata_dict['gene_expr_cell'] += [
                         norm_counts_cell_count[j].data[
-                            np.argsort(-norm_counts_cell_rank[j].data)]
+                            np.argsort(-norm_counts_cell_rank[j].data)][
+                                :self.model_input_size]
                         for j in range(norm_counts_cell_count.shape[0])]
 
         else: # conversion to dense arrays which requires higher memory
             print('Ranking gene tokens based on normalized counts (dense version).')
             for i in range(0, len(adata), self.chunk_size):
-                rank_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_rank']
-                count_block = adata[i:i+self.chunk_size, coding_miRNA_idx].layers['X_count']
+                rank_block = X_rank_coding[i:i+self.chunk_size]
+                count_block = X_count_coding[i:i+self.chunk_size]
 
                 if sp.issparse(rank_block):
                     rank_block = rank_block.toarray()
@@ -752,25 +906,43 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 else:
                     count_block = np.asarray(count_block)
 
-                for j in range(rank_block.shape[0]):
-                    rank_row = rank_block[j]
-                    count_row = count_block[j]
+                # Rank every cell in the chunk at once (vectorized) instead of
+                # a per-row Python loop. Per row we want lexsort((-count,
+                # -rank)) = primary key rank desc, tie-break count desc. That
+                # equals a STABLE argsort by -count followed by a STABLE
+                # argsort by -rank, done row-wise with axis=1 -- byte-identical
+                # to the per-row np.lexsort (verified, incl. ties).
+                idx_sec = np.argsort(-count_block, axis=1, kind='stable')
+                rank_bysec = np.take_along_axis(rank_block, idx_sec, axis=1)
+                idx_pri = np.argsort(-rank_bysec, axis=1, kind='stable')
+                order = np.take_along_axis(idx_sec, idx_pri, axis=1)
 
-                    # Primary sort: rank_row descending
-                    # Tie-breaker: count_row descending
-                    order = np.lexsort((-count_row, -rank_row))
+                sorted_tokens = coding_miRNA_tokens_cell[order]            # (R, C)
+                sorted_expr = np.take_along_axis(
+                    count_block, order, axis=1).astype(np.float64)
 
-                    sorted_tokens = coding_miRNA_tokens_cell[order].copy()
-                    sorted_rank = rank_row[order]
-                    sorted_expr = count_row[order].astype(np.float64, copy=True)
+                if not self.include_zero_expr_genes:
+                    sorted_rank = np.take_along_axis(rank_block, order, axis=1)
+                    zero_mask = sorted_rank == 0
+                    sorted_tokens = sorted_tokens.copy()
+                    sorted_tokens[zero_mask] = 0
+                    sorted_expr[zero_mask] = 0.0
 
-                    if not self.include_zero_expr_genes:
-                        zero_mask = (sorted_rank == 0)
-                        sorted_tokens[zero_mask] = 0
-                        sorted_expr[zero_mask] = 0.0
+                # Cap stored length at model_input_size: no cell- or
+                # neighbor-segment in _format_examples consumes more than this
+                # (a cell with no neighbors uses exactly model_input_size;
+                # every segment is smaller once neighbors exist), so the rest
+                # would be truncated anyway. Bounds per-cell memory for large
+                # gene panels. tolist() on the 2-D array yields the same
+                # list-of-lists the per-row appends produced.
+                adata_dict['gene_tokens_cell'] += sorted_tokens[
+                    :, :self.model_input_size].tolist()
+                adata_dict['gene_expr_cell'] += sorted_expr[
+                    :, :self.model_input_size].tolist()
 
-                    adata_dict['gene_tokens_cell'].append(sorted_tokens.tolist())
-                    adata_dict['gene_expr_cell'].append(sorted_expr.tolist())
+        # Coding-column count/rank matrices are no longer needed; free them
+        # before the (memory-heavy) neighborhood assembly below.
+        del X_rank_coding, X_count_coding
 
         adata_dict['gene_tokens_cell_neigh'] = adata_dict['gene_tokens_cell']
         adata_dict['gene_expr_cell_neigh'] = adata_dict['gene_expr_cell']
@@ -792,73 +964,97 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         n_cells = len(adata)
 
-        # Add read depth and number of genes
-        #adata_dict['cell_total_counts'] = [
-        #    [total_counts] for total_counts in adata.X.sum(axis=1).A1.tolist()]
-        #adata_dict['cell_n_probed_genes'] = [adata.X.shape[1]] * n_cells
-        
+        # Precompute graph structure and per-cell metadata ONCE, outside the
+        # loop. Previously getnnz(axis=1) -- which rebuilds the full per-row
+        # nnz array (O(n_cells)) -- was called twice per cell, making this
+        # loop O(n_cells^2). Likewise the spatial coords and cell-id list were
+        # re-read per neighbor.
+        connectivities = adata_neigh.obsp['spatial_connectivities']
+        distances = adata_neigh.obsp['spatial_distances']
+        conn_nnz = connectivities.getnnz(axis=1)
+        dist_nnz = distances.getnnz(axis=1)
+        coords = np.asarray(adata.obsm['spatial'])
+        cell_id_list = (adata.obs['cell_id'].values.tolist()
+                        if self.add_neigh_cell_ids else None)
+        gene_tokens_cell_neigh = adata_dict['gene_tokens_cell_neigh']
+        gene_expr_cell_neigh = adata_dict['gene_expr_cell_neigh']
+
         # Loop through all cells to add neighbor cell gene tokens based on
         # position of neighbor cell compared to index cell. Gene tokens of cells
         # that are closer to the index cell will be added first.
         for i in range(len(adata_neigh)):
             # Collect all neighbors of cell i
-            neighbors_i = adata_neigh.obsp[
-                'spatial_connectivities'][i].nonzero()[1]
-
-            # Store cell degree (number of neighbors excluding cell i)
-            #adata_dict['cell_degrees'].append(int(len(neighbors_i)))
+            neighbors_i = connectivities[i].nonzero()[1]
 
             # Take into account case where neighbor cells can have 0 distance
-            if (adata_neigh.obsp['spatial_connectivities'].getnnz(axis=1)[i] != 
-            adata_neigh.obsp['spatial_distances'].getnnz(axis=1)[i]):
-                cell_con_nz = np.nonzero(
-                    adata_neigh.obsp['spatial_connectivities'][i])[1]
-                cell_dist_nz = np.nonzero(
-                    adata_neigh.obsp['spatial_distances'][i])[1]
+            if conn_nnz[i] != dist_nnz[i]:
+                cell_con_nz = np.nonzero(connectivities[i])[1]
+                cell_dist_nz = np.nonzero(distances[i])[1]
                 zero_dist_idx = set(cell_con_nz) - set(cell_dist_nz)
                 for idx in zero_dist_idx:
-                    adata_neigh.obsp[
-                        'spatial_distances'][i, idx] = adata_neigh.obsp[
-                        'spatial_distances'][i, idx] + 10**(-9)
-            
+                    distances[i, idx] = distances[i, idx] + 10**(-9)
+
             # Get sorted indices of neighbor cells based on (lower) distance to
             # index cell
-            cell_start = adata_neigh.obsp['spatial_distances'].indptr[i]
-            cell_end = adata_neigh.obsp['spatial_distances'].indptr[i+1]
-            cell_distances = adata_neigh.obsp[
-                'spatial_distances'].data[cell_start:cell_end]
+            cell_start = distances.indptr[i]
+            cell_end = distances.indptr[i+1]
+            cell_distances = distances.data[cell_start:cell_end]
 
             sorted_indices = np.argsort(cell_distances)
             assert len(neighbors_i) == len(cell_distances), (
                 'Number of neighbors does not equal number of distances.')
+            ordered_neighbors = neighbors_i[sorted_indices]
 
-            # Loop through distance-sorted neighbor cells and add gene,
-            # segment tokens, counts, and relative coords
-            for j, k in enumerate(neighbors_i[sorted_indices]):
-                adata_dict['gene_tokens_neighborhood'][i] = np.hstack(
-                    (adata_dict['gene_tokens_neighborhood'][i],
-                     adata_dict['gene_tokens_cell_neigh'][k]))
-                adata_dict['gene_expr_neighborhood'][i] = np.hstack(
-                    (adata_dict['gene_expr_neighborhood'][i],
-                     adata_dict['gene_expr_cell_neigh'][k]))
-                adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
-                    (adata_dict['seg_tokens_neighborhood'][i],
-                     [j + 2] * len(adata_dict['gene_tokens_cell_neigh'][k])))
+            # Pre-truncate each neighbor's contribution to the per-segment
+            # length that _format_examples will keep, instead of storing the
+            # full per-neighbor array and truncating later. _format_examples
+            # makes one segment per NON-EMPTY neighbor and truncates each to
+            # int(model_input_size / (1 + n_nonempty_neighbors)) via
+            # process_gene_tokens; pre-truncating to that same length here is
+            # idempotent with that step -> byte-identical output, but bounds
+            # the stored neighborhood arrays to ~model_input_size per cell
+            # instead of (n_neighbors x model_input_size).
+            n_nonempty = sum(1 for k in ordered_neighbors
+                             if len(gene_tokens_cell_neigh[k]) > 0)
+            seg_length = self.model_input_size // (1 + n_nonempty)
+            # Guard: if the per-segment length rounds to 0 (pathologically high
+            # degree), store the full arrays so the stored segment set -- and
+            # hence the n_gene_segments / cell-segment length that
+            # _format_examples derives -- matches the legacy behaviour exactly.
+            cap = seg_length if seg_length >= 1 else None
 
-                adata_dict['rel_x_coord'][i].extend([
-                    (adata.obsm['spatial'][k, 0] -
-                     adata.obsm['spatial'][i, 0]
-                     ).tolist()])
-                adata_dict['rel_y_coord'][i].extend([
-                    (adata.obsm['spatial'][k, 1] -
-                     adata.obsm['spatial'][i, 1]
-                    ).tolist()])
+            # Build each distance-sorted neighborhood sequence with a SINGLE
+            # concatenation per cell (previously np.hstack per neighbor ->
+            # O(neighbors^2) reallocation/copy).
+            gene_token_parts = [adata_dict['gene_tokens_neighborhood'][i]]
+            gene_expr_parts = [adata_dict['gene_expr_neighborhood'][i]]
+            seg_token_parts = [adata_dict['seg_tokens_neighborhood'][i]]
+            for j, k in enumerate(ordered_neighbors):
+                neigh_tokens = gene_tokens_cell_neigh[k]
+                neigh_expr = gene_expr_cell_neigh[k]
+                if cap is not None:
+                    neigh_tokens = neigh_tokens[:cap]
+                    neigh_expr = neigh_expr[:cap]
+                gene_token_parts.append(neigh_tokens)
+                gene_expr_parts.append(neigh_expr)
+                seg_token_parts.append([j + 2] * len(neigh_tokens))
+            adata_dict['gene_tokens_neighborhood'][i] = np.hstack(
+                gene_token_parts)
+            adata_dict['gene_expr_neighborhood'][i] = np.hstack(
+                gene_expr_parts)
+            adata_dict['seg_tokens_neighborhood'][i] = np.hstack(
+                seg_token_parts)
 
-                #adata_dict['cell_total_counts'][i].append(adata.X[k].sum())
-                if self.add_neigh_cell_ids:
+            # Relative coordinates of each (distance-sorted) neighbor
+            adata_dict['rel_x_coord'][i].extend(
+                (coords[ordered_neighbors, 0] - coords[i, 0]).tolist())
+            adata_dict['rel_y_coord'][i].extend(
+                (coords[ordered_neighbors, 1] - coords[i, 1]).tolist())
+
+            if self.add_neigh_cell_ids:
+                for k in ordered_neighbors:
                     adata_dict['cell_ids'][i].extend(
-                        [adata.obs['cell_id'].values.tolist()[k]
-                        ] * self.seq_len_cell)
+                        [cell_id_list[k]] * self.seq_len_cell)
 
         del adata_dict['gene_tokens_cell_neigh']
         del adata_dict['gene_expr_cell_neigh']
@@ -937,47 +1133,43 @@ class CellGraphTokenizer(CellBaseTokenizer):
         n_nonzero_neighborhood_tokens = 0
 
         if n_gene_segments > 1:
+            # Convert the neighborhood arrays to numpy ONCE and select each
+            # segment with a boolean mask, instead of re-scanning the Python
+            # lists three times per segment via zip(). Boolean indexing
+            # preserves element order, so each per-segment slice is identical
+            # to the previous list comprehensions. Seeding the concat lists
+            # with the empty np.array([]) reproduces the original dtype
+            # promotion exactly (byte-identical intermediates).
+            neigh_genes = np.asarray(example['gene_tokens_neighborhood'])
+            neigh_segs = np.asarray(example['seg_tokens_neighborhood'])
+            neigh_expr = np.asarray(example['gene_expr_neighborhood'])
+            seg_length = int(self.model_input_size / n_gene_segments)
+
+            gene_token_parts = [gene_tokens_neighborhood]
+            seg_token_parts = [seg_tokens_neighborhood]
+            gene_expr_parts = [gene_expr_neighborhood]
             for segment in range(2, n_gene_segments + 1): # neigh segments
-                gene_tokens_neighborhood_segment = [
-                    gene for gene, seg in zip(
-                        example['gene_tokens_neighborhood'],
-                        example['seg_tokens_neighborhood']) 
-                    if seg == segment]
-                seg_tokens_neighborhood_segment = [
-                    seg for seg in example['seg_tokens_neighborhood'] 
-                    if seg == segment]
+                mask = neigh_segs == segment
 
                 gene_tokens_neighborhood_segment, \
                 n_nonzero_neighborhood_segment_tokens = process_gene_tokens(
-                    gene_tokens_neighborhood_segment,
-                    int(self.model_input_size / n_gene_segments),
-                    self.token_dict)
+                    neigh_genes[mask], seg_length, self.token_dict)
 
                 seg_tokens_neighborhood_segment, _ = process_gene_tokens(
-                    seg_tokens_neighborhood_segment,
-                    int(self.model_input_size / n_gene_segments),
-                    self.token_dict)
+                    neigh_segs[mask], seg_length, self.token_dict)
 
-                gene_tokens_neighborhood = np.hstack(
-                    (gene_tokens_neighborhood,
-                     gene_tokens_neighborhood_segment))
-                seg_tokens_neighborhood = np.hstack(
-                    (seg_tokens_neighborhood, seg_tokens_neighborhood_segment))
+                gene_expr_neighborhood_segment = process_gene_expr(
+                    neigh_expr[mask], seg_length)
+
+                gene_token_parts.append(gene_tokens_neighborhood_segment)
+                seg_token_parts.append(seg_tokens_neighborhood_segment)
+                gene_expr_parts.append(gene_expr_neighborhood_segment)
 
                 n_nonzero_neighborhood_tokens += n_nonzero_neighborhood_segment_tokens
 
-                gene_expr_neighborhood_segment = [
-                    gene_expr for gene_expr, seg in zip(
-                        example['gene_expr_neighborhood'],
-                        example['seg_tokens_neighborhood']) 
-                    if seg == segment]
-
-                gene_expr_neighborhood_segment = process_gene_expr(
-                    gene_expr_neighborhood_segment,
-                    int(self.model_input_size / n_gene_segments))
-
-                gene_expr_neighborhood = np.hstack(
-                    (gene_expr_neighborhood, gene_expr_neighborhood_segment))
+            gene_tokens_neighborhood = np.hstack(gene_token_parts)
+            seg_tokens_neighborhood = np.hstack(seg_token_parts)
+            gene_expr_neighborhood = np.hstack(gene_expr_parts)
 
         del example['gene_tokens_neighborhood']
         del example['gene_expr_neighborhood']

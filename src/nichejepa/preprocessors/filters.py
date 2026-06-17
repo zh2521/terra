@@ -24,8 +24,11 @@ def filter_cells(adata: ad.AnnData) -> ad.AnnData:
         
         return adata
     else:
-        filter_pass_idx = np.where(
-            [filter_pass == 1 for filter_pass in adata.obs['filter_pass']])[0]
-        adata_passing = adata.copy()[filter_pass_idx]
-        
+        filter_pass_idx = np.where(adata.obs['filter_pass'].values == 1)[0]
+        # Subset FIRST, then copy, so we never materialize a full copy of the
+        # entire AnnData (the previous `adata.copy()[idx]` copied every layer /
+        # obsm / obsp before discarding the filtered-out cells). Same cells,
+        # same order; just lower peak memory and faster.
+        adata_passing = adata[filter_pass_idx].copy()
+
         return adata_passing

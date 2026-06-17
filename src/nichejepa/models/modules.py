@@ -110,16 +110,46 @@ class Attention(nn.Module):
             q, k = self.rope(q, k, coords_clean)
 
         if self.use_flash_attention:
-            if masks is not None:
-                # SDPA accepts both bool masks (True = attend) and
-                # float additive masks (e.g. ALiBi bias). Pass through.
-                x = nn.functional.scaled_dot_product_attention(
-                    q, k, v, attn_mask=masks, scale=self.scale)
-                attn=None
+            # Memory-efficient SDPA with fp32 softmax accumulator.
+            # The FLASH_ATTENTION backend (PyTorch's default on bf16
+            # inputs) keeps the softmax in bf16, which loses precision
+            # on the exp/sum step and noticeably hurts JEPA-style
+            # training. The MATH backend matches the autocast-promoted
+            # fp32 softmax of the manual path but is slow and
+            # memory-hungry. EFFICIENT_ATTENTION + CUDNN_ATTENTION
+            # give fp32 softmax accumulation while preserving
+            # tile-wise memory savings. We prefer those over FLASH,
+            # falling back to MATH so the kernel is always available.
+            try:
+                from torch.nn.attention import sdpa_kernel, SDPBackend
+                _sdpa_backends = [
+                    SDPBackend.CUDNN_ATTENTION,
+                    SDPBackend.EFFICIENT_ATTENTION,
+                    SDPBackend.MATH,
+                ]
+            except ImportError:
+                print("Failed to import SDPBackend. Flash attention will be used without backend selection, which may hurt training stability. Consider upgrading to PyTorch 2.3+ for better flash attention support.")
+                # PyTorch < 2.3 — no backend selector API. Fall back
+                # to plain SDPA and accept whatever backend it picks.
+                sdpa_kernel = None
+                _sdpa_backends = None
+
+            if sdpa_kernel is not None:
+                with sdpa_kernel(_sdpa_backends):
+                    if masks is not None:
+                        x = nn.functional.scaled_dot_product_attention(
+                            q, k, v, attn_mask=masks, scale=self.scale)
+                    else:
+                        x = nn.functional.scaled_dot_product_attention(
+                            q, k, v, scale=self.scale)
             else:
-                x = nn.functional.scaled_dot_product_attention(
-                    q, k, v, scale=self.scale)
-                attn=None
+                if masks is not None:
+                    x = nn.functional.scaled_dot_product_attention(
+                        q, k, v, attn_mask=masks, scale=self.scale)
+                else:
+                    x = nn.functional.scaled_dot_product_attention(
+                        q, k, v, scale=self.scale)
+            attn = None
         else:
             attn = (q @ k.transpose(-2, -1)) * self.scale
             if masks is not None:

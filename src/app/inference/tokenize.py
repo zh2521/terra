@@ -86,11 +86,35 @@ def tokenize_adata(adata: ad.AnnData,
     print('==================================================')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
-    norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
 
     # Load model config
     with open(model_config_file_path, 'r') as file:
         model_config = yaml.safe_load(file)
+
+    # Normalization-artifact paths are read FROM THE MODEL CONFIG (recorded at
+    # training time under config['data']). If a path is specified, it is used
+    # and logged; if it is absent, it is not read and a warning notes the
+    # per-file fallback. This keeps the inference normalization explicit and
+    # matched to how the model was trained -- no silent mismatch.
+    norm_factor_file_path = model_config['data'].get('norm_factor_file_path')
+    pf_targets_file_path = model_config['data'].get('pf_targets_file_path')
+
+    if norm_factor_file_path:
+        print("Gene norm factors: reading from config path "
+              f"'{norm_factor_file_path}'.")
+    else:
+        print("WARNING: 'norm_factor_file_path' is not set in the model "
+              "config['data'] -> gene-level norm factors will NOT be loaded. "
+              "This is correct only if the model uses no gene-level norm "
+              "method (e.g. shifted_log / pflog1ppf).")
+
+    if pf_targets_file_path:
+        print("PFlog1pPF: reading FROZEN corpus targets from config path "
+              f"'{pf_targets_file_path}'.")
+    else:
+        print("WARNING: 'pf_targets_file_path' is not set in the model "
+              "config['data'] -> PFlog1pPF will use PER-FILE targets. This is "
+              "correct only if the model was trained with per-file targets.")
 
     print('==================================================')
     print('STEP 2: TOKENIZING ANNDATA OBJECT...')
@@ -114,6 +138,7 @@ def tokenize_adata(adata: ad.AnnData,
         count_gene_norm_method=model_config['data']['count_gene_norm_method'],
         count_count_norm_method=model_config['data']['count_count_norm_method'],
         norm_factor_file_path=norm_factor_file_path,
+        pf_targets_file_path=pf_targets_file_path,
         token_dictionary_file_path=token_dictionary_file_path,
         add_neigh_cell_ids=add_neigh_cell_ids,
         include_special_tokens=include_special_tokens)

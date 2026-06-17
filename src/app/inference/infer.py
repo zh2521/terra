@@ -357,7 +357,14 @@ def infer(args: dict,
         n_nonzero_tokens_list=[],
         include_cell_id=True,
         sep_gene_tokens_neb=sep_gene_tokens_neb,
-        nz_spc=nz_spc)
+        nz_spc=nz_spc,
+        # Mirror embed_dataset: zero the special-token slots at the dataset
+        # level so a dataset tokenized with include_special_tokens=False (no
+        # batch_value / *_value columns) does not raise KeyError in
+        # _add_special_seq. This is behaviour-preserving for the embeddings
+        # because the collator below uses special_token_pad_ratio=1.0 and
+        # zeroes those positions regardless.
+        pad_special_tokens=True)
 
     loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,
