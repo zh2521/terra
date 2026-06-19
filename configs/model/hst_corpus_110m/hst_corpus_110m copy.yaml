@@ -1,19 +1,18 @@
 data:
   dataset_name: 'hst_corpus_110m'
-  model_input_size: 4352 # 2816, 704, 11264
-  n_neighs: 16
-  rank_cell_norm_method: null
+  model_input_size: 2816 # 2816, 704, 11264
+  n_neighs: 10
+  rank_cell_norm_method: 'read_depth'
   rank_gene_norm_method: null
-  rank_count_norm_method: null
-  count_cell_norm_method: null
+  rank_count_norm_method: 'shifted_log'
+  count_cell_norm_method: 'read_depth'
   count_gene_norm_method: null
-  count_count_norm_method: 'pflog1ppf'
+  count_count_norm_method: 'shifted_log'
   raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/hst_corpus_110m'
   token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_homo_sapiens.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/hst_corpus_110m/hst_corpus_110m_32_None_None_None_None_None_pflog1ppf_knn_16_4352.dataset'
-  pf_targets_file_path: '/nfs/team361/sb75/nichejepa-reproducibility/artifacts/data/hst_corpus_110m_pf_targets.csv'
-  precomputed_split: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_pflog1ppf_knn_16_4352_precomputed_split_train.pkl'
-  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_pflog1ppf_knn_16_4352_n_nonzero_tokens_train.pkl'
+  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/hst_corpus_110m/hst_corpus_110m_32_read_depth_None_shifted_log_read_depth_None_shifted_log_knn_10.dataset'
+  precomputed_split: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_read_depth_None_shifted_log_read_depth_None_shifted_log_knn_10_precomputed_split_train.pkl'
+  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_read_depth_None_shifted_log_read_depth_None_shifted_log_knn_10_n_nonzero_tokens_train.pkl'
   test_batch_ids: ['49_batch0']
   val_batch_ids: ['49_batch0']
   tokenizer_type: 'cell_graph'
@@ -22,10 +21,10 @@ data:
   split: 0
   stratify: False
   seq_len_cell: 256 # 64, 128, 256
-  seq_len_neighborhood: 4096 # 384/640, 1536/2816
-  n_segments: 17 # 7, 11, 17; number of unique segment tokens (gene segments)
+  seq_len_neighborhood: 2560 # 384/640, 1536/2816
+  n_segments: 11 # 7, 11; number of unique segment tokens (gene segments)
   sampling_strategy: null # null, 'rand_sampling', 'norm_count_rank_sampling', 'rand_sampling_rep', 'norm_count_rank_sampling_rep'
-  batch_size: 8 # 224, 256, 128, 288
+  batch_size: 256 # 224, 256, 128, 288
   num_workers: 16
   pin_memory: True
   sep_gene_tokens_neb: False
@@ -46,7 +45,11 @@ meta:
   enc_emb_dim: 384 # 768, 384, 192
   pred_depth: 12 # 12
   pred_emb_dim: 192 # 768, 384, 192
+<<<<<<< HEAD
+  num_heads: 6 # 12, 6
+=======
   num_heads: 6 # 6, 8
+>>>>>>> feature/attn_improvements
   mlp_ratio: 4
   special_tokens: ['assay', 'gene_panel', 'batch'] # ['batch'], ['assay', 'batch'],['assay', 'gene_panel', 'batch'], ['tissue', 'assay', 'gene_panel', 'batch']
   pos_learnable: False
@@ -75,7 +78,7 @@ optimization:
   warmup: 1 # 1
   epochs: 5 # 5
   ema:
-  - 0.9995 # 0.998, 0.9995
+  - 0.9998 # 0.998, 0.9995
   - 1.0
   start_lr: 2.0e-05 # 1.0e-06, 2.0e-05
   lr: 6.0e-05 # 6.0e-05, 0.000625

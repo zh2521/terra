@@ -73,7 +73,7 @@ mask:
   special_token_pad_ratio: 0.
 optimization:
   warmup: 1
-  epochs: 10
+  epochs: 20
   ema:
   - 0.998
   - 1.0
