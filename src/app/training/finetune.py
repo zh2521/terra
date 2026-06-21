@@ -287,7 +287,8 @@ def finetune(args: dict,
         sampling_strategy=None,
         n_nonzero_tokens_list=n_nonzero_tokens,
         include_cell_id=False,
-        sep_gene_tokens_neb=sep_gene_tokens_neb)
+        sep_gene_tokens_neb=sep_gene_tokens_neb,
+        truncate_neighbors=args['data'].get('truncate_neighbors', False))
 
     loader, sampler = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,

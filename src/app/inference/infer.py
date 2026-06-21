@@ -364,7 +364,8 @@ def infer(args: dict,
         # _add_special_seq. This is behaviour-preserving for the embeddings
         # because the collator below uses special_token_pad_ratio=1.0 and
         # zeroes those positions regardless.
-        pad_special_tokens=True)
+        pad_special_tokens=True,
+        truncate_neighbors=args['data'].get('truncate_neighbors', False))
 
     loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,

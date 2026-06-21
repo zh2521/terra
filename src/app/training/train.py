@@ -840,7 +840,8 @@ def train(args: dict,
                 n_nonzero_tokens_list=nz,
                 include_cell_id=False,
                 sep_gene_tokens_neb=sep_gene_tokens_neb,
-                nz_spc=nz_spc)
+                nz_spc=nz_spc,
+                truncate_neighbors=args['data'].get('truncate_neighbors', False))
             train_cell_datasets.append(cell_d)
 
     else:
@@ -857,7 +858,8 @@ def train(args: dict,
             n_nonzero_tokens_list=n_nonzero_tokens,
             include_cell_id=False,
             sep_gene_tokens_neb=sep_gene_tokens_neb,
-            nz_spc=nz_spc)
+            nz_spc=nz_spc,
+            truncate_neighbors=args['data'].get('truncate_neighbors', False))
 
     if isinstance(train_dataset, list):
         train_loaders = []
