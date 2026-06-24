@@ -13,6 +13,9 @@ from src.terra.utils.config import create_params_from_YAML_wandb_config
 from src.terra.utils.distributed import init_distributed
 
 
+logger = logging.getLogger(__name__)
+
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Run TERRA inference.')
     parser.add_argument('--fname', type=str, default='configs.yaml',
@@ -23,8 +26,7 @@ def parse_arguments():
 if __name__ == '__main__':
     args = parse_arguments()
 
-    logging.basicConfig()
-    logger = logging.getLogger()
+    logging.basicConfig(level=logging.INFO)
 
     rank = 0
     world_size = 1
@@ -60,4 +62,4 @@ if __name__ == '__main__':
     adata_combined = ad.concat(
         [train_data, test_data], axis=0) # concat along the obs (cells)
     adata_combined.write(f'{folder_path}/adata.h5ad')
-    print("Finished inference script.")
+    logger.info("Finished inference script.")

@@ -21,7 +21,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import init_model, load_checkpoint
+from terra.utils.helper import init_model, load_checkpoint
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
 from terra.masks.block_masking  import BlockMaskCollator
@@ -37,6 +37,9 @@ from terra.utils.embedding import (create_binary_selection_mask,
                                        batch_rowwise_distances)
 from terra.utils.logging import CSVLogger
 from typing import Dict, List
+
+
+logger = logging.getLogger(__name__)
 
 
 def tokenize_adata(adata: ad.AnnData,
@@ -81,9 +84,7 @@ def tokenize_adata(adata: ad.AnnData,
     dataset:
         The tokenized data stored in a huggingface dataset.
     """
-    print('==================================================')
-    print('STEP 1: LOADING CONFIG...')
-    print('==================================================')
+    logger.info('STEP 1: LOADING CONFIG...')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
 
@@ -100,25 +101,23 @@ def tokenize_adata(adata: ad.AnnData,
     pf_targets_file_path = model_config['data'].get('pf_targets_file_path')
 
     if norm_factor_file_path:
-        print("Gene norm factors: reading from config path "
+        logger.info("Gene norm factors: reading from config path "
               f"'{norm_factor_file_path}'.")
     else:
-        print("WARNING: 'norm_factor_file_path' is not set in the model "
+        logger.warning("'norm_factor_file_path' is not set in the model "
               "config['data'] -> gene-level norm factors will NOT be loaded. "
               "This is correct only if the model uses no gene-level norm "
               "method (e.g. shifted_log / pflog1ppf).")
 
     if pf_targets_file_path:
-        print("PFlog1pPF: reading FROZEN corpus targets from config path "
+        logger.info("PFlog1pPF: reading FROZEN corpus targets from config path "
               f"'{pf_targets_file_path}'.")
     else:
-        print("WARNING: 'pf_targets_file_path' is not set in the model "
+        logger.warning("'pf_targets_file_path' is not set in the model "
               "config['data'] -> PFlog1pPF will use PER-FILE targets. This is "
               "correct only if the model was trained with per-file targets.")
 
-    print('==================================================')
-    print('STEP 2: TOKENIZING ANNDATA OBJECT...')
-    print('==================================================')
+    logger.info('STEP 2: TOKENIZING ANNDATA OBJECT...')
     # Tokenize adata
     if model_config['data']['tokenizer_type'] == 'cell_neigh':
         Tokenizer = cell_tokenizers.CellNeighborhoodTokenizer

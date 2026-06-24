@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -38,6 +39,9 @@ import anndata as ad
 from scvi.distributions import ZeroInflatedNegativeBinomial
 from scipy.stats import pearsonr
 from collections import OrderedDict
+
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -555,7 +559,7 @@ def regression_metrics(
         pearson_genes.append({"name": gene_name, "pearson_corr": pearson_corr})
 
     if n_nan_genes > 0:
-        print(f"Warning: {n_nan_genes} genes have NaN Pearson correlation")
+        logger.warning(f"{n_nan_genes} genes have NaN Pearson correlation")
 
     # Convert to arrays for aggregate statistics
     pearson_arr = np.array(pearson_corrs, dtype=float)
@@ -953,7 +957,7 @@ def _restrict_to_genes(
     if not keep_idx:
         raise ValueError(f"No overlap between requested genes and available genes in {context}.")
     if missing:
-        print(f"[info] {len(missing)} requested genes not found in {context} (e.g., {missing[:5]}).")
+        logger.info(f"{len(missing)} requested genes not found in {context} (e.g., {missing[:5]}).")
 
     keep_idx = np.array(keep_idx, dtype=int)
     new_gene_list = gene_list[keep_idx]
@@ -1080,9 +1084,9 @@ def evaluate(
     
     # Warn if predictions are constant (potential training issue)
     if np.allclose(preds_arr, preds_arr[0]):
-        print("[warn] model predictions are constant across all spots")
+        logger.warning("model predictions are constant across all spots")
     if np.allclose(target_arr, target_arr[0]):
-        print("[warn] targets are constant across all spots")
+        logger.warning("targets are constant across all spots")
 
     if spot_metrics_only:
         return _spot_level_metrics(preds_arr, target_arr, suffix=spot_suffix)
@@ -1111,7 +1115,7 @@ def _get_embedding_from_obsm(
     if primary_key and primary_key in adata.obsm:
         return _to_dense(adata.obsm[primary_key])
     if fallback_key and fallback_key in adata.obsm:
-        print(f"[info] Embedding key '{primary_key}' not found; using fallback '{fallback_key}'")
+        logger.warning(f"Embedding key '{primary_key}' not found; using fallback '{fallback_key}'")
         return _to_dense(adata.obsm[fallback_key])
     available = list(adata.obsm.keys())
     raise ValueError(
@@ -1172,7 +1176,7 @@ def load_adata_datasets(
     if not shared:
         raise ValueError("No shared genes between train and test AnnData files.")
     if len(shared) < len(train_genes) or len(shared) < len(test_genes):
-        print(f"[info] Restricting to {len(shared)} shared genes (train:{len(train_genes)}, test:{len(test_genes)})")
+        logger.info(f"Restricting to {len(shared)} shared genes (train:{len(train_genes)}, test:{len(test_genes)})")
 
     if restrict_genes:
         restrict_set = set(restrict_genes)
@@ -1181,9 +1185,9 @@ def load_adata_datasets(
         if not filtered_shared:
             raise ValueError("Gene restriction removed all shared genes between train and test AnnData.")
         if missing:
-            print(f"[info] {len(missing)} requested genes not found in shared set (e.g., {missing[:5]}).")
+            logger.info(f"{len(missing)} requested genes not found in shared set (e.g., {missing[:5]}).")
         if len(filtered_shared) < len(shared):
-            print(f"[info] Restricting to {len(filtered_shared)} genes after applying user gene subset.")
+            logger.info(f"Restricting to {len(filtered_shared)} genes after applying user gene subset.")
         shared = filtered_shared
 
     train_adata = train_adata[:, shared]
@@ -1204,7 +1208,7 @@ def load_adata_datasets(
         if not len(keep_idx):
             raise ValueError("All genes have zero variance; cannot train decoder.")
         if len(keep_idx) < len(shared):
-            print(f"[info] Dropped {len(shared) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
+            logger.info(f"Dropped {len(shared) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
         train_expression = train_expression[:, keep_idx]
         test_expression = test_expression[:, keep_idx]
         gene_list = np.array([shared[i] for i in keep_idx], dtype=object)
@@ -1270,9 +1274,9 @@ def load_adata_single(
         if not keep_idx:
             raise ValueError("Gene restriction removed all genes present in the AnnData file.")
         if missing:
-            print(f"[info] {len(missing)} requested genes not found in AnnData (e.g., {missing[:5]}).")
+            logger.info(f"{len(missing)} requested genes not found in AnnData (e.g., {missing[:5]}).")
         if len(keep_idx) < len(gene_list):
-            print(f"[info] Restricting to {len(keep_idx)} genes from user selection.")
+            logger.info(f"Restricting to {len(keep_idx)} genes from user selection.")
         keep_idx_arr = np.array(keep_idx, dtype=int)
         full_expression = full_expression[:, keep_idx_arr]
         gene_list = gene_list[keep_idx_arr]
@@ -1284,7 +1288,7 @@ def load_adata_single(
         if not len(keep_idx):
             raise ValueError("All genes have zero variance; cannot train decoder.")
         if len(keep_idx) < len(gene_list):
-            print(f"[info] Dropped {len(gene_list) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
+            logger.info(f"Dropped {len(gene_list) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
         full_expression = full_expression[:, keep_idx]
         gene_list = gene_list[keep_idx]
 
@@ -1386,7 +1390,7 @@ def load_combined_dataset(
         "test_slides": data["test_slides"],
         "gene_list": np.array([gene_list[i] for i in keep_idx], dtype=object),
     }
-    print(f"[info] Dropped {len(gene_list) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
+    logger.info(f"Dropped {len(gene_list) - len(keep_idx)} zero-variance genes; {len(keep_idx)} remain.")
     return filtered, filtered["gene_list"]
 
 
@@ -1569,7 +1573,7 @@ def train(args: argparse.Namespace) -> dict:
     set_seed(args.seed)
     device = get_device(args.device)
 
-    print(f"[info] Using loss type: {args.loss_type}")
+    logger.info(f"Using loss type: {args.loss_type}")
 
     gene_subset: Optional[list[str]] = None
     train_adata_obj: Optional[ad.AnnData] = None
@@ -1623,7 +1627,7 @@ def train(args: argparse.Namespace) -> dict:
                 raise ValueError(f"Unknown gene_selection mode: {args.gene_selection}")
 
         if gene_selection_desc:
-            print(f"[info] Gene selection: {gene_selection_desc}")
+            logger.info(f"Gene selection: {gene_selection_desc}")
     
     # Load dataset:
     # 1) NPZ (legacy), or
@@ -1722,17 +1726,17 @@ def train(args: argparse.Namespace) -> dict:
     
     # Log library size statistics
     if args.loss_type == "nb_libsize":
-        print(f"[info] Train library size: mean={train_libsize.mean():.2f}, "
+        logger.info(f"Train library size: mean={train_libsize.mean():.2f}, "
               f"std={train_libsize.std():.2f}, min={train_libsize.min():.2f}, "
               f"max={train_libsize.max():.2f}")
-        print(f"[info] Test library size: mean={test_libsize.mean():.2f}, "
+        logger.info(f"Test library size: mean={test_libsize.mean():.2f}, "
               f"std={test_libsize.std():.2f}, min={test_libsize.min():.2f}, "
               f"max={test_libsize.max():.2f}")
         if has_val and val_libsize is not None:
-            print(f"[info] Val library size: mean={val_libsize.mean():.2f}, "
+            logger.info(f"Val library size: mean={val_libsize.mean():.2f}, "
                   f"std={val_libsize.std():.2f}, min={val_libsize.min():.2f}, "
                   f"max={val_libsize.max():.2f}")
-        print(f"[info] Using fixed library size of {NB_FIXED_LIBSIZE} at test time")
+        logger.info(f"Using fixed library size of {NB_FIXED_LIBSIZE} at test time")
 
     # Create datasets
     # For nb_libsize, we include library size in the dataset
@@ -1749,9 +1753,9 @@ def train(args: argparse.Namespace) -> dict:
     train_zero_std = zero_std_genes(train_expr.numpy(), gene_list)
     test_zero_std = zero_std_genes(test_expr.numpy(), gene_list)
     if train_zero_std:
-        print(f"[info] {len(train_zero_std)} train genes have zero std (first: {train_zero_std[:5]})")
+        logger.info(f"{len(train_zero_std)} train genes have zero std (first: {train_zero_std[:5]})")
     if test_zero_std:
-        print(f"[info] {len(test_zero_std)} test genes have zero std (first: {test_zero_std[:5]})")
+        logger.info(f"{len(test_zero_std)} test genes have zero std (first: {test_zero_std[:5]})")
 
     if args.disable_slide_batching:
         # Standard random mini-batches
@@ -1814,7 +1818,7 @@ def train(args: argparse.Namespace) -> dict:
         mean_activation=mean_activation,
     ).to(device)
 
-    print(f"[info] Decoder has dropout head: {use_dropout_head}")
+    logger.info(f"Decoder has dropout head: {use_dropout_head}")
 
     optimizer = torch.optim.Adam(
         decoder.parameters(),
@@ -1876,7 +1880,7 @@ def train(args: argparse.Namespace) -> dict:
         val = metrics.get(key, float("nan"))
         return float(val) if isinstance(val, (int, float, np.floating, np.integer)) else float("nan")
 
-    print(
+    logger.info(
         "[info] Initial metrics (epoch 0, untrained): "
         f"train {metric_key_map[args.early_stop_metric]}="
         f"{_safe_metric_val(init_train_metrics, metric_key_map[args.early_stop_metric]):.4f}, "
@@ -1990,7 +1994,7 @@ def train(args: argparse.Namespace) -> dict:
         else:
             patience_counter += 1
             if args.early_stop_patience > 0 and patience_counter >= args.early_stop_patience:
-                print(f"[info] Early stopping at epoch {epoch}")
+                logger.info(f"Early stopping at epoch {epoch}")
                 break
 
     # If no improvement was ever recorded, use final state
@@ -2350,43 +2354,16 @@ python count_decoder.py --dataset data.npz --loss-type nb_softplus
 
 def main() -> None:
     """Main entry point."""
+    logging.basicConfig(level=logging.INFO)
     args = parse_args()
     result = train(args)
-    print(f"Saved checkpoint to: {result['checkpoint']}")
+    logger.info(f"Saved checkpoint to: {result['checkpoint']}")
     if result["metrics"]:
-        print(f"Loss type: {args.loss_type}")
+        logger.info(f"Loss type: {args.loss_type}")
         if "val" in result["metrics"]:
-            print(f"Best val Pearson: {result['metrics']['val']['pearson_mean']:.4f}")
-        print(f"Best test Pearson: {result['metrics']['test']['pearson_mean']:.4f}")
+            logger.info(f"Best val Pearson: {result['metrics']['val']['pearson_mean']:.4f}")
+        logger.info(f"Best test Pearson: {result['metrics']['test']['pearson_mean']:.4f}")
 
 
 if __name__ == "__main__":
     main()
-'''
-python -m pdb src/app/count_decoder.py --loss-type nb_libsize  --expression-layer counts --disable-slide-batching 
- --wandb-project count_decoder --spot-metrics --gene-selection hvg --hvg-top-n 100
---adata /nfs/team361/dj17/NEMO_DJ/KidneyToxicity/NEMO_UpdatedTokenisationandEmbedding_November22nd25/Labeltransfer/forshare/nemokidneyxeniumatlas_annotated.h5ad
-'''
-
-'''
- python -m pdb src/app/count_decoder.py --save-dir results_nb_softplus --loss-type nb_softplus  --expression-layer counts --disable-slide-batching  --wandb-project count_decoder --spot-metrics --gene-selection hvg --hvg-top-n 100 --adata /nfs/team361/dj17/NEMO_DJ/KidneyToxicity/NEMO_UpdatedTokenisationandEmbedding_November22nd25/Labeltransfer/forshare/nemokidneyxeniumatlas_annotated.h5ad
-'''
-
-'''
-python -m pdb src/app/count_decoder.py --loss-type nb_softplus --expression-layer counts --disable-slide-batching --wandb-project count_decoder --spot-metrics --gene-selection all --spot-metrics-only --adata /nfs/team361/sb75/DATASETS/gold/cell-graph-tokenizer/kidney_perturbation/nemokidneyxeniumatlas_annotated_processed.h5ad
-
-'''
-
-'''
-python -m pdb src/app/count_decoder.py \
-  --loss-type nb_softplus \
-  --expression-layer counts_neighborhood \
-  --embed-key neighborhood_emb \
-  --disable-slide-batching \
-  --spot-metrics --spot-metrics-only \
-  --gene-selection all \
-  --save-dir ./results_neb \
-  --num-workers 6 \
-  --adata /nfs/team361/sb75/DATASETS/gold/cell-graph-tokenizer/kidney_perturbation/nemokidneyxeniumatlas_annotated_processed.h5ad \
-  --wandb-project count_decoder
-'''

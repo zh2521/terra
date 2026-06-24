@@ -22,7 +22,6 @@ except Exception:
 
 import copy
 import logging
-import sys
 import yaml
 from datetime import datetime
 
@@ -39,7 +38,7 @@ from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
 
-from app.utils import (build_batch_classifier_head,
+from terra.utils.helper import (build_batch_classifier_head,
                        init_model, init_opt, load_checkpoint,
                        parse_distribution_alignment_kwargs,
                        parse_protein_init_kwargs)
@@ -97,8 +96,7 @@ os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1" # Better error propagation
 _GLOBAL_SEED = 0
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 def train(args: dict,
@@ -898,7 +896,7 @@ def train(args: dict,
             persistent_workers=False,
             mega_batch_mult_max=mega_batch_mult_max)
 
-    print(f"Length of train loader: {len(train_loader)}.")
+    logger.info(f"Length of train loader: {len(train_loader)}.")
     ipe = len(train_loader)
 
     # Initialize optimizer and scheduler

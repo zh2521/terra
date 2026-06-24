@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import pickle
-import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
@@ -21,7 +20,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import init_model, load_checkpoint
+from terra.utils.helper import init_model, load_checkpoint
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
 from terra.masks.block_masking  import BlockMaskCollator
@@ -45,8 +44,7 @@ torch.manual_seed(_GLOBAL_SEED)
 torch.backends.cudnn.benchmark = True
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 @torch.inference_mode()

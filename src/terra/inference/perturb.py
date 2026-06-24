@@ -21,7 +21,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import init_model, load_checkpoint
+from terra.utils.helper import init_model, load_checkpoint
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
 from terra.masks.block_masking  import BlockMaskCollator
@@ -37,6 +37,9 @@ from terra.utils.embedding import (create_binary_selection_mask,
                                        batch_rowwise_distances)
 from terra.utils.logging import CSVLogger
 from typing import Dict, List
+
+
+logger = logging.getLogger(__name__)
 
 
 def _build_perturb_index(df: pd.DataFrame) -> dict[str, list[dict]]:
@@ -234,8 +237,7 @@ def perturb_dataset(dataset: Dataset,
         perturb_df["perturbed_ensembl_id"] == "all",
         perturb_df["perturbed_ensembl_id"].map(token_dict),
     )
-    print("Applying perturbations using dataframe:")
-    print(perturb_df)
+    logger.info(f"Applying perturbations using dataframe:\n{perturb_df}")
 
     # If all perturbations are on all cells, skip indexing
     perturbed_cell_ids = perturb_df["perturbed_cell_id"].unique().tolist()

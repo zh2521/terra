@@ -5,7 +5,7 @@ import logging
 
 #import torch.multiprocessing as mp
 import torch.distributed as dist
-from app.training import train
+from terra.training import train
 from terra.datasets.utils import prepare_dataset
 from terra.utils.config import create_params_from_YAML_wandb_config
 import wandb
@@ -23,8 +23,7 @@ from socket import gethostname
 
 warnings.filterwarnings("ignore")
 # logger
-logging.basicConfig()
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 # ==========================
 
@@ -41,8 +40,8 @@ def get_distributed_info():
         WORLD_SIZE = int(os.environ["WORLD_SIZE"])
         GPUS_PER_NODE = int(os.environ["SLURM_GPUS_ON_NODE"])
         assert GPUS_PER_NODE == torch.cuda.device_count()
-        print(f"Hello from rank {WORLD_RANK} of {WORLD_SIZE} on {gethostname()} where there are" \
-            f" {GPUS_PER_NODE} allocated GPUs per node.", flush=True)
+        logger.info(f"Hello from rank {WORLD_RANK} of {WORLD_SIZE} on {gethostname()} where there are" \
+            f" {GPUS_PER_NODE} allocated GPUs per node.")
         LOCAL_RANK = WORLD_RANK - GPUS_PER_NODE * (WORLD_RANK // GPUS_PER_NODE)
     if "LOCAL_RANK" in os.environ:
         # Environment variables set by torch.distributed.launch or
@@ -59,8 +58,8 @@ def get_distributed_info():
         import sys
         sys.exit("Can't find the environment variables for local rank")
 
-    # Print the ranks
-    print(f"World rank: {WORLD_RANK}, Local rank: {LOCAL_RANK}, World size: {WORLD_SIZE}")
+    # Log the ranks
+    logger.info(f"World rank: {WORLD_RANK}, Local rank: {LOCAL_RANK}, World size: {WORLD_SIZE}")
 
     return WORLD_RANK, LOCAL_RANK, WORLD_SIZE
 
@@ -125,10 +124,9 @@ def main():
         current_timestamp = (
             datetime.now().strftime("%d%m%Y_%H%M%S") +
             f"_{datetime.now().microsecond // 1000:03d}")
-        print(f'Run timestamp: {current_timestamp}.')
+        logger.info(f'Run timestamp: {current_timestamp}.')
         if not wandb.run.resumed:
             wandb.config.run_timestamp = current_timestamp
-        print(params)
         if params['state']['folder_path'] is None:
             folder_path = os.path.join(artifact_folder_path,
                                        params['data']['dataset_name'],
@@ -137,8 +135,6 @@ def main():
             folder_path = params['state']['folder_path']
     else:
         folder_path=None
-
-    print(f"tcp://{os.environ['MASTER_ADDR']}:{os.environ['MASTER_PORT']}")
 
     # Set multiprocessing start method
     #try:
@@ -168,19 +164,20 @@ def main():
 
 
 if __name__ == "__main__":
-    # Print Torch Version
-    print(f"torch.__version__: {torch.__version__}")
-    # Print torch CUDA version
-    print(f"torch.version.cuda: {torch.version.cuda}")
-    # Print torch nccl version
+    logging.basicConfig(level=logging.INFO)
+    # Log Torch Version
+    logger.debug(f"torch.__version__: {torch.__version__}")
+    # Log torch CUDA version
+    logger.debug(f"torch.version.cuda: {torch.version.cuda}")
+    # Log torch nccl version
     try:
         nccl_version = torch.cuda.nccl.version()
     except AttributeError:
         nccl_version = "NCCL not available."
-    print(f"torch.cuda.nccl.version(): {nccl_version}")
-    # Print visible CUDA devices
-    print("CUDA_VISIBLE_DEVICES:", os.environ.get("CUDA_VISIBLE_DEVICES"))
-    print("torch.cuda.device_count():", torch.cuda.device_count())
+    logger.debug(f"torch.cuda.nccl.version(): {nccl_version}")
+    # Log visible CUDA devices
+    logger.debug(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+    logger.debug(f"torch.cuda.device_count(): {torch.cuda.device_count()}")
 
     # Set additional environment variables
     os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"

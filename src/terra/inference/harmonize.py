@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import pickle
-import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
@@ -21,7 +20,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import init_model, load_checkpoint
+from terra.utils.helper import init_model, load_checkpoint
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
 from terra.masks.block_masking  import BlockMaskCollator
@@ -37,6 +36,9 @@ from terra.utils.embedding import (create_binary_selection_mask,
                                        batch_rowwise_distances)
 from terra.utils.logging import CSVLogger
 from typing import Dict, List
+
+
+logger = logging.getLogger(__name__)
 
 
 def harmonize_adata(adata: ad.AnnData,
@@ -65,10 +67,8 @@ def harmonize_adata(adata: ad.AnnData,
     adata:
         A harmonized AnnData object.
     """
-    print('==================================================')
-    print('STEP 1: DATA VALIDATION...')
-    print('==================================================')
-    print('Checking that adata.X contains raw counts...')
+    logger.info('STEP 1: DATA VALIDATION...')
+    logger.info('Checking that adata.X contains raw counts...')
     use_counts_from_layers = False
     while True:
         if issparse(adata.X):
@@ -91,18 +91,16 @@ def harmonize_adata(adata: ad.AnnData,
             break
 
     if use_counts_from_layers:
-        print("Using counts from adata.layers['counts'] as adata.X"
+        logger.warning("Using counts from adata.layers['counts'] as adata.X"
               " did not contain raw counts (integer values).")
     else:
-        print("✓ adata.X contains raw counts (integer values).")
+        logger.info("✓ adata.X contains raw counts (integer values).")
 
-    print('==================================================')
-    print('STEP 2: ADDING ENSEMBL IDS...')
-    print('==================================================')
+    logger.info('STEP 2: ADDING ENSEMBL IDS...')
     if not gene_mapping_dict_file_path:
-        print(f'Adding ensembl IDs from release {ensembl_release}...')
-        print(f'Make sure this ensembl release is aligned with pretraining.')
-        print(f'Current ensembl release used for pretraining is 111.')
+        logger.info(f'Adding ensembl IDs from release {ensembl_release}...')
+        logger.info(f'Make sure this ensembl release is aligned with pretraining.')
+        logger.info(f'Current ensembl release used for pretraining is 111.')
         # Extract ensembl IDs of protein coding and miRNA mouse genes
         ensembl = EnsemblRelease(release=ensembl_release, species=species)
         ensembl.download()
@@ -116,7 +114,7 @@ def harmonize_adata(adata: ad.AnnData,
         gene_ensembl_map_dict = {
             gene.gene_name: gene.gene_id for gene in all_relevant_genes}
     else:
-        print(f'Adding ensembl IDs from gene_mapping_dict with file path `{gene_mapping_dict_file_path}`...')
+        logger.info(f'Adding ensembl IDs from gene_mapping_dict with file path `{gene_mapping_dict_file_path}`...')
         with open(gene_mapping_dict_file_path, 'rb') as f:
             gene_ensembl_map_dict = pickle.load(f)
 
@@ -129,10 +127,10 @@ def harmonize_adata(adata: ad.AnnData,
         if gene_name in gene_ensembl_map_dict.keys():
             harmonized_gene_names.append(gene_name)
             matching_ensembl_ids.append(gene_ensembl_map_dict[gene_name])
-    print(f'Number of genes with matching ensembl IDs: {len(harmonized_gene_names)}.')
-    print(f'Number of genes skipped due to non-matching ensembl IDs: {len(adata_gene_names) - len(harmonized_gene_names)}.')
+    logger.info(f'Number of genes with matching ensembl IDs: {len(harmonized_gene_names)}.')
+    logger.warning(f'Number of genes skipped due to non-matching ensembl IDs: {len(adata_gene_names) - len(harmonized_gene_names)}.')
     if len(adata_gene_names) - len(harmonized_gene_names) > 0:
-        print(f'Genes excluded due to non-matching ensembl IDs: {set(adata_gene_names) - set(harmonized_gene_names)}.')
+        logger.warning(f'Genes excluded due to non-matching ensembl IDs: {set(adata_gene_names) - set(harmonized_gene_names)}.')
 
     adata = adata[:, adata.var.index.isin(harmonized_gene_names)].copy()
     adata.var = pd.DataFrame(
@@ -140,7 +138,7 @@ def harmonize_adata(adata: ad.AnnData,
         data={'ensembl_id': matching_ensembl_ids})
 
     if gene_occurrence_count_file_path:
-        print(f'Filtering genes that have not occurred enough during pretraining...')
+        logger.info(f'Filtering genes that have not occurred enough during pretraining...')
         with open(gene_occurrence_count_file_path, 'rb') as f:
             gene_occurrence_count_dict = pickle.load(f)
 
@@ -149,34 +147,32 @@ def harmonize_adata(adata: ad.AnnData,
             ensembl_id for ensembl_id in all_ensembl_ids if gene_occurrence_count_dict[
                     ensembl_id] > gene_occurrence_count_filter_value]
 
-        print(f'Number of genes skipped due to not enough pretraining occurrences: {len(all_ensembl_ids) - len(keep_ensembl_ids)}.')
+        logger.warning(f'Number of genes skipped due to not enough pretraining occurrences: {len(all_ensembl_ids) - len(keep_ensembl_ids)}.')
         if len(all_ensembl_ids) - len(keep_ensembl_ids) > 0:
-            print(f'Genes excluded due to not enough pretraining occurrences: {set(all_ensembl_ids) - set(keep_ensembl_ids)}.')
+            logger.warning(f'Genes excluded due to not enough pretraining occurrences: {set(all_ensembl_ids) - set(keep_ensembl_ids)}.')
         adata = adata[:, adata.var['ensembl_id'].isin(keep_ensembl_ids)].copy()
 
-    print('==================================================')
-    print('STEP 3: BASIC QUALITY CONTROL...')
-    print('==================================================')
+    logger.info('STEP 3: BASIC QUALITY CONTROL...')
     # Filter cells with less than min_genes_per_cell genes
     n_cells_before = adata.n_obs
-    print(f'Filtering cells with less than {min_genes_per_cell} genes.')
+    logger.info(f'Filtering cells with less than {min_genes_per_cell} genes.')
     sc.pp.filter_cells(
         adata,
         min_genes=min_genes_per_cell)
     n_cells_after = adata.n_obs
-    print(f"Before cell filtering: {n_cells_before} cells.")
-    print(f"After cell filtering: {n_cells_after} cells "
+    logger.info(f"Before cell filtering: {n_cells_before} cells.")
+    logger.info(f"After cell filtering: {n_cells_after} cells "
           f"(removed {n_cells_before - n_cells_after} cells).")
 
     # Filter genes with less than min_cells_per_gene cells
     n_genes_before = adata.n_vars
-    print(f'Filtering genes expressed in less than {min_cells_per_gene} cells.')
+    logger.info(f'Filtering genes expressed in less than {min_cells_per_gene} cells.')
     sc.pp.filter_genes(
         adata,
         min_cells=min_cells_per_gene)
     n_genes_after = adata.n_vars
-    print(f"Before gene filtering: {n_genes_before} genes.")
-    print(f"After gene filtering: {n_genes_after} genes "
+    logger.info(f"Before gene filtering: {n_genes_before} genes.")
+    logger.info(f"After gene filtering: {n_genes_after} genes "
           f"(removed {n_genes_before - n_genes_after} genes).")
 
     if 'cell_id' not in adata.obs.keys():

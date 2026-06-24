@@ -1,7 +1,7 @@
 """Hugging Face Hub integration for TERRA models.
 
 Publish and download TERRA model *bundles* -- the self-contained folder that the
-inference pipeline (``app.inference.embed_dataset`` /
+inference pipeline (``terra.embed_dataset`` /
 ``harmonize_tokenize_embed_pipeline``) reads via ``model_folder_path``:
 
     model_checkpoint.pt       target-encoder weights (inference)
@@ -25,15 +25,14 @@ Examples
 --------
 Upload a trained model bundle (maintainer)::
 
-    python -m app.huggingface upload \\
+    python -m terra.hub upload \\
         --folder /path/to/artifacts/models/<timestamp> \\
         --repo-id Lotfollahi-lab/TERRA-96M \\
         --corpus HST-Corpus-112M --tag v1.0
 
 Download a published model and run inference (user)::
 
-    from app.huggingface import download_pretrained
-    from app.inference import harmonize_tokenize_embed_pipeline
+    from terra import download_pretrained, harmonize_tokenize_embed_pipeline
 
     d = download_pretrained("Lotfollahi-lab/TERRA-96M", revision="v1.0")
     adata = harmonize_tokenize_embed_pipeline(
@@ -42,7 +41,10 @@ Download a published model and run inference (user)::
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Files that make up a self-contained TERRA inference bundle. Optional files
 # that are absent for a given model are simply skipped on upload.
@@ -64,7 +66,7 @@ BUNDLE_FILES = (
 # (deleting ``.gitattributes`` would drop the repo's LFS tracking rules).
 STALE_DELETE_PATTERNS = ("*.pt", "*.pth", "*.pkl", "*.yaml", "*.yml", "*.csv")
 
-DEFAULT_LICENSE = "cc-by-nc-4.0"
+DEFAULT_LICENSE = "cc-by-4.0"
 
 
 def _require_hub():
@@ -73,7 +75,7 @@ def _require_hub():
         import huggingface_hub
     except ModuleNotFoundError as e:  # pragma: no cover - trivial guard
         raise ModuleNotFoundError(
-            "app.huggingface requires 'huggingface_hub'. Install it with "
+            "terra.hub requires 'huggingface_hub'. Install it with "
             '`pip install "terra-st[hub]"` (or `pip install huggingface_hub`).'
         ) from e
     return huggingface_hub
@@ -125,8 +127,7 @@ Code & docs: https://github.com/Lotfollahi-lab/terra
     # Kept as a plain string (not an f-string) so the ``{d}`` in the snippet is
     # literal; the repo id is substituted explicitly.
     usage = '''```python
-from app.huggingface import download_pretrained
-from app.inference import harmonize_tokenize_embed_pipeline
+from terra import download_pretrained, harmonize_tokenize_embed_pipeline
 
 d = download_pretrained("__REPO_ID__")
 adata = harmonize_tokenize_embed_pipeline(
@@ -204,7 +205,7 @@ def push_model_to_hub(model_folder: str | Path,
         api.create_tag(repo_id, tag=tag, repo_type="model", exist_ok=True)
 
     url = f"https://huggingface.co/{repo_id}"
-    print(f"Uploaded {model_folder} -> {url}" + (f"  (tag: {tag})" if tag else ""))
+    logger.info(f"Uploaded {model_folder} -> {url}" + (f"  (tag: {tag})" if tag else ""))
     return url
 
 
@@ -230,7 +231,8 @@ def download_pretrained(repo_id: str,
 
 
 def main(argv: list[str] | None = None) -> None:
-    """CLI: ``python -m app.huggingface {upload,download} ...`` (or ``terra-hub``)."""
+    """CLI: ``python -m terra.hub {upload,download} ...`` (or ``terra-hub``)."""
+    logging.basicConfig(level=logging.INFO)
     p = argparse.ArgumentParser(
         description="Publish/download TERRA models on the Hugging Face Hub.")
     sub = p.add_subparsers(dest="cmd", required=True)

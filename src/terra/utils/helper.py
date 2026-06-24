@@ -8,7 +8,6 @@ https://github.com/facebookresearch/ijepa/blob/main/src/helper.py
 
 import logging
 import math
-import sys
 from typing import Literal
 
 import torch
@@ -23,8 +22,7 @@ from terra.utils.schedulers import (CosineWDSchedule,
                                         WarmupCosineSchedule)
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 """
 def apply_peft(model, peft_method='lora', rank=8):
@@ -390,7 +388,6 @@ def load_checkpoint(device: str,
 
         # Load state into target encoder
         if target_encoder is not None:
-            print(list(checkpoint.keys()))
             pretrained_dict = checkpoint['target_encoder']
             if not is_training:
                 pretrained_dict = {

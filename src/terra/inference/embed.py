@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import pickle
-import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
@@ -21,7 +20,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import (init_model, load_checkpoint, parse_arch_kwargs,
+from terra.utils.helper import (init_model, load_checkpoint, parse_arch_kwargs,
                        parse_protein_init_kwargs)
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
@@ -49,8 +48,7 @@ torch.manual_seed(_GLOBAL_SEED)
 torch.backends.cudnn.benchmark = True
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 @torch.inference_mode()
@@ -101,9 +99,7 @@ def embed_dataset(dataset: Dataset,
         Dictionary with the cell, cell gene, neighborhood, and neighborhood gene
         embeddings.
     """
-    print('==================================================')
-    print('STEP 1: LOADING CONFIG...')
-    print('==================================================')
+    logger.info('STEP 1: LOADING CONFIG...')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
     norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
@@ -122,7 +118,7 @@ def embed_dataset(dataset: Dataset,
 
     # Specify last emb layer if not defined
     if emb_layer is None:
-        emb_layer = model_config['meta']['enc_depth'] 
+        emb_layer = model_config['meta']['enc_depth']
 
     # Load token dict and get token dict-specfic params
     with open(token_dictionary_file_path, 'rb') as file:
@@ -136,9 +132,7 @@ def embed_dataset(dataset: Dataset,
     else:
         agg_excluded_tokens = None
 
-    print('==================================================')
-    print('STEP 2: GENERATING EMBEDDINGS...')
-    print('==================================================')
+    logger.info('STEP 2: GENERATING EMBEDDINGS...')
     # Set device
     if not torch.cuda.is_available():
         device = torch.device('cpu')
@@ -451,7 +445,7 @@ def harmonize_tokenize_embed_pipeline(
         A harmonized AnnData object with embeddings stored in `adata.obsm`.
     """
     # Gene-reference files default to the ones shipped inside the model bundle
-    # (see app.huggingface.BUNDLE_FILES), so a downloaded HF model reproduces the
+    # (see terra.hub.BUNDLE_FILES), so a downloaded HF model reproduces the
     # model's training-time harmonization without any external paths. An explicit
     # path always overrides; a missing bundle file falls back to harmonize_adata's
     # built-in behavior (Ensembl-release lookup / skipping the occurrence filter).
@@ -466,7 +460,7 @@ def harmonize_tokenize_embed_pipeline(
     datasets = []
     adata.obs_names_make_unique()
     if sample_key:
-        print(f"Harmonizing AnnData...")
+        logger.info(f"Harmonizing AnnData...")
         adata = harmonize_adata(
             adata,
             gene_mapping_dict_file_path=gene_mapping_dict_file_path,
@@ -484,8 +478,8 @@ def harmonize_tokenize_embed_pipeline(
 
         for sample in samples:
             adata_sample = adata[adata.obs[sample_key] == sample]
-            print(f"Start processing sample: {sample}...")
-            print(f"Harmonizing sample {sample}...")
+            logger.info(f"Start processing sample: {sample}...")
+            logger.info(f"Harmonizing sample {sample}...")
             adata_sample = harmonize_adata(
                 adata_sample,
                 gene_mapping_dict_file_path=gene_mapping_dict_file_path,
@@ -498,9 +492,8 @@ def harmonize_tokenize_embed_pipeline(
             idx_list.extend(adata_sample.obs.index.tolist())
             gene_list.extend(adata_sample.var.index.tolist())
             batch_ids.extend([sample] * len(adata_sample))
-            print(f"Harmonized sample {sample}.")
-            print('==================================================')
-            print(f"Tokenizing sample {sample}...")
+            logger.info(f"Harmonized sample {sample}.")
+            logger.info(f"Tokenizing sample {sample}...")
             dataset_sample = tokenize_adata(
                 adata=adata_sample,
                 model_folder_path=model_folder_path,
@@ -509,22 +502,20 @@ def harmonize_tokenize_embed_pipeline(
                 processing_mode=processing_mode,
                 include_special_tokens=False)
             datasets.append(dataset_sample)
-            print(f"Tokenized sample {sample}.")
-            print('==================================================')
+            logger.info(f"Tokenized sample {sample}.")
 
         adata = adata[idx_list, list(set(gene_list))]
         adata.obs[batch_key] = batch_ids
 
-        print(f"Concatenating tokenized data...")
+        logger.info(f"Concatenating tokenized data...")
         dataset = concatenate_datasets(datasets)
-        print(f"Concatenated tokenized data.")
+        logger.info(f"Concatenated tokenized data.")
 
     else:
-        print("No `sample_key` specified. Start processing entire AnnData. "
+        logger.warning("No `sample_key` specified. Start processing entire AnnData. "
               "This is the intended behavior if the AnnData object contains only one sample. "
               "Otherwise please specify a `sample_key` or results will be invalid!!!")
-        print('==================================================')
-        print(f"Harmonizing AnnData...")
+        logger.info(f"Harmonizing AnnData...")
         adata = harmonize_adata(
             adata,
             gene_mapping_dict_file_path=gene_mapping_dict_file_path,
@@ -538,9 +529,8 @@ def harmonize_tokenize_embed_pipeline(
             adata.obs[batch_key] = harmonized_adata_save_path.split('.')[0].split('/')[-1]
         else:
             adata.obs[batch_key] = adata.uns['batch']
-        print(f"Harmonized AnnData.")
-        print('==================================================')
-        print(f"Tokenizing AnnData.")
+        logger.info(f"Harmonized AnnData.")
+        logger.info(f"Tokenizing AnnData.")
         dataset = tokenize_adata(
             adata=adata,
             model_folder_path=model_folder_path,
@@ -551,21 +541,18 @@ def harmonize_tokenize_embed_pipeline(
             use_generator=use_generator)       
 
     if harmonized_adata_save_path:
-        print('==================================================')
-        print(f"Saving harmonized data...")
+        logger.info(f"Saving harmonized data...")
         adata.write(harmonized_adata_save_path)
-        print(f"Saved harmonized data.")
+        logger.info(f"Saved harmonized data.")
 
     if save_dataset_path:
-        print('==================================================')
-        print(f"Saving tokenized data...")
+        logger.info(f"Saving tokenized data...")
         dataset.save_to_disk(
             save_dataset_path,
             num_shards=num_shards)
-        print(f"Saved tokenized data.")
+        logger.info(f"Saved tokenized data.")
 
-    print('==================================================')
-    print(f"Embedding tokenized data...")
+    logger.info(f"Embedding tokenized data...")
     output_embed = embed_dataset(
         dataset=dataset,
         model_folder_path=model_folder_path,
@@ -577,7 +564,7 @@ def harmonize_tokenize_embed_pipeline(
         num_workers=num_workers,
         ignore_spc_tokens=ignore_spc_tokens,
         agg_type=agg_type)
-    print(f"Embedded tokenized data.")
+    logger.info(f"Embedded tokenized data.")
 
     # Add embeddings to adata
     for key, values in output_embed.items():
@@ -650,9 +637,7 @@ def gene_embed_dataset(dataset: Dataset,
         Dictionary with the cell, cell gene, neighborhood, and neighborhood gene
         embeddings.
     """
-    print('==================================================')
-    print('STEP 1: LOADING CONFIG...')
-    print('==================================================')
+    logger.info('STEP 1: LOADING CONFIG...')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'
     token_dictionary_file_path = Path(model_folder_path) / 'token_dictionary.pkl'
     norm_factor_file_path = Path(model_folder_path) / 'norm_factors.csv'
@@ -679,9 +664,7 @@ def gene_embed_dataset(dataset: Dataset,
     vocab_size = len(token_dict)
     n_special_values = model_config['data'].get('n_special_values', 0)
 
-    print('==================================================')
-    print(f'STEP 2: {description}')
-    print('==================================================')
+    logger.info(f'STEP 2: {description}')
     # Set device
     if not torch.cuda.is_available():
         device = torch.device('cpu')

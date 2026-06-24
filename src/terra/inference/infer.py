@@ -2,7 +2,6 @@ import copy
 import logging
 import os
 import pickle
-import sys
 import yaml
 from collections import defaultdict
 from pathlib import Path
@@ -21,7 +20,7 @@ from tqdm import tqdm
 from pyensembl import EnsemblRelease
 from scipy.sparse import issparse
 
-from app.utils import (init_model, load_checkpoint, parse_arch_kwargs,
+from terra.utils.helper import (init_model, load_checkpoint, parse_arch_kwargs,
                        parse_protein_init_kwargs)
 from terra.datasets.cell_datasets import CellBaseDataset, init_cell_dataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
@@ -46,8 +45,7 @@ torch.manual_seed(_GLOBAL_SEED)
 torch.backends.cudnn.benchmark = True
 
 
-logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 @torch.inference_mode()
@@ -251,7 +249,6 @@ def infer(args: dict,
             token_dict[gene] for gene in agg_excluded_genes]
     else:
         agg_excluded_tokens = None
-    print(agg_excluded_tokens)
 
     # Define tokenizer-specific params
     if tokenizer_type == 'cell_neighborhood':
@@ -509,7 +506,7 @@ def infer(args: dict,
                 cos = torch.where(valid, cos, torch.zeros_like(cos))
 
 
-                print(cos)
+                logger.debug(cos)
 
 
             # Average gene embeddings into cell and neighborhood embedding 
@@ -519,12 +516,12 @@ def infer(args: dict,
                     spatial_cell_emb = compute_mean_unmasked_emb(n_emb, cell_mask)
                 neighborhood_emb = compute_mean_unmasked_emb(n_emb, neighborhood_mask)
                 if (i + 1) == len(cell_emb_list) and debug:
-                    print(neighborhood_emb.shape)
-                    print(neighborhood_mask.shape)
-                    print(cell_mask.sum(dim=1))
-                    print(neighborhood_mask.sum(dim=1))
+                    logger.debug(neighborhood_emb.shape)
+                    logger.debug(neighborhood_mask.shape)
+                    logger.debug(cell_mask.sum(dim=1))
+                    logger.debug(neighborhood_mask.sum(dim=1))
                     cos2 = F.cosine_similarity(spatial_cell_emb, neighborhood_emb, dim=1)
-                    print(cos2)
+                    logger.debug(cos2)
 
                     nonzero_first = (n_emb[:, :256, :].abs().sum(-1) != 0)
                     nonzero_all   = (n_emb.abs().sum(-1) != 0)
@@ -537,10 +534,10 @@ def infer(args: dict,
                     neigh_true_but_zero = (neighborhood_mask & ~nonzero_all).float().mean()
                     neigh_false_but_nonzero = ((~neighborhood_mask) & nonzero_all).float().mean()
 
-                    print("cell:   True-but-zero =", cell_true_but_zero.item(),
-                        " False-but-nonzero =", cell_false_but_nonzero.item())
-                    print("neigh:  True-but-zero =", neigh_true_but_zero.item(),
-                        " False-but-nonzero =", neigh_false_but_nonzero.item())
+                    logger.debug(f"cell:   True-but-zero = {cell_true_but_zero.item()}"
+                        f"  False-but-nonzero = {cell_false_but_nonzero.item()}")
+                    logger.debug(f"neigh:  True-but-zero = {neigh_true_but_zero.item()}"
+                        f"  False-but-nonzero = {neigh_false_but_nonzero.item()}")
 
                     # Token-based zero mask
                     token_zero = (ns_tokens == 0).cpu()                  # (B, S)
@@ -550,26 +547,26 @@ def infer(args: dict,
                     # or: n_emb.eq(0).all(dim=-1)
 
                     token_zero_but_emb_nonzero = token_zero & (~emb_zero)
-                    print("token==0 but emb nonzero:",
-                        token_zero_but_emb_nonzero.float().mean())
+                    logger.debug(f"token==0 but emb nonzero: "
+                        f"{token_zero_but_emb_nonzero.float().mean()}")
 
                     emb_zero_but_token_nonzero = emb_zero & (~token_zero)
-                    print("emb zero but token!=0:",
-                        emb_zero_but_token_nonzero.float().mean())
+                    logger.debug(f"emb zero but token!=0: "
+                        f"{emb_zero_but_token_nonzero.float().mean()}")
 
                     both_zero = token_zero & emb_zero
                     percentage_both_zero = both_zero.float().mean()
 
-                    print("token==0 AND emb row == 0:", percentage_both_zero)
+                    logger.debug(f"token==0 AND emb row == 0: {percentage_both_zero}")
 
                     percentage_zero = (ns_tokens == 0).float().mean()
-                    print("Fraction of zeros:", percentage_zero)
+                    logger.debug(f"Fraction of zeros: {percentage_zero}")
 
                     emb_zero = (n_emb.abs().sum(dim=-1) == 0)  # (B, S)
 
                     percentage_zero_emb_rows = emb_zero.float().mean()
 
-                    print("Fraction of zero embedding rows:", percentage_zero_emb_rows)
+                    logger.debug(f"Fraction of zero embedding rows: {percentage_zero_emb_rows}")
 
                     #raise ValueError
             elif agg_type == "weighted_avg":
@@ -733,7 +730,7 @@ def infer(args: dict,
     adata = ad.AnnData(
         obs=pd.DataFrame({'cell_id': all_cell_ids},
         index=range(len(all_cell_ids))))
-    print("Loading metadata AnnDatas...")
+    logger.info("Loading metadata AnnDatas...")
     adata_metadata = collect_adata_from_folder(
         raw_data_folder_path,
         all_cell_ids,
@@ -755,9 +752,7 @@ def infer(args: dict,
         spatial = torch.cat(all_spatial_cell_emb_list[i], dim=0)      # (N, D)
 
         cos = F.cosine_similarity(neigh, spatial, dim=1)              # (N,)
-        print(f"Layer {emb_layer} cosine:")
-        print(cos)
-        
+
         adata.obsm[f"cell_emb_layer_{emb_layer}"] = np.array(torch.cat(
             all_cell_emb_list[i],
             dim=0))

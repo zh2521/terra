@@ -6,12 +6,14 @@ import anndata as ad
 import torch
 from tqdm import tqdm
 
-from app.utils import (init_model, load_checkpoint, parse_arch_kwargs,
+from terra.utils.helper import (init_model, load_checkpoint, parse_arch_kwargs,
                        parse_protein_init_kwargs)
 from terra.datasets.cell_datasets import CellBaseDataset
 from terra.datasets.dataloaders import init_dataloader_and_sampler
 from terra.models.modules import ClassificationModel
 
+
+logger = logging.getLogger(__name__)
 
 _GLOBAL_SEED = 0
 
@@ -385,7 +387,7 @@ def finetune(args: dict,
 
         epoch_loss = running_loss / len(loader)
         accuracy = correct_preds / total_preds
-        print(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}")
+        logger.info(f"Epoch [{epoch+1}/{epochs}], Loss: {epoch_loss:.4f}, Accuracy: {accuracy:.4f}")
 
     if LOCAL_RANK == 0:
         wandb.log(
