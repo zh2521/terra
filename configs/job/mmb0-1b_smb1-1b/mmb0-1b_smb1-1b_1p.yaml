@@ -13,7 +13,7 @@ infiniband:
   NCCL_IB_DISABLE: 1  # 1: Disable InfiniBand, 0: Enable InfiniBand
 
 environment:
-  ENV_PATH: "/nfs/users/nfs_s/sb75/.venvs/terra"  # Path to the environment to be activated.
+  ENV_PATH: "/nfs/team361/sb75/.venvs/terra-test"  # Path to the environment to be activated.
 
 artifact:
   ARTIFACT_LOCATION: "/nfs/team361/sb75/terra-reproducibility/artifacts/mmb0-1b_smb1-1b_1p"  # Path to store the artifacts.
@@ -21,7 +21,7 @@ artifact:
   OUTPUT_DIR: "/nfs/team361/sb75/terra-reproducibility/artifacts/mmb0-1b_smb1-1b_1p"  # Path to store the artifacts.
   LOG_DIR: "/nfs/team361/sb75/terra-reproducibility/artifacts/mmb0-1b_smb1-1b_1p"
   EXPERIMENT_NAME: "terra_mmb0-1b_smb1-1b_1p"  # Name of the experiment.
-  RUN_NAME: "run46_6enc_pachtercorpusnorm_16nn"  # Name of the run.
+  RUN_NAME: "run52_10knnwith16knndataset"  # Name of the run.
 
 runner_script:
   RUNNER_SCRIPT: "/nfs/team361/sb75/terra/src/app/training/train_model_lsf_mpirun_sanger.sh"  # Path to the runner script.

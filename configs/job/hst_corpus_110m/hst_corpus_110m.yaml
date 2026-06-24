@@ -7,13 +7,13 @@ job_requirement:
   NUM_NODES: 1  # 2 # Number of compute nodes required for the job.
   NUM_GPUS_NODE: 8  # 8 # Number of GPUs per node.
   NUM_PROCESSES_NODE: 64 # 64  # Number of processes per node.
-  MEM_NODE: 512 # 1024, 1408  # Memory allocated per node (in GB).
+  MEM_NODE: 1024 # 1024, 1408  # Memory allocated per node (in GB).
   
 infiniband:
   NCCL_IB_DISABLE: 1  # 1: Disable InfiniBand, 0: Enable InfiniBand
 
 environment:
-  ENV_PATH: "/nfs/users/nfs_s/sb75/.venvs/terra"  # Path to the environment to be activated.
+  ENV_PATH: "/nfs/team361/sb75/.venvs/terra"  # Path to the environment to be activated.
 
 artifact:
   ARTIFACT_LOCATION: "/nfs/team361/sb75/terra-reproducibility/artifacts/hst_corpus_110m"  # Path to store the artifacts.
@@ -21,7 +21,7 @@ artifact:
   OUTPUT_DIR: "/nfs/team361/sb75/terra-reproducibility/artifacts/hst_corpus_110m"  # Path to store the artifacts.
   LOG_DIR: "/nfs/team361/sb75/terra-reproducibility/artifacts/hst_corpus_110m"
   EXPERIMENT_NAME: "terra_pretraining"  # Name of the experiment.
-  RUN_NAME: "hst_corpus_110m_train_split_run_55_pachternorm_09995ema"  # Name of the run.
+  RUN_NAME: "hst_corpus_110m_train_split_run_64_pachternorm_0998ema_10knn"  # Name of the run.
 
 runner_script:
   RUNNER_SCRIPT: "/nfs/team361/sb75/terra/src/app/training/train_model_lsf_mpirun_sanger.sh"  # Path to the runner script.
