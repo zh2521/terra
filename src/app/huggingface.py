@@ -57,6 +57,13 @@ BUNDLE_FILES = (
     "README.md",
 )
 
+# Remote files matching these globs are pruned on upload when absent from the
+# local bundle folder, so renamed/removed data files (e.g. a pre-rename
+# ``ensembl_dic.pkl``) don't linger on the Hub. ``README.md`` and
+# ``.gitattributes`` are deliberately not matched -- they must never be pruned
+# (deleting ``.gitattributes`` would drop the repo's LFS tracking rules).
+STALE_DELETE_PATTERNS = ("*.pt", "*.pth", "*.pkl", "*.yaml", "*.yml", "*.csv")
+
 DEFAULT_LICENSE = "cc-by-nc-4.0"
 
 
@@ -147,6 +154,7 @@ def push_model_to_hub(model_folder: str | Path,
                       paper_url: str | None = None,
                       model_card: str | None = None,
                       commit_message: str | None = None,
+                      prune_stale: bool = True,
                       token: str | None = None) -> str:
     """Create (if needed) a HF model repo and upload a TERRA model bundle.
 
@@ -155,6 +163,12 @@ def push_model_to_hub(model_folder: str | Path,
     skipped). A model card is generated unless ``model_card`` is provided. If
     ``tag`` is given, an immutable git tag is created on the uploaded revision
     -- use it to pin the manuscript checkpoint (e.g. ``v1.0``).
+
+    When ``prune_stale`` is set (default), bundle-type files
+    (``.pt/.pth/.pkl/.yaml/.yml/.csv``) that exist on the Hub but are absent from
+    ``model_folder`` are deleted in the same commit -- so renamed/removed files
+    (e.g. a pre-rename ``ensembl_dic.pkl``) don't linger. ``README.md`` and
+    ``.gitattributes`` are never pruned.
 
     Returns the repository URL.
     """
@@ -182,6 +196,7 @@ def push_model_to_hub(model_folder: str | Path,
         repo_type="model",
         folder_path=str(model_folder),
         allow_patterns=list(BUNDLE_FILES),
+        delete_patterns=list(STALE_DELETE_PATTERNS) if prune_stale else None,
         commit_message=commit_message or f"Upload TERRA bundle ({repo_id})",
     )
 
@@ -236,6 +251,9 @@ def main(argv: list[str] | None = None) -> None:
     up.add_argument("--license", default=DEFAULT_LICENSE)
     up.add_argument("--public", action="store_true",
                     help="Make the repo public (default: private).")
+    up.add_argument("--no-prune", action="store_true",
+                    help="Keep stale Hub files instead of deleting bundle-type "
+                         "files absent from the local folder (default: prune).")
     up.add_argument("--token", default=None,
                     help="HF write token (else cached login / HF_TOKEN env).")
 
@@ -250,7 +268,7 @@ def main(argv: list[str] | None = None) -> None:
             args.folder, args.repo_id, corpus=args.corpus,
             private=not args.public, tag=args.tag, license=args.license,
             training_data=args.training_data, paper_url=args.paper_url,
-            token=args.token)
+            prune_stale=not args.no_prune, token=args.token)
     elif args.cmd == "download":
         print(download_pretrained(
             args.repo_id, revision=args.revision, token=args.token))
