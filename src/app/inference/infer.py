@@ -365,7 +365,8 @@ def infer(args: dict,
         # because the collator below uses special_token_pad_ratio=1.0 and
         # zeroes those positions regardless.
         pad_special_tokens=True,
-        truncate_neighbors=args['data'].get('truncate_neighbors', False))
+        truncate_neighbors=args['data'].get('truncate_neighbors', False),
+        tokenized_seq_len_cell=args['data'].get('tokenized_seq_len_cell', None))
 
     loader, _ = init_dataloader_and_sampler(
         cell_dataset=cell_dataset,

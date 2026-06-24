@@ -39,6 +39,7 @@ class CellBaseDataset(Dataset):
                  nz_spc: bool = True,
                  pad_special_tokens: bool = False,
                  truncate_neighbors: bool = False,
+                 tokenized_seq_len_cell: int | None = None,
                  ):
         """
         Torch CellBaseDataset class.
@@ -124,9 +125,14 @@ class CellBaseDataset(Dataset):
         # If True, a dataset tokenized with MORE neighbors than the config's
         # n_neighs is truncated at load time to the first n_segments segments
         # (cell + nearest n_neighs neighbors), so one tokenized dataset can
-        # serve several neighbor counts without re-tokenizing. Requires the
-        # dataset's per-segment stride to equal seq_len_cell. cell_graph only.
+        # serve several neighbor counts without re-tokenizing. cell_graph only.
         self.truncate_neighbors = truncate_neighbors
+        # The dataset's per-segment token count (stride). When larger than
+        # seq_len_cell, each segment is truncated at load time to the first
+        # seq_len_cell (top-ranked) genes -- equivalent to tokenizing with a
+        # smaller seq_len_cell, no re-tokenization. Defaults to seq_len_cell
+        # (no gene-per-cell truncation). Composes with truncate_neighbors.
+        self.tokenized_seq_len_cell = tokenized_seq_len_cell or seq_len_cell
 
         # Auto-detect per-cell metadata columns (anything ending in
         # ``_value`` in the HF dataset features). These are exposed
@@ -513,36 +519,56 @@ class CellGraphDataset(CellBaseDataset):
         item['gene_panel_token'] = torch.tensor([105])
         item['batch_token'] = torch.tensor([106])
 
-        # Optionally truncate a dataset tokenized with MORE neighbors down to
-        # the config's n_neighs. The cell-graph layout is dense per segment
-        # (segment s occupies [(s-1)*seq_len_cell : s*seq_len_cell]; segment 1 =
-        # cell, 2.. = neighbors nearest-first), so keeping the first
-        # n_segments*seq_len_cell tokens keeps the cell + the nearest n_neighs
-        # neighbors -- equivalent to a knn_<n_neighs> tokenization, no
-        # re-tokenization needed. Runs BEFORE coord expansion / seg_tokens
-        # reconstruction so all per-cell arrays stay aligned. No-op when off.
-        if self.truncate_neighbors:
-            keep_tokens = int(self.n_segments * self.seq_len_cell)
+        # Optionally subset a larger-tokenized dataset to the config layout at
+        # load time -- no re-tokenization -- along TWO independent axes:
+        #   * neighbors: keep the first n_segments segments (cell + nearest
+        #     n_neighs neighbours); enabled by `truncate_neighbors`.
+        #   * genes/cell: keep the first seq_len_cell gene tokens of each
+        #     segment (top-ranked genes); enabled by setting
+        #     `tokenized_seq_len_cell` (the dataset's per-segment stride) larger
+        #     than seq_len_cell.
+        # The cell-graph layout is dense per segment (segment s occupies
+        # [(s-1)*stride : s*stride]; segment 1 = cell, 2.. = neighbours
+        # nearest-first; genes within a segment are rank/count-descending), so
+        # gathering the first seq_len_cell tokens of the first n_segments
+        # segments matches a knn_<n_neighs> / seq_len_cell_<...> tokenization.
+        # Runs BEFORE coord expansion / seg_tokens reconstruction so all
+        # per-cell arrays stay aligned. No-op when neither axis is reduced.
+        stride = self.tokenized_seq_len_cell
+        if self.truncate_neighbors or stride != self.seq_len_cell:
             n_tok = len(item['gene_tokens'])
-            if n_tok > keep_tokens:
-                if n_tok % self.seq_len_cell != 0:
-                    raise ValueError(
-                        f"truncate_neighbors: stored gene_tokens length {n_tok} "
-                        f"is not a multiple of seq_len_cell {self.seq_len_cell}; "
-                        "the dataset's per-segment stride differs from the "
-                        "config, so neighbor truncation would misalign. Use a "
-                        "dataset whose seq_len_cell matches, or re-tokenize.")
-                item['gene_tokens'] = item['gene_tokens'][:keep_tokens]
+            if n_tok % stride != 0:
+                raise ValueError(
+                    f"stored gene_tokens length {n_tok} is not a multiple of "
+                    f"tokenized_seq_len_cell {stride}; set tokenized_seq_len_cell "
+                    "to the dataset's per-segment token count.")
+            if self.seq_len_cell > stride:
+                raise ValueError(
+                    f"seq_len_cell {self.seq_len_cell} exceeds the dataset's "
+                    f"tokenized_seq_len_cell {stride}; cannot keep more genes "
+                    "per cell than were tokenized.")
+            n_seg_data = n_tok // stride
+            keep_seg = (int(self.n_segments) if self.truncate_neighbors
+                        else n_seg_data)
+            if keep_seg > n_seg_data:
+                raise ValueError(
+                    f"n_segments {keep_seg} exceeds the dataset's {n_seg_data} "
+                    "segments; the dataset has fewer neighbours than requested.")
+            # Only re-slice if a dimension actually shrinks.
+            if keep_seg != n_seg_data or self.seq_len_cell != stride:
+                idx = torch.cat([
+                    torch.arange(s * stride, s * stride + self.seq_len_cell)
+                    for s in range(keep_seg)])
+                item['gene_tokens'] = item['gene_tokens'][idx]
                 if 'gene_expr' in item:
-                    item['gene_expr'] = item['gene_expr'][:keep_tokens]
+                    item['gene_expr'] = item['gene_expr'][idx]
                 if 'seg_tokens' in item:
-                    item['seg_tokens'] = item['seg_tokens'][:keep_tokens]
-                n_seg = int(self.n_segments)
+                    item['seg_tokens'] = item['seg_tokens'][idx]
                 for _ck in ('rel_x_coord', 'rel_y_coord'):
                     if _ck in item:
-                        item[_ck] = (item[_ck][:keep_tokens]
+                        item[_ck] = (item[_ck][idx]
                                      if len(item[_ck]) == n_tok
-                                     else item[_ck][:n_seg])
+                                     else item[_ck][:keep_seg])
 
         # Expand spatial coordinates (TODO: if statement to support old API)
         if 'rel_x_coord' in item.keys():
