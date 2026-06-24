@@ -1,8 +1,8 @@
 data:
   dataset_name: 'xhk1007-CV1-41b_1p'
-  raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/xhk1007-CV1-41b_1p'
-  token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_homo_sapiens.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/xhk1007-CV1-41b_1p/xhk1007-CV1-41b_1p_32_None_None_None_None_None_shifted_log_knn_10_2816.dataset'
+  raw_data_folder_path: '${TERRA_DATA_DIR}/silver/xhk1007-CV1-41b_1p'
+  token_dict_folder_path: '${TERRA_DATA_DIR}/tokenizer/token_dictionary_homo_sapiens.pkl'
+  tokenized_data_folder_path: '${TERRA_DATA_DIR}/gold/cell-graph-tokenizer/xhk1007-CV1-41b_1p/xhk1007-CV1-41b_1p_32_None_None_None_None_None_shifted_log_knn_10_2816.dataset'
   precomputed_split: null
   precomputed_n_nonzero_tokens: null
   test_batch_ids: ['49_batch0']

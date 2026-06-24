@@ -1,0 +1,37 @@
+# Example TERRA cluster job-submission config (LSF).
+#
+# Per-experiment job configs are git-ignored because they hold site-specific
+# paths, queues and groups. Copy this template, rename it, and adjust it for your
+# run. The submission scripts parse this file and export each key as an
+# environment variable, so all keys must be UPPER CASE.
+#
+# Paths may be absolute, or use the ${TERRA_*} variables defined in
+# scripts/cluster_env.sh (source that file before submitting so they resolve).
+
+job_requirement:
+  LSB_DEFAULT_USERGROUP: my_group        # Scheduler user group.
+  QUEUE: "my-queue"                      # Scheduler queue.
+  NUM_NODES: 1                           # Compute nodes.
+  NUM_GPUS_NODE: 1                       # GPUs per node.
+  NUM_PROCESSES_NODE: 24                 # Processes per node.
+  MEM_NODE: 64                           # Memory per node (GB).
+
+infiniband:
+  NCCL_IB_DISABLE: 1                     # 1: disable InfiniBand, 0: enable.
+
+environment:
+  ENV_PATH: "${TERRA_ENV_PATH}"          # Python environment to activate.
+
+artifact:
+  ARTIFACT_LOCATION: "${TERRA_ARTIFACTS_DIR}/my_experiment"
+  WAREHOUSE_PATH: "${TERRA_ARTIFACTS_DIR}/my_experiment"
+  OUTPUT_DIR: "${TERRA_ARTIFACTS_DIR}/my_experiment"
+  LOG_DIR: "${TERRA_ARTIFACTS_DIR}/my_experiment"
+  EXPERIMENT_NAME: "terra_my_experiment"
+  RUN_NAME: "run1"
+
+runner_script:
+  RUNNER_SCRIPT: "${TERRA_REPO_DIR}/scripts/train_model_lsf_mpirun_sanger.sh"
+  TRAINING_SCRIPT_PATH: "${TERRA_REPO_DIR}/src/terra/training/main.py"
+  BACKEND: "nccl"
+  CONFIG_FILE: "${TERRA_REPO_DIR}/configs/model/my_experiment.yaml"

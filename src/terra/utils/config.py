@@ -1,6 +1,29 @@
+import os
 import yaml
 import logging
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
+
+
+def _expand_env_vars(obj):
+    """Recursively expand ``${VAR}`` / ``$VAR`` references in string config values.
+
+    Lets configs reference site-specific locations (e.g. ``${TERRA_DATA_DIR}``)
+    that are defined once in the environment (see ``scripts/cluster_env.sh``)
+    instead of hard-coding absolute paths. Undefined variables are left
+    untouched, so a missing setting surfaces as a clear "file not found" rather
+    than silently resolving to a wrong path.
+    """
+    if isinstance(obj, dict):
+        return {k: _expand_env_vars(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_expand_env_vars(v) for v in obj]
+    if isinstance(obj, str):
+        return os.path.expandvars(obj)
+    return obj
+
 
 def create_params_from_YAML_wandb_config(YAML_file: str,
                                          logger: logging.RootLogger,
@@ -39,6 +62,7 @@ def create_params_from_YAML_wandb_config(YAML_file: str,
         # Load parameters from YAML configuration file
         with open(YAML_file, 'r') as y_file:
             params = yaml.safe_load(y_file)
+            params = _expand_env_vars(params)
             logger.info('Loaded parameters from YAML file.')
     except FileNotFoundError:
         logger.error(f"YAML configuration file '{YAML_file}' not found.")
@@ -69,8 +93,6 @@ def create_params_from_YAML_wandb_config(YAML_file: str,
             params['optimization']['ema'] = sweep_config.ema
         if hasattr(sweep_config, 'epochs'):
             params['optimization']['epochs'] = sweep_config.epochs
-
-        print(params)
 
     # Return the updated params dictionary
     return params

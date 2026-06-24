@@ -7,11 +7,11 @@ data:
   count_cell_norm_method: null
   count_gene_norm_method: null
   count_count_norm_method: 'shifted_log'
-  raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/hst_corpus_110m'
-  token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_homo_sapiens.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/hst_corpus_110m/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k.dataset'
-  precomputed_split: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k_precomputed_split_full.pkl'
-  precomputed_n_nonzero_tokens: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k_n_nonzero_tokens_full.pkl'
+  raw_data_folder_path: '${TERRA_DATA_DIR}/silver/hst_corpus_110m'
+  token_dict_folder_path: '${TERRA_DATA_DIR}/tokenizer/token_dictionary_homo_sapiens.pkl'
+  tokenized_data_folder_path: '${TERRA_DATA_DIR}/gold/cell-graph-tokenizer/hst_corpus_110m/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k.dataset'
+  precomputed_split: '${TERRA_DATA_DIR}/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k_precomputed_split_full.pkl'
+  precomputed_n_nonzero_tokens: '${TERRA_DATA_DIR}/tokenizer/hst_corpus_110m_32_None_None_None_None_None_shifted_log_knn_10_5k_n_nonzero_tokens_full.pkl'
   test_batch_ids: ['49_batch0']
   val_batch_ids: ['49_batch0']
   tokenizer_type: 'cell_graph'

@@ -8,10 +8,10 @@ data:
   count_cell_norm_method: null
   count_gene_norm_method: null
   count_count_norm_method: pflog1ppf
-  raw_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/silver/mmb0-1b_smb1-1b_2p_coord_aligned'
-  token_dict_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/tokenizer/token_dictionary_mus_musculus.pkl'
-  tokenized_data_folder_path: '/lustre/scratch126/cellgen/lotfollahi/DATASETS/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_2p_coord_aligned/mmb0-1b_smb1-1b_2p_coord_aligned_32_None_None_None_None_None_pflog1ppf_knn_10_704.dataset'
-  pf_targets_file_path: /nfs/team361/sb75/terra-reproducibility/artifacts/data/mst_corpus_10m_pf_targets.csv
+  raw_data_folder_path: '${TERRA_DATA_DIR}/silver/mmb0-1b_smb1-1b_2p_coord_aligned'
+  token_dict_folder_path: '${TERRA_DATA_DIR}/tokenizer/token_dictionary_mus_musculus.pkl'
+  tokenized_data_folder_path: '${TERRA_DATA_DIR}/gold/cell-graph-tokenizer/mmb0-1b_smb1-1b_2p_coord_aligned/mmb0-1b_smb1-1b_2p_coord_aligned_32_None_None_None_None_None_pflog1ppf_knn_10_704.dataset'
+  pf_targets_file_path: ${TERRA_ARTIFACTS_DIR}/data/mst_corpus_10m_pf_targets.csv
   precomputed_split: null
   precomputed_n_nonzero_tokens: null
   test_batch_ids: null
@@ -104,8 +104,8 @@ state:
 protein_init:
   enabled: False
   mode: warm_start
-  embedding_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.pt
-  mapping_path: /lustre/scratch126/cellgen/lotfollahi/DATASETS/protein_embeddings/esm_c_600m_mouse.json
+  embedding_path: ${TERRA_DATA_DIR}/protein_embeddings/esm_c_600m_mouse.pt
+  mapping_path: ${TERRA_DATA_DIR}/protein_embeddings/esm_c_600m_mouse.json
   #proj_bias: False
   #use_layer_norm: True
   #freeze_esm: False
