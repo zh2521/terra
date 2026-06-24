@@ -1,5 +1,10 @@
+import logging
+
 import anndata as ad
 import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 def filter_cells(adata: ad.AnnData) -> ad.AnnData:
@@ -20,8 +25,9 @@ def filter_cells(adata: ad.AnnData) -> ad.AnnData:
         The filtered AnnData object.
     """
     if 'filter_pass' not in adata.obs.columns:
-        print("No 'filter_pass' column in 'adata.obs'; returning full adata.")
-        
+        logger.warning(
+            "No 'filter_pass' column in 'adata.obs'; returning full adata.")
+
         return adata
     else:
         filter_pass_idx = np.where(adata.obs['filter_pass'].values == 1)[0]

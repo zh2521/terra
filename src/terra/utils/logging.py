@@ -6,7 +6,12 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/logging.py
 (05.06.2024).
 """
 
+import logging
+
 import torch
+
+
+logger = logging.getLogger(__name__)
 
 
 class AverageMeter(object):

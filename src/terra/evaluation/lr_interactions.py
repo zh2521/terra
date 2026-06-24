@@ -1,3 +1,4 @@
+import logging
 import os
 
 import anndata as ad
@@ -5,6 +6,9 @@ import omnipath as op
 import pandas as pd
 from cellphonedb.utils import db_releases_utils, db_utils
 from IPython.display import HTML, display
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_adata_cellphonedb_lr_pairs(
@@ -63,8 +67,6 @@ def get_adata_cellphonedb_lr_pairs(
         'ligand'].map(adata.var['ensembl_id'])
     lr_interaction_df['receptor'] = lr_interaction_df[
         'receptor'].map(adata.var['ensembl_id'])
-
-    print()
 
     # Drop interactions where ligand or receptor is not in the AnnData object
     lr_interaction_df = lr_interaction_df.dropna()

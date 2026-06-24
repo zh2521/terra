@@ -1,4 +1,5 @@
 import json
+import logging
 import pickle
 import random
 import requests
@@ -7,6 +8,9 @@ from typing import Literal
 import datasets
 import numpy as np
 from datasets import load_from_disk
+
+
+logger = logging.getLogger(__name__)
 
 
 def get_ensembl_ids(gene_names: list[str],
@@ -45,7 +49,8 @@ def get_ensembl_ids(gene_names: list[str],
         if len(ensembl_ids.keys()) != len(gene_names):
             missing_genes = [
                 gene for gene in gene_names if gene not in ensembl_ids.keys()]
-            print(f'Could not find Ensembl IDs for genes: {missing_genes}.')
+            logger.warning(
+                f'Could not find Ensembl IDs for genes: {missing_genes}.')
         return ensembl_ids
     else:
         response.raise_for_status()

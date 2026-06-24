@@ -1,9 +1,14 @@
+import logging
+
 import anndata as ad
 import scipy.sparse as sp
+
+logger = logging.getLogger(__name__)
+
 try:
     import squidpy as sq
 except:
-    print("Could not import squidpy...")
+    logger.warning("Could not import squidpy...")
 
 
 def _combine_neighbor_graphs(adata: ad.AnnData,
@@ -111,11 +116,11 @@ def construct_neighbor_graph(adata: ad.AnnData,
         adata_batch_list = []
 
         for batch in batches:
-            print(f"\nProcessing batch {batch}...")
-            print("Loading data...")
+            logger.info(f"\nProcessing batch {batch}...")
+            logger.info("Loading data...")
             adata_batch = adata[adata.obs[batch_key] == batch]
 
-            print("Computing spatial neighborhood graph...")
+            logger.info("Computing spatial neighborhood graph...")
             adata_batch = _combine_neighbor_graphs(
                 adata_batch,
                 n_neighs,

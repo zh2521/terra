@@ -1,8 +1,8 @@
 import gc
+import logging
 import math
 import time
 from collections.abc import Iterator
-from logging import getLogger
 
 import torch
 import torch.distributed as dist
@@ -12,7 +12,7 @@ from torch.utils.data.distributed import DistributedSampler
 from .cell_datasets import CellBaseDataset
 
 
-logger = getLogger()
+logger = logging.getLogger(__name__)
 
 
 _GLOBAL_SEED = 0

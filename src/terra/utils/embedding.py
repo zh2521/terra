@@ -1,4 +1,5 @@
 
+import logging
 import os
 from typing import List, Literal, Optional, Tuple
 
@@ -9,6 +10,9 @@ import scanpy as sc
 import torch
 import torch.nn.functional as F
 from .evaluation import compute_scalar_mmd, compute_emd
+
+
+logger = logging.getLogger(__name__)
 
 
 def compute_sum_and_nonzero_count(
@@ -541,7 +545,7 @@ def collect_adata_from_folder(load_folder_path: str,
         if dataset_ids:
             if not any(dataset_id in subdir.split('/')[-1].split('-')[0] for dataset_id in dataset_ids):
                 continue
-        print(f'Loading AnnData objects from {subdir}.')
+        logger.info(f'Loading AnnData objects from {subdir}.')
         for file in files:
             if file.endswith('.h5ad'):
                 file_path = os.path.join(subdir, file)

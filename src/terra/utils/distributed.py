@@ -6,6 +6,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/utils/distributed.py
 (05.06.2024).
 """
 
+import logging
 import math
 import os
 
@@ -13,10 +14,8 @@ import torch
 import torch.distributed as dist
 from transformers import BatchEncoding
 
-from logging import getLogger
 
-
-logger = getLogger()
+logger = logging.getLogger(__name__)
 
 
 def init_distributed(port: int=40112, rank_and_world_size=(None, None)):

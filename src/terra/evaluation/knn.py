@@ -3,12 +3,16 @@ Adapted from https://github.com/facebookresearch/dino/blob/main/eval_knn.py
 (07.07.2025).
 """
 
+import logging
 import numpy as np
 import torch
 import torch.nn.functional as F
 from collections import Counter
 from torch import nn
 from sklearn.metrics import classification_report
+
+
+logger = logging.getLogger(__name__)
 
 
 def knn_classifier(
@@ -24,7 +28,7 @@ def knn_classifier(
     """
     # --- Device setup ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
 
     features_train = torch.tensor(features_train, dtype=torch.float32)
     labels_train = torch.tensor(labels_train, dtype=torch.long)
@@ -58,16 +62,16 @@ def knn_classifier(
     predictions_np = predictions.cpu().numpy()
     labels_test_np = labels_test.cpu().numpy()
 
-    print("\n--- Evaluation Report on Test Set ---")
+    logger.info("\n--- Evaluation Report on Test Set ---")
     cls_report = classification_report(
         labels_test_np, predictions_np, digits=4)
-    print(cls_report)
+    logger.info(cls_report)
 
     # Save to a .txt file
     if results_save_path:
         with open(results_save_path, "w") as f:
             f.write(cls_report)
 
-        print("\n--- Evaluation Report saved. ---")
+        logger.info("\n--- Evaluation Report saved. ---")
 
     return predictions_np

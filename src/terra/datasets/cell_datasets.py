@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 import datasets
@@ -5,6 +6,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+
+
+logger = logging.getLogger(__name__)
 
 
 # Encoder modes that need per-token rel_x / rel_y coordinates attached
@@ -448,12 +452,11 @@ class CellBaseDataset(Dataset):
                 pass
             else:
                 if segment_tokens.size(0) < segment_seq_len:
-                    torch.set_printoptions(threshold=float('inf'))
-                    print(segment_tokens.size(0))
-                    print(item['seg_tokens'])
                     raise ValueError(
                         'Sequence length for a given segment cannot be larger '
-                        'than segment size when not sampling with replacement.'
+                        'than segment size when not sampling with replacement. '
+                        f'segment_tokens.size(0)={segment_tokens.size(0)}, '
+                        f"seg_tokens={item['seg_tokens']}."
                         )
 
             # If no sampling strategy is specified, use all tokens up to

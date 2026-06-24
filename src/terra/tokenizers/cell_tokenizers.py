@@ -70,10 +70,13 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+
+logger = logging.getLogger(__name__)
+
 try:
     import squidpy as sq
 except:
-    print("Could not import squidpy...")
+    logger.warning("Could not import squidpy...")
 from datasets import Dataset, concatenate_datasets
 
 from ..preprocessors.filters import filter_cells
@@ -90,7 +93,6 @@ from .tokenize import process_gene_expr, process_gene_tokens, rank_gene_tokens
 
 
 warnings.filterwarnings('ignore', message=".*The 'nopython' keyword.*") # noqa
-logger = logging.getLogger(__name__)
 
 
 base_path = Path(__file__).parent.parent.parent.parent
@@ -386,7 +388,7 @@ class CellBaseTokenizer(ABC):
             (Path(output_directory) / output_file_prefix).with_suffix(
                 '.dataset'))
         tokenized_dataset.save_to_disk(output_path, num_shards=num_shards)
-        logger.info("Tokenized dataset saved to '{output_path}'.")
+        logger.info(f"Tokenized dataset saved to '{output_path}'.")
 
     def _create_dataset(self,
                         dataset_dict: dict,
@@ -610,13 +612,13 @@ class CellGraphTokenizer(CellBaseTokenizer):
                 raise ValueError(
                     'Specify either `adata` or `adata_file_path`, not both.')
 
-        print('Filtering cells...')
+        logger.info('Filtering cells...')
         # Filter cells based on adata.obs['filter_pass']
         adata = filter_cells(adata)
 
-        adata_neigh = adata        
+        adata_neigh = adata
 
-        print('Computing spatial neighborhood...')
+        logger.info('Computing spatial neighborhood...')
         # Construct neighbor graph
         adata_neigh = construct_neighbor_graph(
             adata_neigh,
@@ -626,7 +628,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
             include_self_loop=False,
             compute_neighbor_counts=False)
 
-        print('Normalizing gene expression counts...')
+        logger.info('Normalizing gene expression counts...')
         # Perform normalization of counts per cell for rank and count
         # tokenization
         if self.rank_cell_norm_method == 'read_depth':
@@ -809,7 +811,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
 
         # Retrieve gene tokens for genes contained in batch and vocab, i.e.
         # protein-coding and miRNA genes
-        print('Retrieving gene tokens.')
+        logger.info('Retrieving gene tokens.')
         coding_miRNA_idx = np.where(
             [self.coding_miRNA_dict.get(
                 gene_id, False) for gene_id in adata.var['ensembl_id']])[0]
@@ -845,7 +847,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         del adata.layers['X_count']
 
         if not self.rank_differs_from_count: # save memory by working with sparse arrays
-            print('Ranking gene tokens based on normalized counts (sparse version).')
+            logger.info('Ranking gene tokens based on normalized counts (sparse version).')
             for i in range(0, len(adata), self.chunk_size):
                 if self.include_zero_expr_genes:
                     norm_counts_cell_rank = X_rank_coding[
@@ -891,7 +893,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
                         for j in range(norm_counts_cell_count.shape[0])]
 
         else: # conversion to dense arrays which requires higher memory
-            print('Ranking gene tokens based on normalized counts (dense version).')
+            logger.info('Ranking gene tokens based on normalized counts (dense version).')
             for i in range(0, len(adata), self.chunk_size):
                 rank_block = X_rank_coding[i:i+self.chunk_size]
                 count_block = X_count_coding[i:i+self.chunk_size]
@@ -947,7 +949,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
         adata_dict['gene_tokens_cell_neigh'] = adata_dict['gene_tokens_cell']
         adata_dict['gene_expr_cell_neigh'] = adata_dict['gene_expr_cell']
 
-        print('Retrieving tokens for neighborhood cells.')
+        logger.info('Retrieving tokens for neighborhood cells.')
         adata_dict['gene_tokens_neighborhood'] = [
             np.array([]) for i in range(len(adata))]
         adata_dict['gene_expr_neighborhood'] = [
@@ -1314,11 +1316,11 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
                 raise ValueError(
                     'Specify either `adata` or `adata_file_path`, not both.')
 
-        print('Filtering cells.')
+        logger.info('Filtering cells.')
         # Filter to remove poor quality cells
         adata = filter_cells(adata)
 
-        print('Computing spatial neighborhood graph and aggregating counts.')
+        logger.info('Computing spatial neighborhood graph and aggregating counts.')
         # Aggregate neighborhood cell gene expression
         adata = construct_neighbor_graph(
             adata,
@@ -1328,7 +1330,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             include_self_loop=True,
             compute_neighbor_counts=True)
 
-        print('Normalizing gene expression counts...')
+        logger.info('Normalizing gene expression counts...')
         # Perform normalization of counts per cell for rank and count
         # tokenization
         if self.rank_cell_norm_method == 'read_depth':
@@ -1530,7 +1532,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
 
         # Retrieve gene tokens for genes contained in dataset and vocab, i.e.
         # protein-coding and miRNA genes
-        print('Retrieving gene tokens.')
+        logger.info('Retrieving gene tokens.')
         coding_miRNA_idx = np.where(
             [self.coding_miRNA_dict.get(
                 gene_id, False) for gene_id in adata.var['ensembl_id']])[0]
@@ -1549,7 +1551,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             
         # Divide cells into chunks and loop through chunks
         if not self.rank_differs_from_count:  # sparse-optimized path
-            print('Ranking gene tokens based on normalized counts (sparse version).')
+            logger.info('Ranking gene tokens based on normalized counts (sparse version).')
             for i in range(0, len(adata), self.chunk_size):
                 if self.include_zero_expr_genes:
                     norm_counts_cell_rank = adata[
@@ -1624,7 +1626,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
                         for j in range(norm_counts_neighborhood_rank.shape[0])]
 
         else:  # dense path with lexsort tie-breaking
-            print('Ranking gene tokens based on normalized counts (dense version).')
+            logger.info('Ranking gene tokens based on normalized counts (dense version).')
             for i in range(0, len(adata), self.chunk_size):
                 # --- Cell ---
                 cell_rank_block = adata[

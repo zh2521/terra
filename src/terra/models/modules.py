@@ -6,6 +6,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transforme
 (05.06.2024).
 """
 
+import logging
 from typing import Literal
 
 import torch
@@ -14,6 +15,8 @@ from torch.nn.attention import SDPBackend, sdpa_kernel
 
 from .adaln import AdaLN
 from .rope2d import RoPE2D
+
+logger = logging.getLogger(__name__)
 
 
 class Attention(nn.Module):
@@ -128,7 +131,7 @@ class Attention(nn.Module):
                     SDPBackend.MATH,
                 ]
             except ImportError:
-                print("Failed to import SDPBackend. Flash attention will be used without backend selection, which may hurt training stability. Consider upgrading to PyTorch 2.3+ for better flash attention support.")
+                logger.warning("Failed to import SDPBackend. Flash attention will be used without backend selection, which may hurt training stability. Consider upgrading to PyTorch 2.3+ for better flash attention support.")
                 # PyTorch < 2.3 — no backend selector API. Fall back
                 # to plain SDPA and accept whatever backend it picks.
                 sdpa_kernel = None

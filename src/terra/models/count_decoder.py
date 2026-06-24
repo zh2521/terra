@@ -1,7 +1,10 @@
+import logging
 from typing import Literal, List, Optional
 
 import torch
 import torch.nn as nn
+
+logger = logging.getLogger(__name__)
 
 
 class CountDecoder(nn.Module):
@@ -28,9 +31,9 @@ class CountDecoder(nn.Module):
                  n_output: int,
                  n_layers: int):
         super().__init__()
-        print(f"FC COUNT DECODER -> "
-              f"n_input: {n_input}, "
-              f"n_output: {n_output}")
+        logger.info(f"FC COUNT DECODER -> "
+                    f"n_input: {n_input}, "
+                    f"n_output: {n_output}")
 
         self.n_input = n_input
 

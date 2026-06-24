@@ -6,10 +6,13 @@ https://github.com/facebookresearch/ijepa/blob/main/src/masks/multiblock.py
 (05.06.2024).
 """
 
+import logging
 import time # TODO: remove
 
 import numpy as np
-import torch 
+import torch
+
+logger = logging.getLogger(__name__)
 
 
 class BlockMaskCollator:
@@ -68,7 +71,6 @@ class BlockMaskCollator:
         self.restrict_special_attention = restrict_special_attention
         self.cell_segment_sampling_ratio = cell_segment_sampling_ratio
         self.special_token_pad_ratio = special_token_pad_ratio
-        print("Special token pad ratio:", self.special_token_pad_ratio)
 
     def _sample_gene_mask(
         self,
@@ -203,7 +205,6 @@ class BlockMaskCollator:
             else:
                 k = torch.randint(
                     low=2, high=self.n_segments + 1, size=(1,)).item()
-            print(f"k: {k}")
             cutoff = self.n_special_tokens + (self.seq_len_cell * k)
 
             # Pad all segments not kept in cell graph

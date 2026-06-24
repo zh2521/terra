@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 import anndata
@@ -12,6 +13,9 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics.pairwise import rbf_kernel
 from scipy.stats import wasserstein_distance
 from typing import List
+
+
+logger = logging.getLogger(__name__)
 
 
 def classification_metrics(adata: anndata.AnnData,
@@ -66,10 +70,10 @@ def classification_metrics(adata: anndata.AnnData,
     y_train_pred = clf.predict(X_train)
     train_accuracy = accuracy_score(y_train, y_train_pred)
     train_f1 = f1_score(y_train, y_train_pred, average='weighted')
-    print(f"Test Accuracy: {test_accuracy:.2f}")
-    print(f"Test F1 Score: {test_f1:.2f}")
-    print(f"Train Accuracy: {train_accuracy:.2f}")
-    print(f"Train F1 Score: {train_f1:.2f}")
+    logger.info(f"Test Accuracy: {test_accuracy:.2f}")
+    logger.info(f"Test F1 Score: {test_f1:.2f}")
+    logger.info(f"Train Accuracy: {train_accuracy:.2f}")
+    logger.info(f"Train F1 Score: {train_f1:.2f}")
     metrics = {'test_accuracy': test_accuracy,
                'test_f1': test_f1,
                'train_accuracy': train_accuracy,
@@ -112,8 +116,8 @@ def clustering_metrics(adata: anndata.AnnData,
     embeddings = adata.obsm[emb_key]
     true_labels = adata.obs[label_col]
     results = sm.nmi_ari_cluster_labels_kmeans(embeddings, true_labels)
-    print(f"NMI (Normalized Mutual Information): {results['nmi']}")
-    print(f"ARI (Adjusted Rand Index): {results['ari']}")
+    logger.info(f"NMI (Normalized Mutual Information): {results['nmi']}")
+    logger.info(f"ARI (Adjusted Rand Index): {results['ari']}")
     metrics = {'nmi': results['nmi'],
                'ari': results['ari']}
                

@@ -6,6 +6,7 @@ https://github.com/facebookresearch/ijepa/blob/main/src/models/vision_transforme
 (05.06.2024).
 """
 
+import logging
 import math
 from abc import ABC, abstractmethod
 from functools import partial
@@ -33,6 +34,8 @@ from .utils import (get_1d_sincos_pos_embed,
                     repeat_interleave_batch,
                     trunc_normal_)
 from ..masks.utils import apply_masks
+
+logger = logging.getLogger(__name__)
 
 DEBUG = False
 
@@ -485,7 +488,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         if DEBUG:
             zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
             percentage_zero_rows = zero_rows.float().mean()
-            print("Fraction of preblock X all-zero rows:", percentage_zero_rows)
+            logger.debug(f"Fraction of preblock X all-zero rows: {percentage_zero_rows}")
 
         # Run forward prop and store embeddings for each specified layer
         out: dict[int, torch.Tensor] = {}
@@ -501,7 +504,7 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
                     zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)
 
                     percentage_zero_rows = zero_rows.float().mean()
-                    print("Fraction of afterblock X all-zero rows:", percentage_zero_rows)                
+                    logger.debug(f"Fraction of afterblock X all-zero rows: {percentage_zero_rows}")
             if i in layers:
                 # Remove special tokens from output
                 out[i] = x[:, self.n_special_tokens:, :]
@@ -2496,7 +2499,7 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
         
         if DEBUG:
             proportion_zero = (batch['tokens'] == 0).float().mean()
-            print("Proportion of zero tokens:", proportion_zero)
+            logger.debug(f"Proportion of zero tokens: {proportion_zero}")
 
         # Get value embeddings
         if self.count_encoding == 'value_bins':
@@ -2551,10 +2554,10 @@ class GeneTransformerCombinedEncoder(GeneTransformerBaseEncoder):
                 zero_rows = t.eq(0).all(dim=-1)   # (B, L)
                 return zero_rows.float().mean()   # scalar        
 
-            print("seg_emb zero rows:", zero_row_percentage(seg_emb))
-            print("pos_emb zero rows:", zero_row_percentage(pos_emb))
-            print("token_emb zero rows:", zero_row_percentage(token_emb))
-            print("value_emb zero rows:", zero_row_percentage(value_emb))
+            logger.debug(f"seg_emb zero rows: {zero_row_percentage(seg_emb)}")
+            logger.debug(f"pos_emb zero rows: {zero_row_percentage(pos_emb)}")
+            logger.debug(f"token_emb zero rows: {zero_row_percentage(token_emb)}")
+            logger.debug(f"value_emb zero rows: {zero_row_percentage(value_emb)}")
 
         # Remove special token contents
         #if ignore_spc_tokens:
