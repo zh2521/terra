@@ -364,8 +364,8 @@ def harmonize_tokenize_embed_pipeline(
         batch_key: str,
         model_folder_path: str,
         cache_directory_path: str,
-        gene_mapping_dict_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_name_to_ensembl_id_dict.pkl',
-        gene_occurrence_count_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_occurence_count_dict.pkl',
+        gene_mapping_dict_file_path: str | None = None,
+        gene_occurrence_count_file_path: str | None = None,
         gene_occurrence_count_filter_value: int = 10,
         ensembl_release: int = 111,
         species: str = 'human',
@@ -450,6 +450,19 @@ def harmonize_tokenize_embed_pipeline(
     adata:
         A harmonized AnnData object with embeddings stored in `adata.obsm`.
     """
+    # Gene-reference files default to the ones shipped inside the model bundle
+    # (see app.huggingface.BUNDLE_FILES), so a downloaded HF model reproduces the
+    # model's training-time harmonization without any external paths. An explicit
+    # path always overrides; a missing bundle file falls back to harmonize_adata's
+    # built-in behavior (Ensembl-release lookup / skipping the occurrence filter).
+    if gene_mapping_dict_file_path is None:
+        _ref = Path(model_folder_path) / 'ensembl_dictionary.pkl'
+        if _ref.is_file():
+            gene_mapping_dict_file_path = str(_ref)
+    if gene_occurrence_count_file_path is None:
+        _ref = Path(model_folder_path) / 'gene_count_dictionary.pkl'
+        if _ref.is_file():
+            gene_occurrence_count_file_path = str(_ref)
     datasets = []
     adata.obs_names_make_unique()
     if sample_key:

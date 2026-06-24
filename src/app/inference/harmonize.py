@@ -40,8 +40,8 @@ from typing import Dict, List
 
 
 def harmonize_adata(adata: ad.AnnData,
-                    gene_mapping_dict_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_name_to_ensembl_id_dict.pkl',
-                    gene_occurrence_count_file_path: str | None = '/lustre/scratch126/cellgen/lotfollahi/DATASETS/genes/homo_sapiens_gene_occurence_count_dict.pkl',
+                    gene_mapping_dict_file_path: str | None = None,
+                    gene_occurrence_count_file_path: str | None = None,
                     gene_occurrence_count_filter_value: int = 10,
                     ensembl_release: int = 111,
                     species: str = 'human',

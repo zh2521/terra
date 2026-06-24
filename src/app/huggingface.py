@@ -4,12 +4,13 @@ Publish and download TERRA model *bundles* -- the self-contained folder that the
 inference pipeline (``app.inference.embed_dataset`` /
 ``harmonize_tokenize_embed_pipeline``) reads via ``model_folder_path``:
 
-    model_checkpoint.pt     target-encoder weights (inference)
-    model_config.yaml       model / tokenization config
-    token_dictionary.pkl    gene-token vocabulary
-    ensembl_dic.pkl         gene-name -> Ensembl-ID mapping (harmonization)
-    norm_factors.csv        (optional) frozen gene-level norm factors
-    pf_targets.csv          (optional) frozen PFlog1pPF targets
+    model_checkpoint.pt       target-encoder weights (inference)
+    model_config.yaml         model / tokenization config
+    token_dictionary.pkl      gene-token vocabulary
+    ensembl_dictionary.pkl    gene-name -> Ensembl-ID mapping (harmonization)
+    gene_count_dictionary.pkl gene occurrence counts (rare-gene filtering)
+    norm_factors.csv          (optional) frozen gene-level norm factors
+    pf_targets.csv            (optional) frozen PFlog1pPF targets
 
 Model family layout on the Hub: one repo per named model
 (``Lotfollahi-lab/TERRA-96M``, ``Lotfollahi-lab/TERRA-<next>``, ...), and git
@@ -27,7 +28,7 @@ Upload a trained model bundle (maintainer)::
     python -m app.huggingface upload \\
         --folder /path/to/artifacts/models/<timestamp> \\
         --repo-id Lotfollahi-lab/TERRA-96M \\
-        --corpus HST-Corpus-110M --tag v1.0
+        --corpus HST-Corpus-112M --tag v1.0
 
 Download a published model and run inference (user)::
 
@@ -36,8 +37,7 @@ Download a published model and run inference (user)::
 
     d = download_pretrained("Lotfollahi-lab/TERRA-96M", revision="v1.0")
     adata = harmonize_tokenize_embed_pipeline(
-        adata=adata, model_folder_path=d,
-        gene_mapping_dict_file_path=f"{d}/ensembl_dic.pkl", ...)
+        adata=adata, model_folder_path=d, ...)  # gene refs auto-resolved from d
 """
 from __future__ import annotations
 
@@ -50,7 +50,8 @@ BUNDLE_FILES = (
     "model_checkpoint.pt",
     "model_config.yaml",
     "token_dictionary.pkl",
-    "ensembl_dic.pkl",
+    "ensembl_dictionary.pkl",
+    "gene_count_dictionary.pkl",
     "norm_factors.csv",
     "pf_targets.csv",
     "README.md",
@@ -73,10 +74,23 @@ def _require_hub():
 
 def build_model_card(repo_id: str,
                      corpus: str | None = None,
-                     license: str = DEFAULT_LICENSE) -> str:
-    """Return a Markdown model card (with YAML front matter) for a TERRA repo."""
+                     license: str = DEFAULT_LICENSE,
+                     training_data: str | None = None,
+                     paper_url: str | None = None) -> str:
+    """Return a Markdown model card (with YAML front matter) for a TERRA repo.
+
+    ``training_data`` is a free-text description of what the model was trained on
+    (falls back to a one-liner from ``corpus``); ``paper_url`` is the manuscript
+    reference shown in the Citation section.
+    """
     name = repo_id.split("/")[-1]
-    corpus_line = f"Trained on **{corpus}**.\n\n" if corpus else ""
+    if training_data:
+        train_block = f"## Training data\n{training_data}\n\n"
+    elif corpus:
+        train_block = f"## Training data\nTrained on **{corpus}**.\n\n"
+    else:
+        train_block = ""
+    paper_ref = paper_url or "<add paper / bioRxiv reference>"
     header = f"""---
 license: {license}
 library_name: terra-st
@@ -90,13 +104,14 @@ pipeline_tag: feature-extraction
 # {name}
 
 JEPA-based spatial-transcriptomics foundation model (TERRA).
-{corpus_line}Code & docs: https://github.com/Lotfollahi-lab/terra
+Code & docs: https://github.com/Lotfollahi-lab/terra
 
-## Files
+{train_block}## Files
 - `model_checkpoint.pt` — target-encoder weights (inference)
 - `model_config.yaml` — model / tokenization config
 - `token_dictionary.pkl` — gene-token vocabulary
-- `ensembl_dic.pkl` — gene-name to Ensembl-ID mapping (harmonization)
+- `ensembl_dictionary.pkl` — gene-name to Ensembl-ID mapping (harmonization)
+- `gene_count_dictionary.pkl` — gene occurrence counts (rare-gene filtering)
 
 ## Usage
 """
@@ -109,16 +124,16 @@ from app.inference import harmonize_tokenize_embed_pipeline
 d = download_pretrained("__REPO_ID__")
 adata = harmonize_tokenize_embed_pipeline(
     adata=adata,
-    model_folder_path=d,
-    gene_mapping_dict_file_path=f"{d}/ensembl_dic.pkl",
+    model_folder_path=d,            # gene-reference files auto-resolved from here
     # ... sample_key / batch_key / etc.
 )
 ```
 
 ## Citation
-<add paper / bioRxiv reference>
+__PAPER_REF__
 '''
-    return header + usage.replace("__REPO_ID__", repo_id)
+    card = header + usage.replace("__REPO_ID__", repo_id)
+    return card.replace("__PAPER_REF__", paper_ref)
 
 
 def push_model_to_hub(model_folder: str | Path,
@@ -128,6 +143,8 @@ def push_model_to_hub(model_folder: str | Path,
                       private: bool = True,
                       tag: str | None = None,
                       license: str = DEFAULT_LICENSE,
+                      training_data: str | None = None,
+                      paper_url: str | None = None,
                       model_card: str | None = None,
                       commit_message: str | None = None,
                       token: str | None = None) -> str:
@@ -150,7 +167,8 @@ def push_model_to_hub(model_folder: str | Path,
     api.create_repo(repo_id, repo_type="model", private=private, exist_ok=True)
 
     card = (model_card if model_card is not None
-            else build_model_card(repo_id, corpus=corpus, license=license))
+            else build_model_card(repo_id, corpus=corpus, license=license,
+                                  training_data=training_data, paper_url=paper_url))
     api.upload_file(
         path_or_fileobj=card.encode("utf-8"),
         path_in_repo="README.md",
@@ -208,7 +226,11 @@ def main(argv: list[str] | None = None) -> None:
     up.add_argument("--repo-id", required=True,
                     help="e.g. Lotfollahi-lab/TERRA-96M")
     up.add_argument("--corpus", default=None,
-                    help="Training corpus for the model card, e.g. HST-Corpus-110M")
+                    help="Training corpus for the model card, e.g. HST-Corpus-112M")
+    up.add_argument("--training-data", default=None,
+                    help="Free-text training-data description for the model card.")
+    up.add_argument("--paper-url", default=None,
+                    help="Manuscript/preprint reference for the Citation section.")
     up.add_argument("--tag", default=None,
                     help="Immutable git tag to create, e.g. v1.0")
     up.add_argument("--license", default=DEFAULT_LICENSE)
@@ -227,6 +249,7 @@ def main(argv: list[str] | None = None) -> None:
         push_model_to_hub(
             args.folder, args.repo_id, corpus=args.corpus,
             private=not args.public, tag=args.tag, license=args.license,
+            training_data=args.training_data, paper_url=args.paper_url,
             token=args.token)
     elif args.cmd == "download":
         print(download_pretrained(
