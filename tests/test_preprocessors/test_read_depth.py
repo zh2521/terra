@@ -1,7 +1,7 @@
 import numpy as np
 import scipy
 
-from terra.normalizers import read_depth
+from terra.preprocessors import normalize_by_read_depth
 
 
 def test_read_depth():
@@ -24,6 +24,7 @@ def test_read_depth():
         [8 / 8, 0 / 8, 0 / 8],
     ]) * 10_000
 
-    x_normalized = read_depth(x).toarray()
+    res = normalize_by_read_depth(x)
+    x_normalized = np.asarray(res.todense()) if hasattr(res, "todense") else np.asarray(res)
 
-    assert np.testing.assert_allclose(x_normalized, x_expected)
+    np.testing.assert_allclose(x_normalized, x_expected)

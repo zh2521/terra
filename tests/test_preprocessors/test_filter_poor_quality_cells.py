@@ -1,7 +1,7 @@
 import numpy as np
 import anndata as ad
 
-from terra.preprocessors import filter_poor_quality_cells
+from terra.preprocessors import filter_cells
 
 
 def test_filter_poor_quality_cells():
@@ -26,7 +26,8 @@ def test_filter_poor_quality_cells():
     adata = ad.AnnData(x)
     adata.obs["filter_pass"] = filter_pass
 
-    adata_filtered = filter_poor_quality_cells(adata)
-    filtered_x = adata_filtered.X.toarray()
+    adata_filtered = filter_cells(adata)
+    X = adata_filtered.X
+    filtered_x = np.asarray(X.todense()) if hasattr(X, "todense") else np.asarray(X)
 
     np.testing.assert_array_equal(filtered_x, expected_x)

@@ -1,7 +1,7 @@
 import numpy as np
 import scipy
 
-from terra.normalizers import cell_area
+from terra.preprocessors import normalize_by_cell_area
 
 
 def test_cell_area():
@@ -26,6 +26,7 @@ def test_cell_area():
         [8 / 83.1, 0 / 83.1, 0 / 83.1],
     ])
 
-    x_normalized = cell_area(x, cell_areas=cell_areas).toarray()
+    res = normalize_by_cell_area(x, cell_areas=cell_areas)
+    x_normalized = np.asarray(res.todense()) if hasattr(res, "todense") else np.asarray(res)
 
-    assert np.testing.assert_allclose(x_normalized, x_expected)
+    np.testing.assert_allclose(x_normalized, x_expected)

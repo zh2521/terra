@@ -3,7 +3,7 @@ import math
 from random import gauss
 import scipy
 
-from terra.normalizers import seurat_v3
+from terra.preprocessors import normalize_by_seurat
 
 
 def test_seurat_v3():
@@ -28,7 +28,7 @@ def test_seurat_v3():
     expected_std = np.array([0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0])
     expected_mean = np.repeat(0.0, 12)
 
-    x_normalized = seurat_v3(x)
+    x_normalized = normalize_by_seurat(x)
 
     x_normalized_mean = np.array(x_normalized.mean(axis=0)).flatten()
     x_normalized_std = np.array(x_normalized.std(axis=0)).flatten()
