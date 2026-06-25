@@ -36,7 +36,6 @@ except ImportError:  # pragma: no cover - optional dependency
     wandb = None
 
 import anndata as ad
-from scvi.distributions import ZeroInflatedNegativeBinomial
 from scipy.stats import pearsonr
 from collections import OrderedDict
 
@@ -179,6 +178,17 @@ def nb_nll(
 # ZINB LOSS FUNCTION (ORIGINAL)
 # =============================================================================
 
+def _zinb_distribution(**kwargs):
+    """Lazily import scvi's ZINB distribution.
+
+    scvi-tools is an optional, training-only dependency, so importing
+    ``terra.training.decode`` (and using the pure-torch ``nb_nll``) must not
+    require it -- scvi is imported only when the zero-inflated path is used.
+    """
+    from scvi.distributions import ZeroInflatedNegativeBinomial
+    return ZeroInflatedNegativeBinomial(**kwargs)
+
+
 def zinb_nll(
     mu: torch.Tensor,
     theta: torch.Tensor,
@@ -207,7 +217,7 @@ def zinb_nll(
     torch.Tensor
         Scalar tensor with the mean NLL over the batch.
     """
-    dist = ZeroInflatedNegativeBinomial(mu=mu, theta=theta, zi_logits=zi_logits)
+    dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=zi_logits)
     return -dist.log_prob(target).sum(dim=-1).mean()
 
 
@@ -783,7 +793,7 @@ def apply_count_decoder(
             emb_batch = torch.from_numpy(embeddings[start:end]).to(device_obj)
             mu, theta, dropout = decoder(emb_batch)
             if loss_type == "zinb":
-                dist = ZeroInflatedNegativeBinomial(mu=mu, theta=theta, zi_logits=dropout)
+                dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=dropout)
                 batch_preds = dist.mean
             elif loss_type == "nb_libsize":
                 fixed_libsize = torch.full((mu.size(0), 1), NB_FIXED_LIBSIZE, device=device_obj)
@@ -1048,7 +1058,7 @@ def evaluate(
             if loss_type == "zinb":
                 # For ZINB, use the distribution mean which accounts for zero-inflation
                 # Mean of ZINB = (1 - pi) * mu, where pi = sigmoid(dropout)
-                dist = ZeroInflatedNegativeBinomial(mu=mu, theta=theta, zi_logits=dropout)
+                dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=dropout)
                 preds = dist.mean
                 
             elif loss_type == "nb_libsize":
