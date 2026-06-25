@@ -40,3 +40,17 @@ from terra import download_pretrained, harmonize_tokenize_embed_pipeline
     download_pretrained
     push_model_to_hub
 ```
+
+## Data
+
+Convenience reader used by the tutorials to load public 10x Genomics Xenium
+samples.
+
+```{eval-rst}
+.. currentmodule:: terra.datasets
+
+.. autosummary::
+    :toctree: generated
+
+    read_xenium_10x
+```

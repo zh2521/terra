@@ -5,3 +5,4 @@ from .cell_datasets import (CellBaseDataset,
 from .dataloaders import (CustomDistributedLengthGroupedSampler,
                           init_dataloader_and_sampler)
 from .utils import get_ensembl_ids, prepare_dataset
+from .xenium import read_xenium_10x
