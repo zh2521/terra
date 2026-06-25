@@ -1,7 +1,6 @@
 # Installation
 
-TERRA is published on PyPI as `terra-st` (the bare `terra` name was already taken;
-the import name is still `terra`).
+TERRA is published on PyPI as `terra-st` (the import name is `terra`).
 
 ```shell
 pip install terra-st
