@@ -33,7 +33,6 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.profiler
-import wandb
 from datasets import load_from_disk
 from torch.nn.parallel import DistributedDataParallel
 from tqdm import tqdm
@@ -124,6 +123,17 @@ def train(args: dict,
     WORLD_RANK:
         World rank of the process.
     """
+    # `wandb` ships in the optional ``[train]`` extra. Import it lazily here so
+    # that merely importing ``terra.training`` (e.g. for ``decode``) does not
+    # require it; it is only needed to actually run training.
+    try:
+        import wandb
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "Training requires `wandb`. Install the training extra with "
+            "`pip install terra-st[train]`."
+        ) from exc
+
     # Set random seeds
     np.random.seed(_GLOBAL_SEED)
     torch.manual_seed(_GLOBAL_SEED)
