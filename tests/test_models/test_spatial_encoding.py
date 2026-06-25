@@ -94,25 +94,21 @@ def test_polar_zero_distance_is_well_defined():
 # ALiBi mode
 # ---------------------------------------------------------------------------
 
-def _expected_alibi_slopes(H):
-    """Reference re-implementation of the standard Press et al. (2022)
-    ALiBi recipe, used to pin the encoder's slopes for non-power-of-2
-    head counts. For power-of-2 H the slopes are a strictly decreasing
-    geometric sequence 2^(-8/H) * (2^(-8/H))^i. For non-power-of-2 H
-    you take the closest lower power of 2's slopes, then *interleave*
-    every-other slope from the next power of 2 -- which is intentionally
-    NOT globally monotonic (the appended extras can exceed earlier
-    slopes)."""
-    import math
-
-    def pow2(n):
-        start = 2 ** (-(2 ** -(math.log2(n) - 3)))
-        return [start * (start ** i) for i in range(n)]
-
-    if math.log2(H).is_integer():
-        return pow2(H)
-    closest = 2 ** math.floor(math.log2(H))
-    return pow2(closest) + pow2(2 * closest)[0::2][: H - closest]
+# Independent reference values for the standard Press et al. (2022) ALiBi
+# recipe, written out as LITERALS (deliberately NOT re-derived from the
+# implementation's own formula) so the test is a genuine oracle rather than a
+# self-consistency check. Recipe: for a power-of-2 head count the slopes are
+# 2^-(8/n) * (2^-(8/n))^i; for a non-power-of-2 count, take the closest lower
+# power of 2's slopes then append every-other slope of the next power of 2
+# (intentionally not globally monotonic).
+_REFERENCE_ALIBI_SLOPES = {
+    # closest pow2 = 4 -> [0.25, 0.0625, 0.015625, 0.00390625]; + [0.5, 0.125]
+    6: [0.25, 0.0625, 0.015625, 0.00390625, 0.5, 0.125],
+    # closest pow2 = 8 -> 2^-1..2^-8; + every-other of the 16-head sequence
+    12: [0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625,
+         0.7071067811865476, 0.35355339059327384, 0.17677669529663692,
+         0.08838834764831849],
+}
 
 
 def test_alibi_slopes_are_strictly_positive():
@@ -141,7 +137,7 @@ def test_alibi_slopes_match_standard_recipe_for_non_power_of_2():
     than asserting a (false) monotonicity property."""
     for H in (6, 12):
         slopes = GeneTransformerBaseEncoder._get_alibi_slopes(H).tolist()
-        expected = _expected_alibi_slopes(H)
+        expected = _REFERENCE_ALIBI_SLOPES[H]
         assert len(slopes) == H
         for s, e in zip(slopes, expected):
             # float32 tolerance: the encoder computes slopes in float32 while
