@@ -43,10 +43,7 @@ dependencies = [
     "datasets>=2.18",
     # for debug logging (referenced from the issue template)
     "session-info>=1.0",
-    "wandb>=0.16",
     "peft>=0.10",
-    "jupyterlab>=4",
-    "ipykernel>=6",
     "pyensembl>=2.2",
     "leidenalg>=0.9",
 ]
@@ -74,6 +71,16 @@ doc = [
 test = [
     "pytest",
     "coverage",
+]
+# Training only. The training entry points (terra.training.*) import wandb for
+# experiment tracking; install this extra to run them.
+train = [
+    "wandb>=0.16",
+]
+# Running the tutorial / example notebooks interactively.
+notebook = [
+    "jupyterlab>=4",
+    "ipykernel>=6",
 ]
 eval = [
     "cellphonedb",

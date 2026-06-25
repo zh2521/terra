@@ -87,7 +87,6 @@ autodoc_mock_imports = [
     "transformers",
     "peft",
     "scib_metrics",
-    "scvi",
     "pyensembl",
     "cellphonedb",
     "omnipath",
