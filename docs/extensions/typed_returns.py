@@ -30,3 +30,6 @@ def _parse_returns_section(self: NumpyDocstring, section: str) -> list[str]:
 def setup(app: Sphinx):
     """Set app."""
     NumpyDocstring._parse_returns_section = _parse_returns_section
+    # Only monkeypatches a read-time docstring transform, so it is safe under
+    # Sphinx's parallel build (`sphinx -j auto`, as Read the Docs uses).
+    return {"parallel_read_safe": True, "parallel_write_safe": True}

@@ -1027,15 +1027,27 @@ def get_gene_embed(
 
     Parameters
     -----------
-    dataset: Tokenized huggingface dataset.
-    model_folder_path: Path to the folder containing the model config, token dictionary, and normalization factors.
-    emb_layer: Layer for which to retrieve the embedding.
-    cell_gene_ensembl_id: List with gene IDs for which cell gene embeddings will be retrieved.
-    neighborhood_gene_ensembl_id: List with gene IDs for which neighborhood gene embeddings will be retrieved.
-    batch_size: Dataloader param.
-    pin_memory: Dataloader param.
-    num_workers: Number of workers used.
-    include_spatial_cell_emb: If `True`, also return gene embeddings for spatially contextualized cell embedding.
+    dataset:
+        Tokenized huggingface dataset.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ensembl_id:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ensembl_id:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrieved.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used.
+    include_spatial_cell_emb:
+        If `True`, also return gene embeddings for the spatially contextualized
+        cell embedding.
 
     Returns
     -------
@@ -1121,15 +1133,27 @@ def get_average_gene_embed(
 
     Parameters
     -----------
-    dataset: Tokenized huggingface dataset.
-    model_folder_path: Path to the folder containing the model config, token dictionary, and normalization factors.
-    emb_layer: Layer for which to retrieve the embedding.
-    cell_gene_ensembl_id: List with gene IDs for which cell gene embeddings will be retrieved.
-    neighborhood_gene_ensembl_id: List with gene IDs for which neighborhood gene embeddings will be retrieved.
-    batch_size: Dataloader param.
-    pin_memory: Dataloader param.
-    num_workers: Number of workers used.
-    include_spatial_cell_emb: If `True`, also return average gene embeddings for spatially contextualized cell embedding.
+    dataset:
+        Tokenized huggingface dataset.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ensembl_id:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ensembl_id:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrieved.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used.
+    include_spatial_cell_emb:
+        If `True`, also return average gene embeddings for the spatially
+        contextualized cell embedding.
 
     Returns
     -------

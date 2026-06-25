@@ -64,15 +64,27 @@ def get_spatial_score(
 
     Parameters
     -----------
-    dataset: Tokenized huggingface dataset.
-    model_folder_path: Path to the folder containing the model config, token dictionary, and normalization factors.
-    emb_layer: Layer for which to retrieve the embedding.
-    cell_gene_ensembl_id: List with gene IDs for which cell gene embeddings will be retrieved.
-    neighborhood_gene_ensembl_id: List with gene IDs for which neighborhood gene embeddings will be retrieved.
-    batch_size: Dataloader param.
-    pin_memory: Dataloader param.
-    num_workers: Number of workers used.
-    compute_cosine_with_list: A list that defines the items with which we want to compute cosine similarity. It could have value of 'cell' or/and 'neighborhood'.
+    dataset:
+        Tokenized huggingface dataset.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ensembl_id:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ensembl_id:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrieved.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used.
+    compute_cosine_with_list:
+        Items with which to compute cosine similarity; may contain ``'cell'``
+        and/or ``'neighborhood'``.
 
     Returns
     -------
@@ -132,14 +144,24 @@ def get_emd_distance(
 
     Parameters
     -----------
-    dataset: Tokenized huggingface dataset.
-    model_folder_path: Path to the folder containing the model config, token dictionary, and normalization factors.
-    emb_layer: Layer for which to retrieve the embedding.
-    cell_gene_ensembl_id: List with gene IDs for which cell gene embeddings will be retrieved.
-    neighborhood_gene_ensembl_id: List with gene IDs for which neighborhood gene embeddings will be retrieved.
-    batch_size: Dataloader param.
-    pin_memory: Dataloader param.
-    num_workers: Number of workers used.
+    dataset:
+        Tokenized huggingface dataset.
+    model_folder_path:
+        Path to the folder containing the model config, token dictionary, and
+        normalization factors.
+    emb_layer:
+        Layer for which to retrieve the embedding.
+    cell_gene_ensembl_id:
+        List with gene IDs for which cell gene embeddings will be retrieved.
+    neighborhood_gene_ensembl_id:
+        List with gene IDs for which neighborhood gene embeddings will be
+        retrieved.
+    batch_size:
+        Dataloader param.
+    pin_memory:
+        Dataloader param.
+    num_workers:
+        Number of workers used.
 
     Returns
     -------

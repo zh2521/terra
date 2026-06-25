@@ -189,5 +189,7 @@ nitpick_ignore = [
     ("py:class", "datasets.arrow_dataset.Dataset"),
     ("py:class", "np.ndarray"),
     ("py:class", "pandas.core.frame.DataFrame"),
+    ("py:class", "pandas.DataFrame"),
     ("py:class", "terra.datasets.cell_datasets.CellBaseDataset"),
+    ("py:data", "typing.Union"),
 ]
