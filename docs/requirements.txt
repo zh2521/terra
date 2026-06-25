@@ -8,6 +8,9 @@
 # classes subclass nn.Module -- a mocked torch would erase their signatures.
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
+# PyYAML is imported at module level by terra.inference (config parsing), so
+# autodoc needs it to import the package; it is not mocked.
+pyyaml
 
 sphinx>=4
 sphinx-book-theme>=1.0.0

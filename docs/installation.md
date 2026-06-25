@@ -48,6 +48,7 @@ TERRA ships several optional dependency groups:
 | Extra | Install | Purpose |
 | --- | --- | --- |
 | `hub` | `uv pip install "terra-st[hub]"` | Publish/download model bundles on the Hugging Face Hub (`terra-hub`). |
+| `notebook` | `uv pip install "terra-st[notebook]"` | JupyterLab + ipykernel to run the tutorial notebooks. |
 | `eval` | `uv pip install "terra-st[eval]"` | Evaluation utilities (CellPhoneDB, Omnipath). |
 | `doc` | `uv pip install "terra-st[doc]"` | Build the documentation. |
 | `test` | `uv pip install "terra-st[test]"` | Run the test suite. |

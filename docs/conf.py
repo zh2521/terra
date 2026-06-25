@@ -5,6 +5,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 # -- Path setup --------------------------------------------------------------
+import os
 import sys
 from datetime import datetime
 from importlib.metadata import metadata
@@ -155,8 +156,15 @@ html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
 html_css_files = ["css/custom.css"]
 html_logo = "_static/terra_logo.png"
+html_favicon = "_static/favicon.png"
 
 html_title = "TERRA"
+
+# Canonical URL + OpenGraph. On Read the Docs, READTHEDOCS_CANONICAL_URL holds
+# the served version's base URL; it is empty locally (no canonical/OG URLs).
+html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
+ogp_site_url = html_baseurl
+ogp_image = "_static/terra_logo.png"
 
 html_theme_options = {
     "repository_url": repository_url,

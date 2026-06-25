@@ -46,6 +46,8 @@ dependencies = [
     "peft>=0.10",
     "pyensembl>=2.2",
     "leidenalg>=0.9",
+    # config files are parsed with PyYAML (terra.inference, terra.utils.config)
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
