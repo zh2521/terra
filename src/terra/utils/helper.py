@@ -12,8 +12,6 @@ from typing import Literal
 
 import torch
 import torch.nn as nn
-from peft import LoraConfig
-from peft.tuners.lora import LoraModel
 
 import terra.models.gene_transformers as gt
 from terra.models.batch_classifier import BatchClassifierHead
@@ -67,6 +65,12 @@ def apply_peft(
     - If target_encoder object is an EncoderMultiMaskWrapper, PEFT is applied to the backbone, i.e. gt.GeneTransformerBaseEncoder,
     and a new EncoderMultiMaskWrapper object is instantiated with the PEFT model as the backbone.
     """
+    # Imported lazily: peft (and the transformers/torchvision it pulls in) is
+    # only needed for finetuning, so importing terra for inference or training
+    # does not drag in peft.
+    from peft import LoraConfig
+    from peft.tuners.lora import LoraModel
+
     if peft_method == 'lora':
         if not peft_target_modules:
             peft_target_modules = [
