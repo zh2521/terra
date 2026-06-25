@@ -1,8 +1,12 @@
-# TERRA
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Lotfollahi-lab/terra/main/docs/_static/terra_logo.png" width="300" alt="TERRA logo">
+</p>
 
-[![PyPI](https://img.shields.io/pypi/v/terra-st.svg)](https://pypi.org/project/terra-st/)
-[![Documentation](https://readthedocs.org/projects/terra/badge/?version=latest)](https://terra.readthedocs.io/)
-[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](LICENSE)
+<p align="center">
+  <a href="https://pypi.org/project/terra-st/"><img src="https://img.shields.io/pypi/v/terra-st.svg" alt="PyPI"></a>
+  <a href="https://terra.readthedocs.io/"><img src="https://readthedocs.org/projects/terra/badge/?version=latest" alt="Documentation"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD%203--Clause-blue.svg" alt="License: BSD-3-Clause"></a>
+</p>
 
 **TERRA** is a foundation model for spatial transcriptomics. It uses a
 Joint-Embedding Predictive Architecture (JEPA): cells are tokenized together with
