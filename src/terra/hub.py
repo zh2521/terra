@@ -66,7 +66,7 @@ BUNDLE_FILES = (
 # (deleting ``.gitattributes`` would drop the repo's LFS tracking rules).
 STALE_DELETE_PATTERNS = ("*.pt", "*.pth", "*.pkl", "*.yaml", "*.yml", "*.csv")
 
-DEFAULT_LICENSE = "cc-by-4.0"
+DEFAULT_LICENSE = "cc-by-nc-4.0"
 
 
 def _require_hub():

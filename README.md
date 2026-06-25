@@ -113,4 +113,5 @@ A BibTeX entry and DOI will be added here on publication.
 
 The TERRA **code** is released under the [BSD 3-Clause License](LICENSE).
 Pretrained **model weights** distributed on the Hugging Face Hub are released
-under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/).
+under [CC-BY-NC-4.0](https://creativecommons.org/licenses/by-nc/4.0/)
+(non-commercial use).
