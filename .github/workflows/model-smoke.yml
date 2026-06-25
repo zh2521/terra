@@ -1,0 +1,50 @@
+name: Model smoke test
+
+# End-to-end smoke test of the PUBLISHED Hugging Face models
+# (Lotfollahi-lab/TERRA-96M, TERRA-112M): download the bundle and run the full
+# harmonize -> tokenize -> embed pipeline on a tiny synthetic spatial AnnData.
+#
+# This is deliberately NOT run on every push/PR -- it is slow (downloads the
+# model bundle + the Ensembl annotation, builds a spatial graph, runs a forward
+# pass) and depends on the network. It runs only:
+#   * manually, via the "Run workflow" button (use before cutting a release), and
+#   * weekly, to catch "did a model re-upload break the bundle?" drift.
+#
+# The test self-skips (does not fail) if the model download fails, so a transient
+# HF/network blip won't produce a false red; only a genuine pipeline/assertion
+# failure does.
+
+on:
+  workflow_dispatch: {}          # manual button (Actions -> Model smoke test -> Run workflow)
+  schedule:
+    - cron: "0 6 * * 1"          # weekly, Mondays 06:00 UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Inference smoke (TERRA-96M / TERRA-112M)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -e {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "**/pyproject.toml"
+      - name: Install package with inference + hub extras
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install ".[dev,test,hub]"
+      - name: Run the published-model smoke test
+        env:
+          TERRA_MODEL_SMOKE: "1"   # opt-in switch the test gates on
+          MPLBACKEND: agg
+        run: |
+          pytest tests/test_inference -v --color=yes
