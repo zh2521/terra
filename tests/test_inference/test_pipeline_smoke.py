@@ -4,7 +4,7 @@ This test exercises the *real* published Hugging Face models end-to-end:
 ``download_pretrained`` -> ``harmonize_tokenize_embed_pipeline`` on a small
 synthetic spatial AnnData. It is deliberately **opt-in** so it never runs (and
 never breaks) the default CI, which has neither the GPU/inference stack, the
-``huggingface_hub`` dependency, nor network access / an HF token.
+``huggingface_hub`` dependency, nor network access.
 
 How to run it
 -------------
@@ -15,20 +15,16 @@ How to run it
    (the pipeline also needs torch, anndata, scanpy, squidpy, pyensembl and
    datasets, which are core ``terra-st`` dependencies.)
 
-2. Authenticate to Hugging Face. The TERRA model repos are **private**, so a
-   token with read access to ``Lotfollahi-lab`` is required::
+   The TERRA model repos are **public**, so no Hugging Face authentication is
+   required -- only network access to download the bundle.
 
-       hf auth login            # or: huggingface-cli login
-       # or set an env var:
-       export HF_TOKEN=hf_...
-
-3. Enable and run the opt-in test::
+2. Enable and run the opt-in test::
 
        TERRA_MODEL_SMOKE=1 pytest tests/test_inference -v
 
 The test self-skips (rather than fails) when any precondition is missing: the
 inference/Hub libraries are not importable, ``TERRA_MODEL_SMOKE`` is unset, or
-the model download fails (private repo / no token / offline). It downloads the
+the model download fails (offline / network error). It downloads the
 real model bundle, builds a tiny synthetic spatial dataset, runs the full
 harmonize+tokenize+embed pipeline and asserts -- at the smoke level -- that the
 returned AnnData carries finite, non-trivial embeddings of the expected shape in
@@ -54,12 +50,12 @@ pytest.importorskip("pyensembl")
 pytest.importorskip("datasets")
 
 # Even with all deps installed, only run when the user explicitly opts in. This
-# is the master switch that keeps the slow, network/token-dependent test out of
+# is the master switch that keeps the slow, network-dependent test out of
 # the default suite.
 pytestmark = pytest.mark.skipif(
     not os.environ.get("TERRA_MODEL_SMOKE"),
-    reason="Set TERRA_MODEL_SMOKE=1 (and authenticate to HF) to run the "
-    "published-model inference smoke test.",
+    reason="Set TERRA_MODEL_SMOKE=1 to run the published-model inference "
+    "smoke test.",
 )
 
 # Imported only after the importorskip gate above, so the module still collects
@@ -139,14 +135,14 @@ def _make_synthetic_spatial_adata() -> "ad.AnnData":
 def test_pipeline_smoke(repo_id, tmp_path):
     """Download a published model and embed a tiny synthetic dataset."""
     # 1. Download the model bundle. Skip (don't fail) on any download error --
-    #    private repo without a token, offline, etc.
+    #    offline, network error, etc. (the repos are public, no token needed).
     try:
         model_dir = download_pretrained(repo_id)
     except Exception as exc:  # noqa: BLE001 - any download failure -> skip
         pytest.skip(
             f"Could not download '{repo_id}' ({type(exc).__name__}: {exc}). "
-            "Ensure you are authenticated to Hugging Face (hf auth login / "
-            "HF_TOKEN) and have read access to the private TERRA repos."
+            "Ensure you have network access to Hugging Face (the TERRA model "
+            "repos are public, so no token is required)."
         )
 
     # 2. Build synthetic input.

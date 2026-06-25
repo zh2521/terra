@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-Train a lightweight ZINB/NB decoder that maps fixed UNI embeddings to gene
-expression. This version assumes embeddings are precomputed inside the
-combined NPZ dataset (see build_combined_dataset.py) and removes the
+Train a lightweight NB (Negative Binomial) decoder that maps fixed UNI
+embeddings to gene expression. This version assumes embeddings are precomputed
+inside the combined NPZ dataset (see build_combined_dataset.py) and removes the
 previous mixup / teacher-student / LoRA machinery for clarity.
 
 Supported loss functions:
-- ZINB (Zero-Inflated Negative Binomial): Original loss with dropout (zero-inflation) parameter
 - NB with library size (nb_libsize): Uses true library size during training, fixed 10k CPM at test time
-- NB with softplus (nb_softplus): No library size scaling, pure softplus for mean prediction
+- NB with softplus (nb_softplus, default): No library size scaling, pure softplus for mean prediction
 
 The NB loss variants address the data leakage concern when using library size:
 - nb_libsize: Mitigates leakage by using a fixed 10k library size at test time
@@ -75,16 +74,7 @@ def nb_log_prob(
 ) -> torch.Tensor:
     """
     Compute the log probability of the Negative Binomial distribution.
-    
-    This implementation is adapted from scvi-tools:
-    Title: scvi-tools
-    Authors: Romain Lopez <romain_lopez@gmail.com>,
-             Adam Gayoso <adamgayoso@berkeley.edu>,
-             Galen Xing <gx2113@columbia.edu>
-    Date: 16th November 2020
-    Code version: 0.8.1
-    Availability: https://github.com/YosefLab/scvi-tools/blob/8f5a9cc362325abbb7be1e07f9523cfcf7e55ec0/scvi/core/distributions/_negative_binomial.py
-    
+
     The NB distribution models count data with overdispersion, parameterized by:
     - mu: mean of the distribution (positive support)
     - theta: inverse dispersion parameter (positive support)
@@ -175,72 +165,26 @@ def nb_nll(
 
 
 # =============================================================================
-# ZINB LOSS FUNCTION (ORIGINAL)
-# =============================================================================
-
-def _zinb_distribution(**kwargs):
-    """Lazily import scvi's ZINB distribution.
-
-    scvi-tools is an optional, training-only dependency, so importing
-    ``terra.training.decode`` (and using the pure-torch ``nb_nll``) must not
-    require it -- scvi is imported only when the zero-inflated path is used.
-    """
-    from scvi.distributions import ZeroInflatedNegativeBinomial
-    return ZeroInflatedNegativeBinomial(**kwargs)
-
-
-def zinb_nll(
-    mu: torch.Tensor,
-    theta: torch.Tensor,
-    zi_logits: torch.Tensor,
-    target: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Compute the Zero-Inflated Negative Binomial negative log-likelihood loss.
-    
-    ZINB extends NB by adding a zero-inflation component that models excess zeros
-    in the data (e.g., dropout events in single-cell RNA-seq).
-    
-    Parameters
-    ----------
-    mu : torch.Tensor
-        Predicted means of the NB component. Shape: (batch_size, n_genes)
-    theta : torch.Tensor
-        Dispersion parameter. Shape: (batch_size, n_genes)
-    zi_logits : torch.Tensor
-        Logits for the zero-inflation probability (dropout). Shape: (batch_size, n_genes)
-    target : torch.Tensor
-        Ground truth counts. Shape: (batch_size, n_genes)
-    
-    Returns
-    -------
-    torch.Tensor
-        Scalar tensor with the mean NLL over the batch.
-    """
-    dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=zi_logits)
-    return -dist.log_prob(target).sum(dim=-1).mean()
-
-
-# =============================================================================
 # DECODER MODELS
 # =============================================================================
 
 class ZINBDecoder(nn.Module):
     """
-    MLP decoder that outputs parameters for ZINB or NB distributions.
-    
+    MLP decoder that outputs parameters for the Negative Binomial distribution.
+
+    Note: the ``ZINBDecoder`` name is retained only for checkpoint
+    compatibility; this decoder is now NB-only.
+
     Architecture:
     - Backbone: Stack of Linear -> [BatchNorm] -> [LayerNorm] -> SiLU -> Dropout blocks
     - Mean head: Linear layer followed by softplus activation
       (softmax when modeling relative expression for nb_libsize)
-    - Dropout head (optional): Linear layer for zero-inflation logits (ZINB only)
     - Theta: Learnable per-gene dispersion parameter
-    
+
     The model predicts:
     - count_mean: Expected counts (positive via softplus)
     - theta: Dispersion parameter (positive via softplus on learnable param)
-    - count_dropout: Zero-inflation logits (only used for ZINB)
-    
+
     Parameters
     ----------
     embed_dim : int
@@ -250,7 +194,7 @@ class ZINBDecoder(nn.Module):
     n_genes : int
         Number of genes (output dimension).
     dropout : float
-        Dropout probability in hidden layers.
+        Dropout (regularization) probability applied in the hidden layers.
     depth : int
         Number of MLP blocks in the backbone.
     layer_norm : bool
@@ -259,8 +203,6 @@ class ZINBDecoder(nn.Module):
         Whether to use BatchNorm in hidden layers.
     residual : bool
         Whether to use residual connections (only if hidden_dim == embed_dim).
-    use_dropout_head : bool
-        Whether to include the dropout head (True for ZINB, False for NB).
     mean_activation : str
         Activation for the mean head: "softplus" (default) or "softmax".
         Softmax is used when the decoder should output relative expression that sums to 1.
@@ -276,7 +218,6 @@ class ZINBDecoder(nn.Module):
         layer_norm: bool = False,
         batch_norm: bool = False,
         residual: bool = False,
-        use_dropout_head: bool = True,
         mean_activation: str = "softplus",
     ):
         super().__init__()
@@ -308,65 +249,50 @@ class ZINBDecoder(nn.Module):
         if mean_activation not in valid_mean_act:
             raise ValueError(f"mean_activation must be one of {valid_mean_act}, got {mean_activation}")
         self.mean_activation = mean_activation
-        
-        # Dropout head is only needed for ZINB (zero-inflation modeling)
-        self.use_dropout_head = use_dropout_head
-        if use_dropout_head:
-            self.dropout_head = nn.Linear(in_dim, n_genes)
-        else:
-            self.dropout_head = None
-        
+
         # Learnable per-gene dispersion parameter (initialized to 0, softplus gives ~0.69)
         self.theta = nn.Parameter(torch.zeros(n_genes))
 
     def forward(
         self,
         x: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the decoder.
-        
+
         Parameters
         ----------
         x : torch.Tensor
             Input embeddings. Shape: (batch_size, embed_dim)
-        
+
         Returns
         -------
         count_mean : torch.Tensor
             Predicted mean counts (before library size scaling). Shape: (batch_size, n_genes)
         theta : torch.Tensor
             Dispersion parameter. Shape: (batch_size, n_genes)
-        count_dropout : Optional[torch.Tensor]
-            Zero-inflation logits (None for NB). Shape: (batch_size, n_genes) if ZINB
         """
         h = x
-        
+
         # Pass through backbone with optional residual connections
         for layer in self.backbone:
             if self.residual and h.shape[-1] == layer[0].out_features:
                 h = h + layer(h)
             else:
                 h = layer(h)
-        
+
         # Mean activation depends on training objective
         logits = self.mean_head(h)
         if self.mean_activation == "softmax":
             count_mean = torch.nn.functional.softmax(logits, dim=-1)
         else:
             count_mean = torch.nn.functional.softplus(logits)
-        
-        # Compute dropout logits only for ZINB
-        if self.use_dropout_head and self.dropout_head is not None:
-            count_dropout = self.dropout_head(h)
-        else:
-            count_dropout = None
-        
+
         # Softplus on learnable theta ensures positive dispersion
         # Expand to match batch size for broadcasting
         theta = torch.nn.functional.softplus(self.theta).view(1, -1).expand_as(count_mean)
-        
-        return count_mean, theta, count_dropout
+
+        return count_mean, theta
 
 
 # =============================================================================
@@ -680,7 +606,6 @@ def _infer_decoder_config_from_state(state_dict: Dict[str, torch.Tensor]) -> Dic
         "layer_norm": has_layer_norm,
         "batch_norm": has_batch_norm,
         "residual": False,
-        "use_dropout_head": "dropout_head.weight" in state_dict,
     }
 
 
@@ -714,7 +639,7 @@ def apply_count_decoder(
     embed_fallback_key : Optional[str]
         Fallback obsm key if emb_key is missing.
     loss_type : Optional[str]
-        Override loss type ("zinb", "nb_libsize", "nb_softplus"). Defaults to checkpoint.
+        Override loss type ("nb_libsize", "nb_softplus"). Defaults to checkpoint.
     device : int
         GPU id (use -1 for CPU preference).
     batch_size : int
@@ -738,7 +663,7 @@ def apply_count_decoder(
         raise ValueError("Checkpoint is missing 'gene_list'.")
     gene_list = list(gene_list)
 
-    ckpt_loss_type = payload.get("loss_type", "zinb")
+    ckpt_loss_type = payload.get("loss_type", "nb_softplus")
     loss_type = loss_type or ckpt_loss_type
 
     config = payload.get("config")
@@ -751,7 +676,6 @@ def apply_count_decoder(
             "layer_norm": bool(config.get("layer_norm", False)),
             "batch_norm": bool(config.get("batch_norm", False)),
             "residual": bool(config.get("residual", False)),
-            "use_dropout_head": bool(config.get("use_dropout_head", loss_type == "zinb")),
         }
     else:
         model_cfg = _infer_decoder_config_from_state(state_dict)
@@ -767,7 +691,6 @@ def apply_count_decoder(
         layer_norm=model_cfg["layer_norm"],
         batch_norm=model_cfg["batch_norm"],
         residual=model_cfg["residual"],
-        use_dropout_head=model_cfg["use_dropout_head"],
         mean_activation=mean_activation,
     )
     decoder.load_state_dict(state_dict, strict=True)
@@ -791,17 +714,17 @@ def apply_count_decoder(
         for start in range(0, n_obs, batch_size):
             end = min(start + batch_size, n_obs)
             emb_batch = torch.from_numpy(embeddings[start:end]).to(device_obj)
-            mu, theta, dropout = decoder(emb_batch)
-            if loss_type == "zinb":
-                dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=dropout)
-                batch_preds = dist.mean
-            elif loss_type == "nb_libsize":
+            mu, theta = decoder(emb_batch)
+            if loss_type == "nb_libsize":
                 fixed_libsize = torch.full((mu.size(0), 1), NB_FIXED_LIBSIZE, device=device_obj)
                 batch_preds = mu * fixed_libsize
             elif loss_type == "nb_softplus":
                 batch_preds = mu
             else:
-                raise ValueError(f"Unknown loss_type: {loss_type}")
+                raise ValueError(
+                    f"Unknown loss_type: {loss_type}. "
+                    "Please choose from: nb_libsize, nb_softplus"
+                )
             preds[start:end] = batch_preds.detach().cpu().numpy()
 
     if list(adata.var_names) == gene_list:
@@ -995,7 +918,7 @@ def evaluate(
     loader: DataLoader,
     device: torch.device,
     genes: List[str],
-    loss_type: str = "zinb",
+    loss_type: str = "nb_softplus",
     metric_transform: str = "none",
     spot_metrics: bool = False,
     spot_metrics_only: bool = False,
@@ -1005,7 +928,6 @@ def evaluate(
     Evaluate the decoder on a dataset.
     
     This function handles different loss types and their specific requirements:
-    - ZINB: Uses the ZINB distribution mean for predictions
     - NB with libsize: Uses fixed 10k library size at test time to avoid data leakage
     - NB softplus: Uses raw softplus output without library size scaling
     
@@ -1020,7 +942,7 @@ def evaluate(
     genes : List[str]
         Gene names for reporting.
     loss_type : str
-        Type of loss function: "zinb", "nb_libsize", or "nb_softplus".
+        Type of loss function: "nb_libsize" or "nb_softplus".
     metric_transform : str
         Transform to apply before computing metrics.
     spot_metrics : bool
@@ -1053,15 +975,9 @@ def evaluate(
             target = target.to(device)
             
             # Get model predictions
-            mu, theta, dropout = decoder(emb)
-            
-            if loss_type == "zinb":
-                # For ZINB, use the distribution mean which accounts for zero-inflation
-                # Mean of ZINB = (1 - pi) * mu, where pi = sigmoid(dropout)
-                dist = _zinb_distribution(mu=mu, theta=theta, zi_logits=dropout)
-                preds = dist.mean
-                
-            elif loss_type == "nb_libsize":
+            mu, theta = decoder(emb)
+
+            if loss_type == "nb_libsize":
                 # For NB with library size, use fixed 10k at test time
                 # This avoids data leakage from using true library sizes
                 # The model outputs relative expression (like CPM normalized)
@@ -1075,10 +991,13 @@ def evaluate(
                 # For NB without library size, use raw softplus output
                 # The model directly predicts absolute expression levels
                 preds = mu
-                
+
             else:
-                raise ValueError(f"Unknown loss_type: {loss_type}")
-            
+                raise ValueError(
+                    f"Unknown loss_type: {loss_type}. "
+                    "Please choose from: nb_libsize, nb_softplus"
+                )
+
             preds_all.append(preds.detach().cpu().numpy())
             target_all.append(target.detach().cpu().numpy())
 
@@ -1482,59 +1401,45 @@ def get_device(device_id: int) -> torch.device:
 def compute_loss(
     mu: torch.Tensor,
     theta: torch.Tensor,
-    dropout: Optional[torch.Tensor],
     target: torch.Tensor,
     loss_type: str,
     library_size: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
     Compute the loss based on the specified loss type.
-    
-    This function handles three loss types:
-    
-    1. ZINB (Zero-Inflated Negative Binomial):
-       - Uses mu, theta, and dropout (zero-inflation logits)
-       - No library size scaling
-       - Suitable when modeling dropout events explicitly
-    
-    2. NB with library size (nb_libsize):
+
+    This function handles two loss types:
+
+    1. NB with library size (nb_libsize):
        - Uses mu * library_size as the mean
        - During training: library_size = true total counts per cell
        - During testing: library_size = fixed 10k to avoid leakage
        - Suitable when you want to model relative expression
-    
-    3. NB with softplus (nb_softplus):
+
+    2. NB with softplus (nb_softplus):
        - Uses mu directly (no library size scaling)
        - Model learns to predict absolute counts
        - Avoids library size dependency entirely
-    
+
     Parameters
     ----------
     mu : torch.Tensor
         Predicted mean (before library size scaling). Shape: (batch_size, n_genes)
     theta : torch.Tensor
         Dispersion parameter. Shape: (batch_size, n_genes)
-    dropout : Optional[torch.Tensor]
-        Zero-inflation logits (only for ZINB). Shape: (batch_size, n_genes)
     target : torch.Tensor
         Ground truth counts. Shape: (batch_size, n_genes)
     loss_type : str
-        Type of loss: "zinb", "nb_libsize", or "nb_softplus".
+        Type of loss: "nb_libsize" or "nb_softplus".
     library_size : Optional[torch.Tensor]
         Library size for nb_libsize. Shape: (batch_size, 1)
-    
+
     Returns
     -------
     torch.Tensor
         Scalar loss value.
     """
-    if loss_type == "zinb":
-        # ZINB loss with zero-inflation modeling
-        if dropout is None:
-            raise ValueError("ZINB loss requires dropout (zi_logits) output")
-        return zinb_nll(mu, theta, dropout, target)
-    
-    elif loss_type == "nb_libsize":
+    if loss_type == "nb_libsize":
         # NB loss with library size scaling
         # mu represents relative expression, we scale by library size
         if library_size is None:
@@ -1542,16 +1447,16 @@ def compute_loss(
         # Scale mu by library size to get absolute counts
         scaled_mu = mu * library_size
         return nb_nll(scaled_mu, theta, target)
-    
+
     elif loss_type == "nb_softplus":
         # NB loss without library size
         # mu directly represents absolute counts via softplus
         return nb_nll(mu, theta, target)
-    
+
     else:
         raise ValueError(
             f"Unknown loss_type: {loss_type}. "
-            "Please choose from: zinb, nb_libsize, nb_softplus"
+            "Please choose from: nb_libsize, nb_softplus"
         )
 
 
@@ -1810,9 +1715,6 @@ def train(args: argparse.Namespace) -> dict:
         )
 
     # Initialize decoder
-    # For NB losses, we don't need the dropout head (no zero-inflation)
-    use_dropout_head = (args.loss_type == "zinb")
-
     mean_activation = "softplus" if args.loss_type != "nb_libsize" else "softmax"
 
     decoder = ZINBDecoder(
@@ -1824,11 +1726,8 @@ def train(args: argparse.Namespace) -> dict:
         layer_norm=args.layer_norm,
         batch_norm=args.batch_norm,
         residual=args.residual,
-        use_dropout_head=use_dropout_head,
         mean_activation=mean_activation,
     ).to(device)
-
-    logger.info(f"Decoder has dropout head: {use_dropout_head}")
 
     optimizer = torch.optim.Adam(
         decoder.parameters(),
@@ -1922,13 +1821,12 @@ def train(args: argparse.Namespace) -> dict:
             target = target.to(device)
             
             # Forward pass
-            mu, theta, dropout = decoder(emb)
-            
+            mu, theta = decoder(emb)
+
             # Compute loss based on loss type
             loss = compute_loss(
                 mu=mu,
                 theta=theta,
-                dropout=dropout,
                 target=target,
                 loss_type=args.loss_type,
                 library_size=libsize,
@@ -2061,7 +1959,6 @@ def train(args: argparse.Namespace) -> dict:
                 "layer_norm": bool(args.layer_norm),
                 "batch_norm": bool(args.batch_norm),
                 "residual": bool(args.residual),
-                "use_dropout_head": bool(use_dropout_head),
                 "mean_activation": mean_activation,
             },
         },
@@ -2112,37 +2009,30 @@ def parse_args() -> argparse.Namespace:
     
     Key arguments for loss type selection:
     --loss-type: Choose from:
-        - zinb: Zero-Inflated Negative Binomial (default, original behavior)
+        - nb_softplus: NB without library size (pure softplus for mean prediction, default)
         - nb_libsize: NB with library size (true libsize in training, fixed 10k at test)
-        - nb_softplus: NB without library size (pure softplus for mean prediction)
     """
     parser = argparse.ArgumentParser(
-        description="Train a ZINB/NB decoder on fixed embeddings.",
+        description="Train an NB decoder on fixed embeddings.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Loss Type Selection:
 --------------------
---loss-type zinb        : Zero-Inflated Negative Binomial (default)
-                          Uses dropout head for zero-inflation modeling.
-                          
---loss-type nb_libsize  : Negative Binomial with library size scaling
-                          Training: Uses true library size (sum of counts per cell)
-                          Testing: Uses fixed 10k library size to avoid data leakage
-                          
---loss-type nb_softplus : Negative Binomial without library size
+--loss-type nb_softplus : Negative Binomial without library size (default)
                           Uses pure softplus output for mean prediction.
                           No library size dependency at all.
 
+--loss-type nb_libsize  : Negative Binomial with library size scaling
+                          Training: Uses true library size (sum of counts per cell)
+                          Testing: Uses fixed 10k library size to avoid data leakage
+
 Example usage:
 --------------
-# Original ZINB loss
-python count_decoder.py --dataset data.npz --loss-type zinb
+# NB without library size (default)
+python count_decoder.py --dataset data.npz --loss-type nb_softplus
 
 # NB with library size (10k CPM at test time)
 python count_decoder.py --dataset data.npz --loss-type nb_libsize
-
-# NB without library size
-python count_decoder.py --dataset data.npz --loss-type nb_softplus
         """,
     )
     
@@ -2285,16 +2175,15 @@ python count_decoder.py --dataset data.npz --loss-type nb_softplus
         help="Use standard random mini-batches instead of slide-homogeneous batches.",
     )
     
-    # Loss type selection - NEW ARGUMENT
+    # Loss type selection
     parser.add_argument(
         "--loss-type",
-        choices=["zinb", "nb_libsize", "nb_softplus"],
-        default="zinb",
+        choices=["nb_libsize", "nb_softplus"],
+        default="nb_softplus",
         help=(
             "Loss function type. "
-            "'zinb': Zero-Inflated NB (default, includes dropout head). "
-            "'nb_libsize': NB with library size (true libsize in train, fixed 10k at test). "
-            "'nb_softplus': NB without library size (pure softplus output)."
+            "'nb_softplus': NB without library size (pure softplus output, default). "
+            "'nb_libsize': NB with library size (true libsize in train, fixed 10k at test)."
         ),
     )
     
