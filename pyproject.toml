@@ -26,7 +26,31 @@ maintainers = [
 ]
 urls.Documentation = "https://terra.readthedocs.io/"
 urls.Source = "https://github.com/Lotfollahi-lab/terra"
-urls.Home-page = "https://github.com/Lotfollahi-lab/terra"
+urls.Homepage = "https://github.com/Lotfollahi-lab/terra"
+urls.Changelog = "https://github.com/Lotfollahi-lab/terra/blob/main/CHANGELOG.md"
+urls.Issues = "https://github.com/Lotfollahi-lab/terra/issues"
+keywords = [
+    "spatial transcriptomics",
+    "foundation model",
+    "JEPA",
+    "single-cell",
+    "representation learning",
+    "deep learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     # Lower bounds are modern versions known to work with TERRA. The exact,
     # fully-pinned reproducible environment TERRA is developed/tested against
