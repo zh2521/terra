@@ -16,24 +16,14 @@ single-cell resolution).
 
 ### Added
 
--   **Pretrained models** distributed as self-contained bundles on the Hugging
-    Face Hub — `TERRA-96M` and `TERRA-112M` — fetched with `download_pretrained`
-    and published with the `terra-hub` CLI / `push_model_to_hub`. Each bundle
-    ships the checkpoint, tokenizer, and gene-reference files needed to
-    reproduce training-time harmonization.
--   **Zero-shot inference pipeline** — `harmonize_tokenize_embed_pipeline`, plus
-    the individual `harmonize_adata` / `tokenize_adata` / `embed_dataset` steps —
-    producing cell- and neighborhood-level embeddings for single- and
-    multi-sample data.
--   **Downstream analyses**: gene-level embeddings (`get_gene_embed`,
-    `get_average_gene_embed`), spatial gene-pair scoring (`get_spatial_score`),
-    EMD-based spatial structure (`get_emd_distance`), and in-silico perturbation
-    (`perturb_dataset`).
--   **Finetuning** of the pretrained encoder with LoRA/PEFT (`terra.training`).
--   **Data reader** for public 10x Genomics Xenium samples
-    (`terra.datasets.read_xenium_10x`), used by the tutorials.
--   **Documentation** on Read the Docs: an installation guide, three end-to-end
-    tutorials (single-sample quickstart, multi-sample quickstart, and downstream
-    analysis), a user guide, and a full API reference.
+-   Pretrained models (`TERRA-96M`, `TERRA-112M`) distributed as self-contained
+    bundles on the Hugging Face Hub, with download and publishing utilities
+    (`download_pretrained`, `terra-hub`).
+-   Zero-shot inference pipeline producing cell- and neighborhood-level
+    embeddings for single- and multi-sample spatial data.
+-   Downstream analyses: gene-level embeddings, spatial gene-pair scoring,
+    EMD-based spatial structure, and in-silico perturbation.
+-   Finetuning of the pretrained encoder with LoRA/PEFT.
+-   Documentation, tutorials, and API reference.
 
 [0.1.0]: https://github.com/Lotfollahi-lab/terra/releases/tag/v0.1.0
