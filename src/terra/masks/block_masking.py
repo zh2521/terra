@@ -249,8 +249,6 @@ class BlockMaskCollator:
         masks_attention = (
             tokens != 0).unsqueeze(1).unsqueeze(1) # [B, 1, 1, N]
 
-        #print("Attention mask")
-        #print(masks_attention.shape)
 
         if self.restrict_special_attention:
             # Make special tokens only attent to themselves
@@ -313,11 +311,8 @@ class BlockMaskCollator:
             collated_context_masks = None
 
         #elapsed_ms = (t1 - t0) * 1000
-        #print(f"[Collate] Took {elapsed_ms:.3f} ms for batch size {B}")
         #raise ValueError
 
-        #print(collated_context_masks[0])
-        #print(collated_target_masks[0])
 
         return collated, \
                collated_context_masks, \

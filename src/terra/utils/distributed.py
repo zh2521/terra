@@ -18,6 +18,12 @@ from transformers import BatchEncoding
 logger = logging.getLogger(__name__)
 
 
+__all__ = [
+    "logger",
+    "init_distributed",
+]
+
+
 def init_distributed(port: int=40112, rank_and_world_size=(None, None)):
 
     if dist.is_available() and dist.is_initialized():

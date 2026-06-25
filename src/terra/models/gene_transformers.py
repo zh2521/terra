@@ -471,19 +471,12 @@ class GeneTransformerBaseEncoder(ABC, nn.Module):
         if cell_only:
             x[:, (self.n_special_tokens+self.seq_len_cell):, :] = 0
 
-            #print('model cell attn')
             #torch.set_printoptions(profile="full")
-            #print(attn.shape)
-            #print(attn[0, :, 1, :])
-            #print(attn[0, :, 65, :])
 
         # Mask token embeddings if masks are provided
         if masks is not None:
             x = apply_masks(x, masks)
 
-        #print("MASKS:")
-        #print(masks)
-        #print(x)
 
         if DEBUG:
             zero_rows = (x.abs().sum(dim=-1) == 0)   # (B, S)

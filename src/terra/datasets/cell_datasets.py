@@ -425,7 +425,6 @@ class CellBaseDataset(Dataset):
             segment_values:
                 List of values for a given segment.
             """
-            # TODO: Fix tokenization index after removal of 100 <cls> tokens
             #seg_tokens = torch.where(
             #    item['seg_tokens'] != 0,
             #    item['seg_tokens'] - 104,
@@ -645,7 +644,6 @@ class CellGraphDataset(CellBaseDataset):
 
         # Get (sampled) gene tokens, positions, segments and values for
         # neighbor cell segments
-        # TODO: Fix tokenization index after removal of 100 <cls> tokens
         #seg_tokens = torch.where(
         #    item['seg_tokens'] != 0,
         #    item['seg_tokens'] - 104,
@@ -762,10 +760,6 @@ class CellGraphDataset(CellBaseDataset):
                 (item_dict['segments'] != 0) & (
                     torch.arange(len(item_dict['segments'])
                     ) >= self.n_special_tokens)] += self.n_special_tokens
-        #print(item_dict['tokens'])
-        #print(item_dict['values'])
-        #print(item_dict['segments'])
-        #print(item_dict['positions'])
 
         # Expose per-cell metadata (batch_value, assay_value, ...) as
         # scalar fields independent of self.special_tokens.
@@ -993,10 +987,6 @@ class CellNeighborhoodDataset(CellBaseDataset):
                 (item_dict['segments'] != 0) & (
                     torch.arange(len(item_dict['segments'])
                     ) >= self.n_special_tokens)] += self.n_special_tokens
-        #print(item_dict['tokens'])
-        #print(item_dict['values'])
-        #print(item_dict['segments'])
-        #print(item_dict['positions'])
 
         # Expose per-cell metadata (batch_value, assay_value, ...) as
         # scalar fields independent of self.special_tokens.

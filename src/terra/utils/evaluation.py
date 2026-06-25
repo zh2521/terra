@@ -18,6 +18,19 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 
+__all__ = [
+    "logger",
+    "classification_metrics",
+    "clustering_metrics",
+    "compute_energy_distance",
+    "compute_maximum_mean_discrepancy",
+    "compute_scalar_mmd",
+    "compute_emd",
+    "get_top_gene_pairs",
+    "get_top_gene_score",
+]
+
+
 def classification_metrics(adata: anndata.AnnData,
                            label_col: str = 'cell_type',
                            classifier: Literal['knn', 'logistic'] = 'knn',

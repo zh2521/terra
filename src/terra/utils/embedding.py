@@ -15,6 +15,20 @@ from .evaluation import compute_scalar_mmd, compute_emd
 logger = logging.getLogger(__name__)
 
 
+__all__ = [
+    "logger",
+    "compute_sum_and_nonzero_count",
+    "compute_unmasked_rank_based_weights",
+    "compute_mean_unmasked_emb",
+    "compute_softmax_weighted_mean_emb",
+    "create_binary_selection_mask",
+    "retrieve_gene_emb",
+    "compute_count_mean_cosine_sim",
+    "batch_rowwise_distances",
+    "collect_adata_from_folder",
+]
+
+
 def compute_sum_and_nonzero_count(
     mat: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -227,8 +241,6 @@ def create_binary_selection_mask(ns_tokens: torch.Tensor,
     selection_mask:
         The resulting 2D selection mask tensor.
     """
-    #print("HEEEERE")
-    #print(ns_tokens.shape)
     selection_mask = torch.zeros_like(ns_tokens, dtype=torch.bool)
 
     if selection_type == 'agg_cell':

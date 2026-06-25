@@ -206,9 +206,7 @@ def _perturb_batch_with_df(
             batch["gene_expr"] = ge_sorted.reshape(B, n_segments * seq_len_cell)
 
         #if len(cell_pert_idx) == 0:
-        #    print(f"No qualifying cells for perturbation with row idx: {idx}.")
         #else:
-        #    print(f"{len(cell_pert_idx)} qualifying cells for perturbation with row idx: {idx}.")
 
     return batch
 

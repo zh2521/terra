@@ -168,12 +168,10 @@ def nb_nll(
 # DECODER MODELS
 # =============================================================================
 
-class ZINBDecoder(nn.Module):
+class CountDecoder(nn.Module):
     """
-    MLP decoder that outputs parameters for the Negative Binomial distribution.
-
-    Note: the ``ZINBDecoder`` name is retained only for checkpoint
-    compatibility; this decoder is now NB-only.
+    NB count decoder: an MLP that maps embeddings to parameters of the
+    Negative Binomial distribution over gene counts.
 
     Architecture:
     - Backbone: Stack of Linear -> [BatchNorm] -> [LayerNorm] -> SiLU -> Dropout blocks
@@ -560,7 +558,7 @@ def _resolve_checkpoint_path(
     if not model_folder_path:
         raise ValueError("Provide either model_folder_path or checkpoint_path.")
     path = Path(model_folder_path)
-    return path / "zinb_decoder.pt" if path.is_dir() else path
+    return path / "count_decoder.pt" if path.is_dir() else path
 
 
 def _infer_decoder_config_from_state(state_dict: Dict[str, torch.Tensor]) -> Dict[str, object]:
@@ -631,7 +629,7 @@ def apply_count_decoder(
     emb_key : str
         Primary obsm key for embeddings.
     model_folder_path : Optional[str]
-        Directory containing zinb_decoder.pt, or a direct path to a checkpoint.
+        Directory containing count_decoder.pt, or a direct path to a checkpoint.
     decoded_counts_layer_key : str
         Layer name to store decoded counts.
     checkpoint_path : Optional[str]
@@ -683,7 +681,7 @@ def apply_count_decoder(
     mean_activation = "softplus" if loss_type != "nb_libsize" else "softmax"
     if config and "mean_activation" in config:
         mean_activation = str(config["mean_activation"])
-    decoder = ZINBDecoder(
+    decoder = CountDecoder(
         embed_dim=model_cfg["embed_dim"],
         hidden_dim=model_cfg["hidden_dim"],
         n_genes=model_cfg["n_genes"],
@@ -1597,7 +1595,7 @@ def train(args: argparse.Namespace) -> dict:
             name=args.wandb_run_name,
             config={
                 "loss_type": args.loss_type,
-                "model": "ZINBDecoder",
+                "model": "CountDecoder",
                 "args": vars(args),
             },
             reinit=True,
@@ -1717,7 +1715,7 @@ def train(args: argparse.Namespace) -> dict:
     # Initialize decoder
     mean_activation = "softplus" if args.loss_type != "nb_libsize" else "softmax"
 
-    decoder = ZINBDecoder(
+    decoder = CountDecoder(
         embed_dim=train_emb.shape[1],
         hidden_dim=args.hidden_dim,
         n_genes=train_expr.shape[1],
@@ -1944,7 +1942,7 @@ def train(args: argparse.Namespace) -> dict:
         }
 
     # Save checkpoint
-    output_path = Path(args.output) if args.output else Path(args.save_dir) / "zinb_decoder.pt"
+    output_path = Path(args.output) if args.output else Path(args.save_dir) / "count_decoder.pt"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
         {

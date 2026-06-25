@@ -173,7 +173,6 @@ class CustomDistributedLengthGroupedSampler(DistributedSampler):
 
         #t1 = time.perf_counter()
         #elapsed_ms = (t1 - t0) * 1000
-        #print(f"[Length Sampling] Took {elapsed_ms:.3f}ms.")
 
         return indices
 

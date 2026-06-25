@@ -547,7 +547,6 @@ class CellGraphTokenizer(CellBaseTokenizer):
         """
         super().__init__(**base_tokenizer_kwargs)
 
-        # TODO fix this for radius and delaunay
         self.seq_len_cell = int(self.model_input_size / (self.n_neighs + 1))
 
     def _tokenize_adata(self,
@@ -1095,7 +1094,7 @@ class CellGraphTokenizer(CellBaseTokenizer):
             adata_dict['batch_value'] = [
                 self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
             adata_dict['gene_panel_value'] = [self.token_dict.get(
-                f'spv_gene_panel{len(adata.var_names)}', spv_idx_subtract) # TODO: temp solution for unused gene panels while token is not used
+                f'spv_gene_panel{len(adata.var_names)}', spv_idx_subtract)
                 - spv_idx_subtract] * n_cells
             adata_dict['assay_value'] = [
                 self.token_dict[
@@ -1252,7 +1251,6 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
         """
         super().__init__(**base_tokenizer_kwargs)
 
-        # TODO fix this for radius and delaunay
         if split_cell_neigh_equally:
             self.seq_len_cell = int(self.model_input_size / 2)
         else:
@@ -1752,7 +1750,7 @@ class CellNeighborhoodTokenizer(CellBaseTokenizer):
             adata_dict['batch_value'] = [
                 self.token_dict[f'spv_{batch_id_key}'] - spv_idx_subtract] * n_cells
             adata_dict['gene_panel_value'] = [self.token_dict.get(
-                f'spv_gene_panel{len(adata.var_names)}', spv_idx_subtract) # TODO: temp solution for unused gene panels while token is not used
+                f'spv_gene_panel{len(adata.var_names)}', spv_idx_subtract)
                 - spv_idx_subtract] * n_cells
             adata_dict['assay_value'] = [
                 self.token_dict[

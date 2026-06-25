@@ -279,10 +279,6 @@ def embed_dataset(dataset: Dataset,
             top_k=top_k).cpu()
 
         #torch.set_printoptions(threshold=float('inf'))
-        #print('ns tokens')
-        #print(ns_tokens[0])
-        #print('cell mask')
-        #print(cell_mask[0])
         #raise ValueError
 
         # Create mask for neighbor cell genes
@@ -318,10 +314,6 @@ def embed_dataset(dataset: Dataset,
             neighborhood_values = values.masked_fill(~neighborhood_mask, float('-inf'))
             neighborhood_weights = torch.softmax(neighborhood_values, dim=1)
             torch.set_printoptions(threshold=float('inf'))
-            #print('cell weights')
-            #print(cell_weights[0])
-            #print('neighborhood weights')
-            #print(neighborhood_weights[0])
             #raise ValueError
             neighborhood_emb = compute_softmax_weighted_mean_emb(n_emb, neighborhood_weights)            
 

@@ -11,6 +11,12 @@ import math
 import torch
 
 
+__all__ = [
+    "WarmupCosineSchedule",
+    "CosineWDSchedule",
+]
+
+
 class WarmupCosineSchedule(object):
     """
     WarmupCosineSchedule class to schedule learning rate.

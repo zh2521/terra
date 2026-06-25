@@ -7,6 +7,12 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+__all__ = [
+    "logger",
+    "create_params_from_YAML_wandb_config",
+]
+
+
 def _expand_env_vars(obj):
     """Recursively expand ``${VAR}`` / ``$VAR`` references in string config values.
 
