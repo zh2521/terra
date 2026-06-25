@@ -144,7 +144,9 @@ def test_alibi_slopes_match_standard_recipe_for_non_power_of_2():
         expected = _expected_alibi_slopes(H)
         assert len(slopes) == H
         for s, e in zip(slopes, expected):
-            assert abs(s - e) < 1e-12, (
+            # float32 tolerance: the encoder computes slopes in float32 while
+            # the reference recipe is float64.
+            assert abs(s - e) < 1e-5, (
                 f"slopes deviate from standard recipe at H={H}: "
                 f"{slopes} vs {expected}")
         # The first power-of-2 block (the leading ``closest`` slopes) is
