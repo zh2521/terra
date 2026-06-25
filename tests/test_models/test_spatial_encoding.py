@@ -94,16 +94,67 @@ def test_polar_zero_distance_is_well_defined():
 # ALiBi mode
 # ---------------------------------------------------------------------------
 
-def test_alibi_slopes_are_strictly_positive_and_decreasing():
-    """ALiBi slopes must form a strictly decreasing geometric sequence
-    starting just below 1.0 (the standard ALiBi recipe). Sanity for
-    num_heads = 4, 6, 8, 12 -- including non-power-of-2 cases."""
+def _expected_alibi_slopes(H):
+    """Reference re-implementation of the standard Press et al. (2022)
+    ALiBi recipe, used to pin the encoder's slopes for non-power-of-2
+    head counts. For power-of-2 H the slopes are a strictly decreasing
+    geometric sequence 2^(-8/H) * (2^(-8/H))^i. For non-power-of-2 H
+    you take the closest lower power of 2's slopes, then *interleave*
+    every-other slope from the next power of 2 -- which is intentionally
+    NOT globally monotonic (the appended extras can exceed earlier
+    slopes)."""
+    import math
+
+    def pow2(n):
+        start = 2 ** (-(2 ** -(math.log2(n) - 3)))
+        return [start * (start ** i) for i in range(n)]
+
+    if math.log2(H).is_integer():
+        return pow2(H)
+    closest = 2 ** math.floor(math.log2(H))
+    return pow2(closest) + pow2(2 * closest)[0::2][: H - closest]
+
+
+def test_alibi_slopes_are_strictly_positive():
+    """ALiBi slopes must all be strictly positive (so the bias only
+    ever penalizes, never rewards, distance) and below 1.0 for every
+    head count, including non-power-of-2 cases."""
     for H in (2, 4, 6, 8, 12):
         slopes = GeneTransformerBaseEncoder._get_alibi_slopes(H).tolist()
         assert all(s > 0 for s in slopes), f"non-positive slope at H={H}"
+        assert all(s < 1.0 for s in slopes), f"slope >= 1.0 at H={H}: {slopes}"
+
+
+def test_alibi_slopes_strictly_decreasing_for_power_of_2():
+    """For power-of-2 head counts the standard recipe yields a strictly
+    decreasing geometric sequence."""
+    for H in (2, 4, 8):
+        slopes = GeneTransformerBaseEncoder._get_alibi_slopes(H).tolist()
         for a, b in zip(slopes, slopes[1:]):
             assert a > b, f"slopes not strictly decreasing at H={H}: {slopes}"
-        assert slopes[0] < 1.0, f"first slope >= 1.0 at H={H}: {slopes[0]}"
+
+
+def test_alibi_slopes_match_standard_recipe_for_non_power_of_2():
+    """For non-power-of-2 head counts the standard Press et al. recipe
+    interleaves extra slopes and is intentionally NOT globally
+    monotonic. Pin the encoder's output to the reference recipe rather
+    than asserting a (false) monotonicity property."""
+    for H in (6, 12):
+        slopes = GeneTransformerBaseEncoder._get_alibi_slopes(H).tolist()
+        expected = _expected_alibi_slopes(H)
+        assert len(slopes) == H
+        for s, e in zip(slopes, expected):
+            assert abs(s - e) < 1e-12, (
+                f"slopes deviate from standard recipe at H={H}: "
+                f"{slopes} vs {expected}")
+        # The first power-of-2 block (the leading ``closest`` slopes) is
+        # still strictly decreasing; the interleaved extras follow it.
+        closest = 2 ** math.floor(math.log2(H))
+        head_block = slopes[:closest]
+        for a, b in zip(head_block, head_block[1:]):
+            assert a > b, (
+                f"leading power-of-2 block not strictly decreasing at "
+                f"H={H}: {head_block}")
 
 
 def test_alibi_bias_shape_and_decay_with_distance():
@@ -349,10 +400,25 @@ def test_laplacian_pe_sign_is_deterministic():
 
 def test_laplacian_pe_changes_with_geometry():
     """Different cell geometries must produce different PE -- if not,
-    the encoding carries no spatial info."""
-    enc = _make_rank_encoder("laplacian", embed_dim=32)
+    the encoding carries no spatial info.
+
+    NOTE: this needs n_segments >= 3. With only 2 cells the *normalized*
+    Laplacian of a connected 2-node graph is always [[1, -1], [-1, 1]]
+    regardless of the edge weight, so its eigenvectors (hence the PE)
+    are geometry-invariant by construction -- the bottom non-trivial
+    eigenvector is always [1/sqrt2, -1/sqrt2]. Geometry only enters the
+    spectrum once there are >= 3 cells (so the relative edge weights can
+    reshape the eigenbasis). We build a 3-cell encoder here and seed
+    both geometries deterministically so the test is reproducible."""
+    from terra.models.gene_transformers import GeneTransformerRankEncoder
+    # seq_len_cell = (14 - 2) // 3 = 4; cell blocks at indices 2, 6, 10.
+    enc = GeneTransformerRankEncoder(
+        vocab_size=16, seq_len=14, n_special_tokens=2, n_segments=3,
+        cell_pos_enc="laplacian", embed_dim=32, depth=1, num_heads=4,
+        use_flash_attention=False,
+    )
+    torch.manual_seed(0)
     b1, _ = _make_laplacian_batch(B=1, encoder=enc)
-    # Rebuild with a different random geometry
     torch.manual_seed(42)
     b2, _ = _make_laplacian_batch(B=1, encoder=enc)
     a = enc._get_seg_emb(b1)

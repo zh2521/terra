@@ -224,10 +224,12 @@ def test_protein_init_token_embedding_forward_routes_correctly():
     out = module(tokens)
     assert out.shape == (1, 6, embed_dim)
 
-    # Gene-token rows match proj(esm_row)
+    # Gene-token rows match proj(layer_norm(esm_row)). The gene branch
+    # in forward() applies protein_norm (a LayerNorm, on by default) to
+    # the ESM lookup before the projection, mirroring UCE's pattern.
     for tid in [5, 6, 8]:
         expected = module.protein_proj(
-            module.protein_emb(torch.tensor([tid])))
+            module.protein_norm(module.protein_emb(torch.tensor([tid]))))
         out_at = module(torch.tensor([[tid]]))
         torch.testing.assert_close(out_at, expected.unsqueeze(0))
 
@@ -463,18 +465,38 @@ def test_warm_start_skips_pca_when_dims_match():
 
 
 def test_warm_start_uses_pca_when_dims_differ():
-    """When dims differ, PCA-reduce and report variance retained."""
-    token_dict = _make_synthetic_token_dict()
+    """When dims differ, PCA-reduce and report variance retained.
+
+    PCA components are bounded by min(embed_dim, n_gene_rows, esm_dim),
+    so this scenario needs at least ``embed_dim`` covered gene rows for
+    the reduction to actually produce ``embed_dim`` components. The
+    shared 3-gene fixtures would cap it at 3; build a larger token
+    dict / protein matrix / mapping locally so the contract under test
+    (pca_components_used == embed_dim) is reachable.
+    """
     esm_dim = 16
     embed_dim = 8
-    protein_matrix = _make_synthetic_protein_matrix(esm_dim=esm_dim)
-    mapping = _make_synthetic_mapping()
-    aligned, gene_mask, _ = build_aligned_protein_matrix(
+    n_genes = 12  # >= embed_dim so min(embed_dim, n_genes, esm_dim) == embed_dim
+
+    # Special tokens at low IDs, then n_genes ENSG-prefixed gene tokens.
+    token_dict = {"<pad>": 0, "cls_0": 1, "spt_batch": 2}
+    for i in range(n_genes):
+        token_dict[f"ENSG{i:011d}"] = len(token_dict)
+
+    # Distinct, linearly-independent ESM-like rows so PCA finds
+    # embed_dim non-degenerate components.
+    g = torch.Generator(device="cpu").manual_seed(0)
+    protein_matrix = torch.randn(n_genes, esm_dim, generator=g)
+    mapping = {f"ENSG{i:011d}": i for i in range(n_genes)}
+
+    aligned, gene_mask, align_stats = build_aligned_protein_matrix(
         token_dict=token_dict,
         protein_matrix=protein_matrix,
         ensembl_to_row=mapping,
         effective_vocab_size=len(token_dict),
     )
+    assert align_stats["n_gene_tokens_covered"] == n_genes
+
     init, stats = _warm_start_init_tensor(
         aligned=aligned,
         gene_mask=gene_mask,
