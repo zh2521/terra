@@ -19,7 +19,22 @@ check_python_version
 
 CONFIG_FILE="$1"
 
-eval $(python3 ${ADVANCED_BASH_SCRIPT_PATH}/parse_config.py "$CONFIG_FILE")
+# parse_config.py treats the config as literal text -- it does NOT expand
+# ${...} variables (it would even mkdir a literal "${TERRA_ARTIFACTS_DIR}").
+# Resolve the TERRA_* site variables (exported by cluster_env.sh, sourced
+# above) into a temporary copy first, so artifact/script paths come out real.
+# The model config referenced inside keeps its own ${TERRA_*} placeholders,
+# which TERRA's Python config loader expands at run time.
+_TERRA_EXPANDED_CONFIG="$(mktemp --suffix=.yaml)"
+trap 'rm -f "$_TERRA_EXPANDED_CONFIG"' EXIT
+python3 - "$CONFIG_FILE" > "$_TERRA_EXPANDED_CONFIG" <<'PYEOF'
+import os, re, sys
+text = open(sys.argv[1]).read()
+sys.stdout.write(re.sub(r"\$\{(TERRA_[A-Z_]+)\}",
+                        lambda m: os.environ.get(m.group(1), m.group(0)), text))
+PYEOF
+
+eval $(python3 ${ADVANCED_BASH_SCRIPT_PATH}/parse_config.py "$_TERRA_EXPANDED_CONFIG")
 
 echo "QUEUE=$QUEUE"                 # Queue name
 echo "NUM_NODES=$NUM_NODES"         # Number of nodes
