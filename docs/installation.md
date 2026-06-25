@@ -1,46 +1,51 @@
 # Installation
 
-TERRA is published on PyPI as `terra-st` (the import name is `terra`).
+TERRA is published on PyPI as `terra-st` (the import name is `terra`). We
+recommend installing with [uv](https://docs.astral.sh/uv/):
 
 ```shell
-pip install terra-st
+uv pip install terra-st
 ```
+
+Plain `pip install terra-st` works too.
 
 For a development install from a clone of the [repository](https://github.com/Lotfollahi-lab/terra):
 
 ```shell
 git clone https://github.com/Lotfollahi-lab/terra.git
 cd terra
-pip install -e ".[dev,test,doc]"
+uv pip install -e ".[dev,test,doc]"
 ```
 
 ## PyTorch / GPU note
 
-TERRA depends on [PyTorch](https://pytorch.org). A plain `pip install terra-st`
-pulls the **default** PyTorch wheel from PyPI, which on Linux is a CUDA build —
-and that build must match your machine's NVIDIA driver. If the bundled CUDA is
-newer than your driver, CUDA fails to initialize at runtime with an error like:
+TERRA depends on [PyTorch](https://pytorch.org). Install the PyTorch build that
+matches your hardware **before** installing TERRA — see the
+[official PyTorch install guide](https://pytorch.org/get-started/locally/) for
+the exact command for your system.
 
-```text
-RuntimeError: The NVIDIA driver on your system is too old (found version 12040).
-```
+To pick the right build, check your hardware first:
 
-PyPI cannot host the CUDA-specific PyTorch wheels (they live on
-`download.pytorch.org`), so the CUDA build is an **install-time** choice. Install
-the PyTorch build for your hardware **first**, then install TERRA:
+- **NVIDIA GPU:** run `nvidia-smi` and read the "CUDA Version" shown in the
+  top-right, then install the matching CUDA build, e.g.:
+
+  ```shell
+  uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+  ```
+
+- **CPU only (no GPU):**
+
+  ```shell
+  uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+  ```
+
+Then install TERRA:
 
 ```shell
-# GPU — pick the CUDA version that matches your driver (see below):
-pip install torch --index-url https://download.pytorch.org/whl/cu124
-# ...or CPU only:
-pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-pip install terra-st
+uv pip install terra-st
 ```
 
-Find your driver's maximum supported CUDA version in the top-right of
-`nvidia-smi` ("CUDA Version"); the installed `torch.version.cuda` must be **≤**
-that value. Verify the install with:
+Verify the install with:
 
 ```shell
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
