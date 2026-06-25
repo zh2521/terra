@@ -19,25 +19,15 @@ uv pip install -e ".[dev,test,doc]"
 
 ## PyTorch / GPU note
 
-TERRA depends on [PyTorch](https://pytorch.org). Install the PyTorch build that
-matches your hardware **before** installing TERRA — see the
-[official PyTorch install guide](https://pytorch.org/get-started/locally/) for
-the exact command for your system.
+TERRA requires an NVIDIA GPU. Install the [PyTorch](https://pytorch.org) build
+that matches your GPU driver **before** installing TERRA: run `nvidia-smi` and
+read the "CUDA Version" shown in the top-right, then install the matching CUDA
+build (see the [official PyTorch install guide](https://pytorch.org/get-started/locally/)),
+e.g.:
 
-To pick the right build, check your hardware first:
-
-- **NVIDIA GPU:** run `nvidia-smi` and read the "CUDA Version" shown in the
-  top-right, then install the matching CUDA build, e.g.:
-
-  ```shell
-  uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-  ```
-
-- **CPU only (no GPU):**
-
-  ```shell
-  uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-  ```
+```shell
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+```
 
 Then install TERRA:
 
@@ -57,10 +47,10 @@ TERRA ships several optional dependency groups:
 
 | Extra | Install | Purpose |
 | --- | --- | --- |
-| `hub` | `pip install "terra-st[hub]"` | Publish/download model bundles on the Hugging Face Hub (`terra-hub`). |
-| `eval` | `pip install "terra-st[eval]"` | Evaluation utilities (CellPhoneDB, Omnipath). |
-| `doc` | `pip install "terra-st[doc]"` | Build the documentation. |
-| `test` | `pip install "terra-st[test]"` | Run the test suite. |
+| `hub` | `uv pip install "terra-st[hub]"` | Publish/download model bundles on the Hugging Face Hub (`terra-hub`). |
+| `eval` | `uv pip install "terra-st[eval]"` | Evaluation utilities (CellPhoneDB, Omnipath). |
+| `doc` | `uv pip install "terra-st[doc]"` | Build the documentation. |
+| `test` | `uv pip install "terra-st[test]"` | Run the test suite. |
 
 ## Reproducible environment
 

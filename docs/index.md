@@ -2,7 +2,7 @@
 
 **TERRA** is a JEPA-based foundation model for spatial transcriptomics, developed by the
 [Lotfollahi Lab](https://github.com/Lotfollahi-lab). It learns embeddings of cells in
-their spatial context by predicting masked cell and neighbourhood representations in
+their spatial context by predicting masked cell and neighborhood representations in
 latent space, and transfers to downstream tasks such as niche identification,
 batch-integrated atlasing, spatial gene-pair scoring, and in-silico perturbation.
 

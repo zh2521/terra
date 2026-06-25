@@ -10,13 +10,13 @@
 
 **TERRA** is a foundation model for spatial transcriptomics. It uses a
 Joint-Embedding Predictive Architecture (JEPA): cells are tokenized together with
-their spatial neighbours, parts of the input are masked, and the model learns by
-predicting the *latent* representations of the masked cell and neighbourhood
+their spatial neighbors, parts of the input are masked, and the model learns by
+predicting the *latent* representations of the masked cell and neighborhood
 tokens. The resulting embeddings capture both a cell's own expression and its
 tissue microenvironment.
 
-Pretrained on **HST-Corpus-112M** (>100M cells spanning human spatial-transcriptomics
-datasets), TERRA produces cell- and neighbourhood-level embeddings that transfer to
+Pretrained on **HST-Corpus-112M** (>100M cells at single-cell resolution spanning
+human spatial-transcriptomics datasets), TERRA produces cell- and neighborhood-level embeddings that transfer to
 downstream tasks such as niche and cell-type identification, batch-integrated
 atlasing, spatial gene-pair scoring, and in-silico perturbation — without
 task-specific retraining.
@@ -27,7 +27,7 @@ task-specific retraining.
 
 ## Key features
 
-- **Spatially-aware embeddings** — cell and neighbourhood representations learned in latent space via JEPA.
+- **Spatially-aware embeddings** — cell and neighborhood representations learned in latent space via JEPA.
 - **Pretrained and ready to use** — download a model from the Hugging Face Hub and embed your own `AnnData` in a few lines.
 - **Self-contained model bundles** — each release ships the checkpoint, tokenizer, and gene-reference files needed to reproduce its training-time harmonization.
 - **Downstream analyses** — niche/cell-type clustering, gene-pair spatial scoring, EMD-based spatial structure, and perturbation.
@@ -51,25 +51,15 @@ uv pip install -e ".[dev,test,doc]"
 
 ### PyTorch / GPU note
 
-TERRA depends on [PyTorch](https://pytorch.org). Install the PyTorch build that
-matches your hardware **before** installing TERRA — see the
-[official PyTorch install guide](https://pytorch.org/get-started/locally/) for
-the exact command for your system.
+TERRA requires an NVIDIA GPU. Install the [PyTorch](https://pytorch.org) build
+that matches your GPU driver **before** installing TERRA: run `nvidia-smi` and
+read the "CUDA Version" shown in the top-right, then install the matching CUDA
+build (see the [official PyTorch install guide](https://pytorch.org/get-started/locally/)),
+e.g.:
 
-To pick the right build, check your hardware first:
-
-- **NVIDIA GPU:** run `nvidia-smi` and read the "CUDA Version" shown in the
-  top-right, then install the matching CUDA build, e.g.:
-
-  ```shell
-  uv pip install torch --index-url https://download.pytorch.org/whl/cu124
-  ```
-
-- **CPU only (no GPU):**
-
-  ```shell
-  uv pip install torch --index-url https://download.pytorch.org/whl/cpu
-  ```
+```shell
+uv pip install torch --index-url https://download.pytorch.org/whl/cu124
+```
 
 Then install TERRA:
 
@@ -105,7 +95,7 @@ adata = harmonize_tokenize_embed_pipeline(
     cache_directory_path="./terra_cache",
 )
 
-# Cell- and neighbourhood-level embeddings are now in adata.obsm.
+# Cell- and neighborhood-level embeddings are now in adata.obsm.
 ```
 
 See the [documentation](https://terra.readthedocs.io) for the step-by-step

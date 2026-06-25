@@ -4,14 +4,15 @@
 
 TERRA is a foundation model for spatial transcriptomics based on a
 **Joint-Embedding Predictive Architecture (JEPA)**. Each cell is tokenized
-together with its spatial neighbours into a sequence of gene tokens; parts of the
+together with its spatial neighbors into a sequence of gene tokens; parts of the
 sequence are masked, and the model is trained to predict the *latent*
-representations of the masked cell and neighbourhood tokens rather than raw
-counts. This yields embeddings that summarise both a cell's own expression and
+representations of the masked cell and neighborhood tokens rather than raw
+counts. This yields embeddings that summarize both a cell's own expression and
 its surrounding tissue microenvironment.
 
 TERRA is pretrained on **HST-Corpus-112M**, a corpus of more than 100 million
-cells spanning human spatial-transcriptomics datasets. The pretrained embeddings
+cells at single-cell resolution spanning human spatial-transcriptomics datasets.
+The pretrained embeddings
 transfer to a range of downstream tasks without task-specific retraining.
 
 ## The inference pipeline
@@ -23,9 +24,9 @@ as a single convenience function and as individual steps:
 1. **Harmonize** — map gene names to Ensembl IDs and apply quality control so the
    input matches the gene vocabulary the model was trained on
    (`harmonize_adata`).
-2. **Tokenize** — build the per-cell neighbourhood token sequences against a
+2. **Tokenize** — build the per-cell neighborhood token sequences against a
    trained model's tokenizer (`tokenize_adata`).
-3. **Embed** — run the model to retrieve cell- and neighbourhood-level embeddings
+3. **Embed** — run the model to retrieve cell- and neighborhood-level embeddings
    (`embed_dataset`).
 
 The convenience wrapper `harmonize_tokenize_embed_pipeline` runs all three:
@@ -44,7 +45,7 @@ adata = harmonize_tokenize_embed_pipeline(
 )
 ```
 
-The resulting cell- and neighbourhood-level embeddings are stored in
+The resulting cell- and neighborhood-level embeddings are stored in
 `adata.obsm`. See the {doc}`tutorials` for the step-by-step version and downstream
 analyses, and the {doc}`api` for the full reference.
 
