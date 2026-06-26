@@ -1,44 +1,43 @@
 # Installation
 
-TERRA is published on PyPI as `terra-st` (the import name is `terra`). We
-recommend installing with [uv](https://docs.astral.sh/uv/):
+TERRA is published on PyPI as `terra-st` (the import name is `terra`) and
+**requires an NVIDIA GPU**. Install in two steps — PyTorch first, so it matches
+your GPU, then TERRA. We recommend [uv](https://docs.astral.sh/uv/).
 
-```shell
-uv pip install terra-st
-```
+## 1. Install PyTorch for your hardware
 
-Plain `pip install terra-st` works too.
-
-For a development install from a clone of the [repository](https://github.com/Lotfollahi-lab/terra):
-
-```shell
-git clone https://github.com/Lotfollahi-lab/terra.git
-cd terra
-uv pip install -e ".[dev,test,doc]"
-```
-
-## PyTorch / GPU note
-
-TERRA requires an NVIDIA GPU. Install the [PyTorch](https://pytorch.org) build
-that matches your GPU driver **before** installing TERRA: run `nvidia-smi` and
-read the "CUDA Version" shown in the top-right, then install the matching CUDA
-build (see the [official PyTorch install guide](https://pytorch.org/get-started/locally/)),
-e.g.:
+Install the [PyTorch](https://pytorch.org) build that matches your GPU driver
+**before** installing TERRA, so the correct CUDA wheel is used (otherwise a plain
+install pulls the default wheel, which may not match your driver). Run
+`nvidia-smi` and read the "CUDA Version" in the top-right, then install the
+matching CUDA build — see the
+[official PyTorch install guide](https://pytorch.org/get-started/locally/) — e.g.:
 
 ```shell
 uv pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
-Then install TERRA:
+## 2. Install TERRA
 
 ```shell
 uv pip install terra-st
 ```
 
-Verify the install with:
+Plain `pip install terra-st` works too. Verify the install:
 
 ```shell
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+```
+
+## Development install
+
+For a development install from a clone of the
+[repository](https://github.com/Lotfollahi-lab/terra) (after step 1 above):
+
+```shell
+git clone https://github.com/Lotfollahi-lab/terra.git
+cd terra
+uv pip install -e ".[dev,test,doc]"
 ```
 
 ## Optional extras

@@ -34,40 +34,28 @@ task-specific retraining.
 
 ## Installation
 
-TERRA is published on PyPI as `terra-st` (the import name is `terra`). We
-recommend installing with [uv](https://docs.astral.sh/uv/):
+TERRA is published on PyPI as `terra-st` (the import name is `terra`) and
+**requires an NVIDIA GPU**. Install PyTorch first (so it matches your GPU), then
+TERRA — we recommend [uv](https://docs.astral.sh/uv/).
 
-```shell
-uv pip install terra-st
-```
-
-Plain `pip install terra-st` works too.
-
-For a development install from a clone of this repository:
-
-```shell
-uv pip install -e ".[dev,test,doc]"
-```
-
-### PyTorch / GPU note
-
-TERRA requires an NVIDIA GPU. Install the [PyTorch](https://pytorch.org) build
-that matches your GPU driver **before** installing TERRA: run `nvidia-smi` and
-read the "CUDA Version" shown in the top-right, then install the matching CUDA
-build (see the [official PyTorch install guide](https://pytorch.org/get-started/locally/)),
-e.g.:
+**1. Install PyTorch for your hardware.** Run `nvidia-smi`, read the "CUDA
+Version" in the top-right, and install the matching CUDA build (see the
+[PyTorch install guide](https://pytorch.org/get-started/locally/)), e.g.:
 
 ```shell
 uv pip install torch --index-url https://download.pytorch.org/whl/cu124
 ```
 
-Then install TERRA:
+**2. Install TERRA.**
 
 ```shell
 uv pip install terra-st
 ```
 
-Verify the install with:
+Plain `pip install terra-st` works too. For a development install from a clone
+of this repository (after step 1): `uv pip install -e ".[dev,test,doc]"`.
+
+Verify the install:
 
 ```shell
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
