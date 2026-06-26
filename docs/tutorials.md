@@ -1,8 +1,7 @@
 # Tutorials
 
 End-to-end notebooks for applying a pretrained TERRA model to your own spatial
-data. They require an NVIDIA GPU and ship with outputs cleared — run them on a
-GPU to reproduce the figures.
+data. Running them requires an NVIDIA GPU.
 
 ::::{grid} 1 2 2 3
 :gutter: 2
