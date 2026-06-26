@@ -35,6 +35,7 @@ from terra.utils.embedding import (create_binary_selection_mask,
                                        compute_sum_and_nonzero_count,
                                        batch_rowwise_distances)
 from terra.utils.logging import CSVLogger
+from terra.inference.embed import gene_embed_dataset
 from typing import Dict, List
 
 

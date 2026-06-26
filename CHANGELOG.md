@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning][].
 -   `read_xenium_10x` now aligns cell centroids correctly for older Xenium
     panels with an integer `cell_id`, which previously produced all-NaN spatial
     coordinates.
+-   `get_spatial_score` and `get_emd_distance` no longer raise
+    `NameError: gene_embed_dataset` — the helper they depend on is now imported.
 
 ## [0.1.0] - 2026-06-26
 
