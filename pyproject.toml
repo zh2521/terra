@@ -24,7 +24,7 @@ maintainers = [
     {name = "Mohammad Vali Sanian", email = "mohammad.sanian@helsinki.fi"},
 
 ]
-urls.Documentation = "https://terra.readthedocs.io/"
+urls.Documentation = "https://terra-st.readthedocs.io/"
 urls.Source = "https://github.com/Lotfollahi-lab/terra"
 urls.Homepage = "https://github.com/Lotfollahi-lab/terra"
 urls.Changelog = "https://github.com/Lotfollahi-lab/terra/blob/main/CHANGELOG.md"

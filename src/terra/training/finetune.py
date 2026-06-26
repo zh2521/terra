@@ -71,7 +71,7 @@ def parse_arguments():
     Parse config file name from command-line arguments and return hyperparameters in a nested dictionary.
     """
     parser = argparse.ArgumentParser(
-        description='Run NicheJEPA finetuning.')
+        description='Run TERRA finetuning.')
     parser.add_argument(
         '--fname',
         type=str,

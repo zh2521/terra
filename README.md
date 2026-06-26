@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/terra-st/"><img src="https://img.shields.io/pypi/v/terra-st.svg" alt="PyPI"></a>
-  <a href="https://terra.readthedocs.io/"><img src="https://readthedocs.org/projects/terra/badge/?version=latest" alt="Documentation"></a>
+  <a href="https://terra-st.readthedocs.io/"><img src="https://readthedocs.org/projects/terra-st/badge/?version=latest" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-BSD%203--Clause-blue.svg" alt="License: BSD-3-Clause"></a>
 </p>
 
@@ -21,9 +21,9 @@ downstream tasks such as niche and cell-type identification, batch-integrated
 atlasing, spatial gene-pair scoring, and in-silico perturbation — without
 task-specific retraining.
 
-- 📖 **Documentation:** <https://terra.readthedocs.io>
+- 📖 **Documentation:** <https://terra-st.readthedocs.io>
 - 🤗 **Pretrained models:** <https://huggingface.co/Lotfollahi-lab> (`TERRA-96M`, `TERRA-112M`)
-- 📓 **Tutorial:** [end-to-end walkthrough](https://terra.readthedocs.io/en/latest/tutorials.html)
+- 📓 **Tutorial:** [end-to-end walkthrough](https://terra-st.readthedocs.io/en/latest/tutorials.html)
 
 ## Key features
 
@@ -98,9 +98,9 @@ adata = harmonize_tokenize_embed_pipeline(
 # Cell- and neighborhood-level embeddings are now in adata.obsm.
 ```
 
-See the [documentation](https://terra.readthedocs.io) for the step-by-step
+See the [documentation](https://terra-st.readthedocs.io) for the step-by-step
 pipeline, downstream analyses (niche identification, gene-pair scoring,
-perturbation), and the full [tutorial](https://terra.readthedocs.io/en/latest/tutorials.html).
+perturbation), and the full [tutorial](https://terra-st.readthedocs.io/en/latest/tutorials.html).
 
 ## Citation
 
