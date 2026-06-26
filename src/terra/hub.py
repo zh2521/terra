@@ -213,12 +213,18 @@ def download_pretrained(repo_id: str,
                         *,
                         revision: str | None = None,
                         cache_dir: str | None = None,
+                        local_dir: str | None = None,
                         token: str | None = None) -> str:
     """Download a published TERRA model bundle.
 
     Returns the local folder path to pass as ``model_folder_path`` to the
     inference pipeline. ``revision`` pins a git tag/branch/commit (e.g. the
     manuscript ``v1.0``); omit it for the latest ``main``.
+
+    By default the bundle is stored in the Hugging Face cache. Pass
+    ``local_dir`` to download the files directly into that folder (created if
+    needed, and returned as-is); pass ``cache_dir`` to use a custom Hugging
+    Face cache root instead.
     """
     hub = _require_hub()
     return hub.snapshot_download(
@@ -226,6 +232,7 @@ def download_pretrained(repo_id: str,
         repo_type="model",
         revision=revision,
         cache_dir=cache_dir,
+        local_dir=local_dir,
         token=token,
     )
 
