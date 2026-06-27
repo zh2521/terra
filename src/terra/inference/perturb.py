@@ -124,10 +124,17 @@ def _perturb_batch_with_df(
     n_segments: int = 11,
     pad_gene_tokens: bool = True,
     adjust_positions: bool = False,
+    track_flags: bool = False,
     ) -> dict:
     """
     Modify batch of token sequences in place based on config defined in
     perturbation dataframe.
+
+    ``track_flags`` adds a per-row ``pert_flag_idx_*`` column marking the
+    perturbed cells (needed only for ``return_only_perturbed_cells``). It is off
+    by default: adding columns changes the map output schema, which forces
+    ``datasets`` to re-encode every column -- including any large nested
+    ``cell_ids`` column -- and can stall.
 
     Parameters
     -----------
@@ -173,8 +180,9 @@ def _perturb_batch_with_df(
                     batch["gene_tokens"][:, col] = 0
             else:  # foldchange
                 batch["gene_expr"][:, col] *= row["foldchange"]
-            batch[f'pert_flag_idx_{idx}'] = torch.ones(
-                batch["gene_tokens"].size(0), dtype=torch.bool)
+            if track_flags:
+                batch[f'pert_flag_idx_{idx}'] = torch.ones(
+                    batch["gene_tokens"].size(0), dtype=torch.bool)
             continue
 
         token_id = row["perturbed_gene_token"]
@@ -186,11 +194,12 @@ def _perturb_batch_with_df(
         offset = 0 if cell_perturbation else seq_len_cell
         abs_gene_pert_idx = rel_gene_pert_idx + offset
 
-        # Perturb tokens and track perturbation flags
-        batch[f'pert_flag_idx_{idx}'] = torch.zeros(
-            batch["gene_tokens"].size(0),
-            dtype=torch.bool)
-        batch[f'pert_flag_idx_{idx}'][cell_pert_idx] = True
+        # Track which cells were perturbed (only for return_only_perturbed_cells);
+        # skipping it otherwise leaves the map output schema unchanged.
+        if track_flags:
+            flag = torch.zeros(batch["gene_tokens"].size(0), dtype=torch.bool)
+            flag[cell_pert_idx] = True
+            batch[f'pert_flag_idx_{idx}'] = flag
         if row["perturbation_type"] == "knockout":
             batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
             if pad_gene_tokens:
@@ -264,7 +273,8 @@ def perturb_dataset(dataset: Dataset,
             seq_len_cell=seq_len_cell,
             n_segments=n_segments,
             pad_gene_tokens=pad_gene_tokens,
-            adjust_positions=adjust_positions
+            adjust_positions=adjust_positions,
+            track_flags=return_only_perturbed_cells,
         )
     
     else:

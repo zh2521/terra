@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning][].
 
 -   `terra.__version__` exposes the installed package version.
 
+### Fixed
+
+-   `perturb_dataset` with `perturbed_cell_id="all"` no longer stalls on datasets
+    that carry a neighborhood `cell_ids` column. The internal `pert_flag_*`
+    columns are now added only when `return_only_perturbed_cells=True`, so the
+    common path keeps the map output schema unchanged and avoids re-encoding the
+    large nested column.
+
 ## [0.1.4] - 2026-06-27
 
 ### Fixed
