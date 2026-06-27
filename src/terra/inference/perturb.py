@@ -68,6 +68,10 @@ def _perturb_batch_with_idx(
         when batched=True.
     """
     B = len(batch["cell_ids"]) # batch size
+    # Mapped without the torch format; convert the edited columns to tensors so
+    # the in-place per-cell edits below work (no-op if already tensors).
+    batch["gene_tokens"] = torch.as_tensor(batch["gene_tokens"])
+    batch["gene_expr"] = torch.as_tensor(batch["gene_expr"])
     for b in range(B):
         cell_ids = list(dict.fromkeys(batch["cell_ids"][b]))
         # Fast reject: does this batch touch any perturbed cell at all?
@@ -140,6 +144,12 @@ def _perturb_batch_with_df(
     batch:
         Batch of perturbed token sequences, modified in place.
     """
+    # The dataset is mapped without its torch format (formatting the large
+    # nested token columns inside .map can stall), so convert the two columns we
+    # edit to tensors here -- datasets writes the modified tensors back out.
+    # ``as_tensor`` is a no-op if they are already tensors.
+    batch["gene_tokens"] = torch.as_tensor(batch["gene_tokens"])
+    batch["gene_expr"] = torch.as_tensor(batch["gene_expr"])
     for idx, row in df.iterrows():
         # Validate perturbation dataframe
         if row["perturbation_target"] not in ['cell', 'neighborhood']:
@@ -268,14 +278,24 @@ def perturb_dataset(dataset: Dataset,
             seq_len_cell=seq_len_cell,
         )
 
-    # Map in batch mode
-    dataset = dataset.map(
+    # Map over the *unformatted* dataset and restore the format afterwards.
+    # Applying the dataset's torch format to the large nested token columns
+    # inside .map can stall indefinitely; the perturbation fn reads raw data and
+    # converts the edited columns to tensors itself.
+    saved_format = dataset.format
+    dataset = dataset.with_format(None).map(
         perturb_fn,
         batched=True,
         batch_size=batch_size,
         num_proc=nproc,
         keep_in_memory=keep_in_memory,
         load_from_cache_file=False)
+    if saved_format.get("type") is not None:
+        dataset.set_format(
+            type=saved_format["type"],
+            columns=saved_format["columns"],
+            output_all_columns=saved_format["output_all_columns"],
+            **saved_format.get("format_kwargs", {}))
 
     # Optionally, return only perturbed cells. Read the per-row perturbation
     # flags and select the matching indices -- far cheaper than filter(), which

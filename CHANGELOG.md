@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning][].
 
 ## [0.1.3] - 2026-06-27
 
+### Fixed
+
+-   `perturb_dataset` no longer hangs on torch-formatted datasets. It now maps
+    over the unformatted dataset (formatting the large nested token columns
+    inside `map` could stall indefinitely) and restores the format afterwards.
+
 ### Changed
 
 -   `perturb_dataset(..., return_only_perturbed_cells=True)` now subsets the
