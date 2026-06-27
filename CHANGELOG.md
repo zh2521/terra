@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
+## [0.1.4] - 2026-06-27
+
+### Fixed
+
+-   Perturbing specific cells by ID now works on multi-sample data: the pipeline
+    forwards `add_neigh_cell_ids` through its multi-sample branch, and the
+    neighborhood `cell_ids` column is kept out of the torch format so it
+    survives tokenization.
+
 ## [0.1.3] - 2026-06-27
 
 ### Fixed
@@ -15,10 +24,6 @@ and this project adheres to [Semantic Versioning][].
 -   `perturb_dataset` no longer hangs on torch-formatted datasets. It now maps
     over the unformatted dataset (formatting the large nested token columns
     inside `map` could stall indefinitely) and restores the format afterwards.
--   Perturbing specific cells by ID now works on multi-sample data: the pipeline
-    forwards `add_neigh_cell_ids` through its multi-sample branch, and the
-    neighborhood `cell_ids` column is kept out of the torch format so it
-    survives tokenization.
 
 ### Changed
 
@@ -70,6 +75,7 @@ single-cell resolution).
 -   Finetuning of the pretrained encoder with LoRA/PEFT.
 -   Documentation, tutorials, and API reference.
 
+[0.1.4]: https://github.com/Lotfollahi-lab/terra/releases/tag/v0.1.4
 [0.1.3]: https://github.com/Lotfollahi-lab/terra/releases/tag/v0.1.3
 [0.1.2]: https://github.com/Lotfollahi-lab/terra/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Lotfollahi-lab/terra/releases/tag/v0.1.1
