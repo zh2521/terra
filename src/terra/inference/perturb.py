@@ -124,17 +124,16 @@ def _perturb_batch_with_df(
     n_segments: int = 11,
     pad_gene_tokens: bool = True,
     adjust_positions: bool = False,
-    track_flags: bool = False,
     ) -> dict:
     """
     Modify batch of token sequences in place based on config defined in
     perturbation dataframe.
 
-    ``track_flags`` adds a per-row ``pert_flag_idx_*`` column marking the
-    perturbed cells (needed only for ``return_only_perturbed_cells``). It is off
-    by default: adding columns changes the map output schema, which forces
-    ``datasets`` to re-encode every column -- including any large nested
-    ``cell_ids`` column -- and can stall.
+    Only the gene tokens/expression are edited; no extra columns are added, so
+    the map output keeps the input schema (adding columns would force
+    ``datasets`` to re-encode every column, including any large nested
+    ``cell_ids`` column, and can stall). ``return_only_perturbed_cells`` is
+    handled separately via ``_affected_cell_indices``.
 
     Parameters
     -----------
@@ -180,9 +179,6 @@ def _perturb_batch_with_df(
                     batch["gene_tokens"][:, col] = 0
             else:  # foldchange
                 batch["gene_expr"][:, col] *= row["foldchange"]
-            if track_flags:
-                batch[f'pert_flag_idx_{idx}'] = torch.ones(
-                    batch["gene_tokens"].size(0), dtype=torch.bool)
             continue
 
         token_id = row["perturbed_gene_token"]
@@ -194,12 +190,6 @@ def _perturb_batch_with_df(
         offset = 0 if cell_perturbation else seq_len_cell
         abs_gene_pert_idx = rel_gene_pert_idx + offset
 
-        # Track which cells were perturbed (only for return_only_perturbed_cells);
-        # skipping it otherwise leaves the map output schema unchanged.
-        if track_flags:
-            flag = torch.zeros(batch["gene_tokens"].size(0), dtype=torch.bool)
-            flag[cell_pert_idx] = True
-            batch[f'pert_flag_idx_{idx}'] = flag
         if row["perturbation_type"] == "knockout":
             batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
             if pad_gene_tokens:
@@ -234,6 +224,59 @@ def _perturb_batch_with_df(
         #else:
 
     return batch
+
+
+def _affected_cell_indices(dataset: Dataset,
+                           perturb_df: pd.DataFrame,
+                           seq_len_cell: int) -> np.ndarray:
+    """Row indices of cells whose tokens the perturbations actually edit.
+
+    Computed analytically from ``perturb_df`` (plus gene presence) instead of
+    emitting per-row flag columns during the map -- adding columns changes the
+    map output schema and forces ``datasets`` to re-encode every column,
+    including any large nested ``cell_ids`` column. ``dataset`` must be the
+    *unperturbed* dataset (knockout zeroes the gene tokens, so gene presence has
+    to be read before perturbing).
+
+    A cell is affected by a row when it is targeted by that row -- itself for a
+    ``cell`` target, or having a listed cell as a neighbor for a
+    ``neighborhood`` target (``"all"`` targets every cell) -- and, for a
+    specific gene, that gene token is present in the relevant segment (the
+    cell's own gene tokens for a ``cell`` target, the neighborhood tokens for a
+    ``neighborhood`` target).
+    """
+    n = len(dataset)
+    affected = np.zeros(n, dtype=bool)
+    gene_tokens = cell_id_col = neigh_lists = None  # read lazily, once
+    for _, row in perturb_df.iterrows():
+        cell_target = row["perturbation_target"] == "cell"
+        tok = row["perturbed_gene_token"]
+
+        if row["perturbed_cell_id"] == "all":
+            targeted = np.ones(n, dtype=bool)
+        elif cell_target:
+            if cell_id_col is None:
+                cell_id_col = np.asarray([str(c) for c in dataset["cell_id"]])
+            targeted = cell_id_col == str(row["perturbed_cell_id"])
+        else:
+            # neighborhood target on a specific cell: cells having it as neighbor
+            if neigh_lists is None:
+                neigh_lists = dataset["cell_ids"]
+            pid = str(row["perturbed_cell_id"])
+            targeted = np.fromiter(
+                (pid in {str(x) for x in ids[seq_len_cell:]} for ids in neigh_lists),
+                dtype=bool, count=n)
+
+        if tok != "all":
+            if gene_tokens is None:
+                gene_tokens = np.asarray(dataset["gene_tokens"])
+            seg = (gene_tokens[:, :seq_len_cell] if cell_target
+                   else gene_tokens[:, seq_len_cell:])
+            targeted = targeted & (seg == int(tok)).any(axis=1)
+
+        affected |= targeted
+    return np.nonzero(affected)[0]
+
 
 def perturb_dataset(dataset: Dataset,
                     perturb_df: pd.DataFrame,
@@ -274,7 +317,6 @@ def perturb_dataset(dataset: Dataset,
             n_segments=n_segments,
             pad_gene_tokens=pad_gene_tokens,
             adjust_positions=adjust_positions,
-            track_flags=return_only_perturbed_cells,
         )
     
     else:
@@ -287,6 +329,13 @@ def perturb_dataset(dataset: Dataset,
             index=perturb_index,
             seq_len_cell=seq_len_cell,
         )
+
+    # Compute which cells the perturbations actually edit *before* mapping, from
+    # the original dataset (knockout zeroes the gene tokens, so presence must be
+    # read pre-perturbation). Row order is preserved by map, so these indices
+    # stay valid for the perturbed dataset.
+    keep_idx = (_affected_cell_indices(dataset, perturb_df, seq_len_cell)
+                if return_only_perturbed_cells else None)
 
     # Map over the *unformatted* dataset and restore the format afterwards.
     # Applying the dataset's torch format to the large nested token columns
@@ -307,15 +356,8 @@ def perturb_dataset(dataset: Dataset,
             output_all_columns=saved_format["output_all_columns"],
             **saved_format.get("format_kwargs", {}))
 
-    # Optionally, return only perturbed cells. Read the per-row perturbation
-    # flags and select the matching indices -- far cheaper than filter(), which
-    # scans and rewrites every (large) token row to test one field.
+    # Optionally, return only the cells the perturbations actually edited.
     if return_only_perturbed_cells:
-        pert_cols = [
-            c for c in dataset.column_names if c.startswith("pert_flag_idx")]
-        flags = np.column_stack(
-            [np.asarray(dataset[c], dtype=bool) for c in pert_cols])
-        keep_idx = np.nonzero(flags.any(axis=1))[0]
         dataset = dataset.select(keep_idx)
 
     return dataset

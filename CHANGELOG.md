@@ -16,11 +16,11 @@ and this project adheres to [Semantic Versioning][].
 
 ### Fixed
 
--   `perturb_dataset` with `perturbed_cell_id="all"` no longer stalls on datasets
-    that carry a neighborhood `cell_ids` column. The internal `pert_flag_*`
-    columns are now added only when `return_only_perturbed_cells=True`, so the
-    common path keeps the map output schema unchanged and avoids re-encoding the
-    large nested column.
+-   `perturb_dataset` no longer stalls on datasets that carry a neighborhood
+    `cell_ids` column. The perturbation map no longer adds per-row flag columns
+    (changing the output schema forced `datasets` to re-encode every column,
+    including the large nested `cell_ids`); `return_only_perturbed_cells` now
+    selects the affected cells computed directly from the perturbation table.
 
 ## [0.1.4] - 2026-06-27
 
