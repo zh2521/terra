@@ -152,29 +152,35 @@ def _perturb_batch_with_df(
         # Get indices of tokens to be perturbed
         cell_perturbation = row["perturbation_target"] == 'cell'
         if row["perturbed_gene_token"] == "all":
-            if cell_perturbation:
-                idx = slice(0, seq_len_cell)
-            else: # neighborhood perturbation
-                idx = slice(seq_len_cell, None)
-        else:
-            token_id = row["perturbed_gene_token"]
-            token_slice = (
-                batch["gene_tokens"][:, :seq_len_cell] if cell_perturbation
-                else batch["gene_tokens"][:, seq_len_cell:])
-            cell_pert_idx, rel_gene_pert_idx = torch.nonzero(
-                token_slice == token_id, as_tuple=True)
-            offset = 0 if cell_perturbation else seq_len_cell
-            abs_gene_pert_idx = rel_gene_pert_idx + offset
+            # Perturb every gene position in the cell (or neighborhood) segment,
+            # for every cell in the batch. The advanced-indexing path below is
+            # only valid for a specific gene token, so apply "all" directly.
+            col = (slice(0, seq_len_cell) if cell_perturbation
+                   else slice(seq_len_cell, None))
+            if row["perturbation_type"] == "knockout":
+                batch["gene_expr"][:, col] = 0.0
+                if pad_gene_tokens:
+                    batch["gene_tokens"][:, col] = 0
+            else:  # foldchange
+                batch["gene_expr"][:, col] *= row["foldchange"]
+            batch[f'pert_flag_idx_{idx}'] = torch.ones(
+                batch["gene_tokens"].size(0), dtype=torch.bool)
+            continue
+
+        token_id = row["perturbed_gene_token"]
+        token_slice = (
+            batch["gene_tokens"][:, :seq_len_cell] if cell_perturbation
+            else batch["gene_tokens"][:, seq_len_cell:])
+        cell_pert_idx, rel_gene_pert_idx = torch.nonzero(
+            token_slice == token_id, as_tuple=True)
+        offset = 0 if cell_perturbation else seq_len_cell
+        abs_gene_pert_idx = rel_gene_pert_idx + offset
 
         # Perturb tokens and track perturbation flags
         batch[f'pert_flag_idx_{idx}'] = torch.zeros(
             batch["gene_tokens"].size(0),
-            #batch["gene_tokens"].size(1),
             dtype=torch.bool)
-        batch[f'pert_flag_idx_{idx}'][
-            cell_pert_idx,
-            #abs_gene_pert_idx
-            ] = True
+        batch[f'pert_flag_idx_{idx}'][cell_pert_idx] = True
         if row["perturbation_type"] == "knockout":
             batch["gene_expr"][cell_pert_idx, abs_gene_pert_idx] = 0.0
             if pad_gene_tokens:

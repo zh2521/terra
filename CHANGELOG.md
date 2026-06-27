@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning][].
     coordinates.
 -   `get_spatial_score` and `get_emd_distance` no longer raise
     `NameError: gene_embed_dataset` — the helper they depend on is now imported.
+-   `perturb_dataset` with `perturbed_cell_id="all"` now applies `"all"`-gene
+    knockout/fold-change perturbations correctly (the all-cells fast path
+    referenced an unbound variable for whole-panel perturbations).
 
 ## [0.1.0] - 2026-06-26
 
