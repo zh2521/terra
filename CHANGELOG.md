@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning][].
 
 -   `terra.__version__` exposes the installed package version.
 
+### Changed
+
+-   `perturb_dataset` matches a specific `perturbed_cell_id` on each cell's own
+    `cell_id`, so perturbing specific cells with a `cell` target no longer needs
+    `add_neigh_cell_ids`. Only `neighborhood`-target perturbations on specific
+    cells require it (to know each cell's neighbors).
+
 ### Fixed
 
 -   `perturb_dataset` no longer stalls on datasets that carry a neighborhood

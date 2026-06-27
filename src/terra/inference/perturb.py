@@ -61,60 +61,59 @@ def _perturb_batch_with_idx(
     """
     Modify the tensors in-place (cheap) and return the same dict.
 
+    Cells are matched by their own ``cell_id`` for ``cell``-target
+    perturbations. ``neighborhood``-target perturbations on specific cells also
+    need the neighbor IDs (the ``cell_ids`` column added by
+    ``add_neigh_cell_ids``); they are skipped if that column is absent.
+
     Parameters
     -----------
     batch:
         The dictionary mapping column -> list-of-values returned by huggingface
         when batched=True.
     """
-    B = len(batch["cell_ids"]) # batch size
     # Mapped without the torch format; convert the edited columns to tensors so
     # the in-place per-cell edits below work (no-op if already tensors).
     batch["gene_tokens"] = torch.as_tensor(batch["gene_tokens"])
     batch["gene_expr"] = torch.as_tensor(batch["gene_expr"])
+    own_ids = batch["cell_id"]            # each cell's own id (always present)
+    neigh_ids = batch.get("cell_ids")     # neighbor ids (add_neigh_cell_ids only)
+    B = len(own_ids)
+
+    def _apply(b, row, is_index_cell):
+        gene_tokens = batch["gene_tokens"][b]
+        gene_expr = batch["gene_expr"][b]
+        if row["perturbed_gene_token"] == "all":
+            idx = (slice(0, seq_len_cell) if is_index_cell
+                   else slice(seq_len_cell, None))
+        else:
+            token_slice = (gene_tokens[:seq_len_cell] if is_index_cell
+                           else gene_tokens[seq_len_cell:])
+            offset = 0 if is_index_cell else seq_len_cell
+            idx = torch.nonzero(
+                token_slice == row["perturbed_gene_token"],
+                as_tuple=True)[0] + offset
+        if row["perturbation_type"] == "knockout":
+            gene_expr[idx] = 0.0
+        elif row["perturbation_type"] == "foldchange":
+            gene_expr[idx] *= row["foldchange"]
+        else:
+            raise ValueError(f"Bad perturbation_type: {row['perturbation_type']}")
+
     for b in range(B):
-        cell_ids = list(dict.fromkeys(batch["cell_ids"][b]))
-        # Fast reject: does this batch touch any perturbed cell at all?
-        if not any(cid in index for cid in cell_ids):
-            continue
-
-        # Handle index-cell (first) and neighbourhood (rest) separately
-        for cid in cell_ids:
-            for row in index.get(cid, []):
-                is_index_cell = (cid == cell_ids[0])
-                if row["perturbation_target"] == "cell" and not is_index_cell:
+        own = own_ids[b]
+        # cell-target: edit cell b's own tokens when b is in the perturb list
+        for row in index.get(own, []):
+            if row["perturbation_target"] == "cell":
+                _apply(b, row, is_index_cell=True)
+        # neighborhood-target: edit cell b's neighborhood for any listed neighbor
+        if neigh_ids is not None:
+            for nid in dict.fromkeys(neigh_ids[b][seq_len_cell:]):
+                if nid == own:
                     continue
-                if row["perturbation_target"] == "neighborhood" and is_index_cell:
-                    continue
-
-                gene_tokens = batch["gene_tokens"][b]
-                gene_expr   = batch["gene_expr"][b]
-
-                # --- choose which token positions to perturb -------------
-                if row["perturbed_gene_token"] == "all":
-                    if is_index_cell:
-                        idx = slice(0, seq_len_cell)
-                    else:
-                        idx = slice(seq_len_cell, None)
-                else:
-                    token_id = row["perturbed_gene_token"]
-                    token_slice = (
-                        gene_tokens[:seq_len_cell]
-                        if is_index_cell else
-                        gene_tokens[seq_len_cell:]
-                    )
-                    rel_idx = torch.nonzero(token_slice == token_id, as_tuple=True)[0]
-                    offset  = 0 if is_index_cell else seq_len_cell
-                    idx     = rel_idx + offset
-                # ---------------------------------------------------------
-
-                if row["perturbation_type"] == "knockout":
-                    gene_expr[idx] = 0.0
-                elif row["perturbation_type"] == "foldchange":
-                    gene_expr[idx] *= row["foldchange"]
-                else:
-                    raise ValueError(f"Bad perturbation_type: {row['perturbation_type']}")
-
+                for row in index.get(nid, []):
+                    if row["perturbation_target"] == "neighborhood":
+                        _apply(b, row, is_index_cell=False)
     return batch
 
 def _perturb_batch_with_df(
@@ -320,6 +319,16 @@ def perturb_dataset(dataset: Dataset,
         )
     
     else:
+        # Perturbing specific cells: cell-target rows are matched on the cell's
+        # own `cell_id`; neighborhood-target rows need the neighbor IDs, which
+        # only exist when the dataset was tokenized with add_neigh_cell_ids=True.
+        if ((perturb_df["perturbation_target"] == "neighborhood").any()
+                and "cell_ids" not in dataset.column_names):
+            raise ValueError(
+                "Perturbing the neighborhood of specific cells requires the "
+                "dataset to be tokenized with add_neigh_cell_ids=True "
+                "(so neighbor IDs are stored).")
+
         # Build an index for fast cell lookup
         perturb_index = _build_perturb_index(perturb_df)
 
