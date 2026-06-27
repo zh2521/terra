@@ -25,7 +25,7 @@ Embed several sections/donors together and integrate them into a shared space.
 :link: notebooks/downstream_analysis
 :link-type: doc
 
-Gene-level embeddings, spatial gene-pair scoring, EMD spatial structure,
+Gene-level embeddings, spatial gene-pair scoring, spatial structure (Earth Mover's Distance),
 subsetting, and in-silico perturbation.
 :::
 
