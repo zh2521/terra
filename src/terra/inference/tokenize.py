@@ -150,6 +150,10 @@ def tokenize_adata(adata: ad.AnnData,
 
     columns = list(dataset.features.keys())
     columns.remove("cell_id")
+    if "cell_ids" in columns:
+        # Neighborhood cell-id strings (added when add_neigh_cell_ids=True) can't
+        # be torch-formatted; keep them as a plain (output_all_columns) column.
+        columns.remove("cell_ids")
     dataset.set_format(
         type="torch",
         columns=columns,

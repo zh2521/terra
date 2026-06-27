@@ -488,9 +488,10 @@ def harmonize_tokenize_embed_pipeline(
             dataset_sample = tokenize_adata(
                 adata=adata_sample,
                 model_folder_path=model_folder_path,
-                cache_directory_path=cache_directory_path,             
+                cache_directory_path=cache_directory_path,
                 nproc=nproc,
                 processing_mode=processing_mode,
+                add_neigh_cell_ids=add_neigh_cell_ids,
                 include_special_tokens=False)
             datasets.append(dataset_sample)
             logger.info(f"Tokenized sample {sample}.")

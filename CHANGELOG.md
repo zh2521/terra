@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning][].
 -   `perturb_dataset` no longer hangs on torch-formatted datasets. It now maps
     over the unformatted dataset (formatting the large nested token columns
     inside `map` could stall indefinitely) and restores the format afterwards.
+-   Perturbing specific cells by ID now works on multi-sample data: the pipeline
+    forwards `add_neigh_cell_ids` through its multi-sample branch, and the
+    neighborhood `cell_ids` column is kept out of the torch format so it
+    survives tokenization.
 
 ### Changed
 
