@@ -31,6 +31,11 @@ python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda
 python -c "import terra; print(terra.__version__)"
 ```
 
+The last value printed by the first command should be `True` — TERRA requires a
+GPU, so `torch.cuda.is_available()` must report one. If it prints `False`,
+PyTorch can't see your GPU (usually a CUDA build that doesn't match your driver
+— revisit step 1).
+
 ## Development install
 
 For a development install from a clone of the
