@@ -21,7 +21,7 @@ artifact:
   OUTPUT_DIR: "${TERRA_ARTIFACTS_DIR}/xhs49-1b_1p"  # Path to store the artifacts.
   LOG_DIR: "${TERRA_ARTIFACTS_DIR}/xhs49-1b_1p"
   EXPERIMENT_NAME: "terra_xhs49-1b_1p"  # Name of the experiment.
-  RUN_NAME: "run1_32bs"  # Name of the run.
+  RUN_NAME: "run2_32bs_09995ema"  # Name of the run.
 
 runner_script:
   RUNNER_SCRIPT: "${TERRA_REPO_DIR}/scripts/train_model_lsf_mpirun_sanger.sh"  # Path to the runner script.

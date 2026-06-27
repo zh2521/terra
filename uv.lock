@@ -4065,101 +4065,6 @@ wheels = [
 ]
 
 [[package]]
-name = "nichejepa"
-version = "0.0.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anndata", version = "0.11.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "anndata", version = "0.12.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "datasets" },
-    { name = "ipykernel" },
-    { name = "jupyterlab" },
-    { name = "leidenalg" },
-    { name = "peft" },
-    { name = "pyensembl" },
-    { name = "scib-metrics", version = "0.5.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "scib-metrics", version = "0.5.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "scikit-misc" },
-    { name = "session-info" },
-    { name = "squidpy", version = "1.6.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "squidpy", version = "1.8.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "wandb" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pre-commit" },
-    { name = "twine" },
-]
-doc = [
-    { name = "docutils", version = "0.21.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "ipykernel" },
-    { name = "ipython", version = "8.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "ipython", version = "9.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "ipython", version = "9.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "myst-nb" },
-    { name = "pandas" },
-    { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "sphinx-autodoc-typehints", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "sphinx-autodoc-typehints", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
-    { name = "sphinx-autodoc-typehints", version = "3.9.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "sphinx-book-theme", version = "1.1.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
-    { name = "sphinx-book-theme", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "sphinx-copybutton" },
-    { name = "sphinxcontrib-bibtex" },
-    { name = "sphinxext-opengraph" },
-]
-eval = [
-    { name = "cellphonedb" },
-    { name = "omnipath" },
-]
-test = [
-    { name = "coverage" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anndata" },
-    { name = "cellphonedb", marker = "extra == 'eval'" },
-    { name = "coverage", marker = "extra == 'test'" },
-    { name = "datasets" },
-    { name = "docutils", marker = "extra == 'doc'", specifier = ">=0.8,!=0.18.*,!=0.19.*" },
-    { name = "ipykernel" },
-    { name = "ipykernel", marker = "extra == 'doc'" },
-    { name = "ipython", marker = "extra == 'doc'" },
-    { name = "jupyterlab" },
-    { name = "leidenalg" },
-    { name = "myst-nb", marker = "extra == 'doc'" },
-    { name = "omnipath", marker = "extra == 'eval'" },
-    { name = "pandas", marker = "extra == 'doc'" },
-    { name = "peft" },
-    { name = "pre-commit", marker = "extra == 'dev'" },
-    { name = "pyensembl" },
-    { name = "pytest", marker = "extra == 'test'" },
-    { name = "scib-metrics" },
-    { name = "scikit-misc" },
-    { name = "session-info" },
-    { name = "sphinx", marker = "extra == 'doc'", specifier = ">=4" },
-    { name = "sphinx-autodoc-typehints", marker = "extra == 'doc'" },
-    { name = "sphinx-book-theme", marker = "extra == 'doc'", specifier = ">=1.0.0" },
-    { name = "sphinx-copybutton", marker = "extra == 'doc'" },
-    { name = "sphinxcontrib-bibtex", marker = "extra == 'doc'", specifier = ">=1.0.0" },
-    { name = "sphinxext-opengraph", marker = "extra == 'doc'" },
-    { name = "squidpy" },
-    { name = "torch" },
-    { name = "transformers" },
-    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0.2" },
-    { name = "wandb" },
-]
-provides-extras = ["dev", "doc", "test", "eval"]
-
-[[package]]
 name = "nodeenv"
 version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -7611,6 +7516,41 @@ wheels = [
 ]
 
 [[package]]
+name = "sphinx-design"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version > '3.10' and python_full_version < '3.11'",
+    "python_full_version <= '3.10'",
+]
+dependencies = [
+    { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2b/69/b34e0cb5336f09c6866d53b4a19d76c227cdec1bbc7ac4de63ca7d58c9c7/sphinx_design-0.6.1.tar.gz", hash = "sha256:b44eea3719386d04d765c1a8257caca2b3e6f8421d7b3a5e742c0fd45f84e632", size = 2193689, upload-time = "2024-08-02T13:48:44.277Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c6/43/65c0acbd8cc6f50195a3a1fc195c404988b15c67090e73c7a41a9f57d6bd/sphinx_design-0.6.1-py3-none-any.whl", hash = "sha256:b11f37db1a802a183d61b159d9a202314d4d2fe29c163437001324fe2f19549c", size = 2215338, upload-time = "2024-08-02T13:48:42.106Z" },
+]
+
+[[package]]
+name = "sphinx-design"
+version = "0.7.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.14'",
+    "python_full_version == '3.13.*'",
+    "python_full_version == '3.12.*'",
+    "python_full_version == '3.11.*'",
+]
+dependencies = [
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/13/7b/804f311da4663a4aecc6cf7abd83443f3d4ded970826d0c958edc77d4527/sphinx_design-0.7.0.tar.gz", hash = "sha256:d2a3f5b19c24b916adb52f97c5f00efab4009ca337812001109084a740ec9b7a", size = 2203582, upload-time = "2026-01-19T13:12:53.297Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/30/cf/45dd359f6ca0c3762ce0490f681da242f0530c49c81050c035c016bfdd3a/sphinx_design-0.7.0-py3-none-any.whl", hash = "sha256:f82bf179951d58f55dca78ab3706aeafa496b741a91b1911d371441127d64282", size = 2220350, upload-time = "2026-01-19T13:12:51.077Z" },
+]
+
+[[package]]
 name = "sphinxcontrib-applehelp"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -7958,6 +7898,114 @@ sdist = { url = "https://files.pythonhosted.org/packages/8a/11/965c6fd8e5cc254f1
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6a/9e/2064975477fdc887e47ad42157e214526dcad8f317a948dee17e1659a62f/terminado-0.18.1-py3-none-any.whl", hash = "sha256:a4468e1b37bb318f8a86514f65814e1afc977cf29b3992a4500d9dd305dcceb0", size = 14154, upload-time = "2024-03-12T14:34:36.569Z" },
 ]
+
+[[package]]
+name = "terra-st"
+version = "0.1.2"
+source = { editable = "." }
+dependencies = [
+    { name = "anndata", version = "0.11.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "anndata", version = "0.12.10", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "datasets" },
+    { name = "leidenalg" },
+    { name = "peft" },
+    { name = "pyensembl" },
+    { name = "pyyaml" },
+    { name = "scib-metrics", version = "0.5.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "scib-metrics", version = "0.5.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "scikit-misc" },
+    { name = "session-info" },
+    { name = "squidpy", version = "1.6.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "squidpy", version = "1.8.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pre-commit" },
+    { name = "twine" },
+]
+doc = [
+    { name = "docutils", version = "0.21.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "docutils", version = "0.22.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "ipykernel" },
+    { name = "ipython", version = "8.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "ipython", version = "9.10.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "ipython", version = "9.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "myst-nb" },
+    { name = "pandas" },
+    { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sphinx", version = "9.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "sphinx", version = "9.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "sphinx-autodoc-typehints", version = "3.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sphinx-autodoc-typehints", version = "3.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
+    { name = "sphinx-autodoc-typehints", version = "3.9.11", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "sphinx-book-theme", version = "1.1.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sphinx-book-theme", version = "1.2.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "sphinx-copybutton" },
+    { name = "sphinx-design", version = "0.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "sphinx-design", version = "0.7.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "sphinxcontrib-bibtex" },
+    { name = "sphinxext-opengraph" },
+]
+eval = [
+    { name = "cellphonedb" },
+    { name = "omnipath" },
+]
+hub = [
+    { name = "huggingface-hub" },
+]
+notebook = [
+    { name = "ipykernel" },
+    { name = "jupyterlab" },
+]
+test = [
+    { name = "coverage" },
+    { name = "pytest" },
+]
+train = [
+    { name = "wandb" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anndata", specifier = ">=0.10" },
+    { name = "cellphonedb", marker = "extra == 'eval'" },
+    { name = "coverage", marker = "extra == 'test'" },
+    { name = "datasets", specifier = ">=2.18" },
+    { name = "docutils", marker = "extra == 'doc'", specifier = ">=0.8,!=0.18.*,!=0.19.*" },
+    { name = "huggingface-hub", marker = "extra == 'hub'", specifier = ">=0.20" },
+    { name = "ipykernel", marker = "extra == 'doc'" },
+    { name = "ipykernel", marker = "extra == 'notebook'", specifier = ">=6" },
+    { name = "ipython", marker = "extra == 'doc'" },
+    { name = "jupyterlab", marker = "extra == 'notebook'", specifier = ">=4" },
+    { name = "leidenalg", specifier = ">=0.9" },
+    { name = "myst-nb", marker = "extra == 'doc'" },
+    { name = "omnipath", marker = "extra == 'eval'" },
+    { name = "pandas", marker = "extra == 'doc'" },
+    { name = "peft", specifier = ">=0.10" },
+    { name = "pre-commit", marker = "extra == 'dev'" },
+    { name = "pyensembl", specifier = ">=2.2" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "scib-metrics", specifier = ">=0.5" },
+    { name = "scikit-misc", specifier = ">=0.3" },
+    { name = "session-info", specifier = ">=1.0" },
+    { name = "sphinx", marker = "extra == 'doc'", specifier = ">=4" },
+    { name = "sphinx-autodoc-typehints", marker = "extra == 'doc'" },
+    { name = "sphinx-book-theme", marker = "extra == 'doc'", specifier = ">=1.0.0" },
+    { name = "sphinx-copybutton", marker = "extra == 'doc'" },
+    { name = "sphinx-design", marker = "extra == 'doc'" },
+    { name = "sphinxcontrib-bibtex", marker = "extra == 'doc'", specifier = ">=1.0.0" },
+    { name = "sphinxext-opengraph", marker = "extra == 'doc'" },
+    { name = "squidpy", specifier = ">=1.4" },
+    { name = "torch", specifier = ">=2.1" },
+    { name = "transformers", specifier = ">=4.44" },
+    { name = "twine", marker = "extra == 'dev'", specifier = ">=4.0.2" },
+    { name = "wandb", marker = "extra == 'train'", specifier = ">=0.16" },
+]
+provides-extras = ["dev", "doc", "test", "train", "notebook", "eval", "hub"]
 
 [[package]]
 name = "texttable"
