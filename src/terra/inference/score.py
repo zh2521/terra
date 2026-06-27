@@ -167,7 +167,9 @@ def get_emd_distance(
     Returns
     -------
     emd_array : np.ndarray
-        Numpy array of EMD distances.
+        Per-cell EMD distances, shape ``(n_cells,)``.
+    emd_matrix : np.ndarray
+        Per-cell gene-level distance matrix, shape ``(n_cells, n_genes)``.
     """
     # Check for duplicates
     if len(cell_gene_ensembl_id) != len(set(cell_gene_ensembl_id)):
