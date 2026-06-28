@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning][].
 
 -   `perturb_dataset` is substantially faster on larger datasets and no longer
     appears to hang. The perturbation map returns the edited gene columns as
-    numpy arrays, which `datasets` encodes far faster than torch tensors or
-    python lists.
+    numpy arrays and keeps the large, unmodified neighbor-ID (`cell_ids`) column
+    out of the re-encode, re-attaching the original column afterwards.
 
 ## [0.1.5] - 2026-06-28
 

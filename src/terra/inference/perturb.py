@@ -119,6 +119,9 @@ def _perturb_batch_with_idx(
     # pathologically slow (can appear to hang) for these wide token columns.
     batch["gene_tokens"] = batch["gene_tokens"].numpy()
     batch["gene_expr"] = batch["gene_expr"].numpy()
+    # Drop the large, unmodified neighbor-ID column from the output (perturb_dataset
+    # re-attaches the original); absent unless this batch needed it as input.
+    batch.pop("cell_ids", None)
     return batch
 
 def _perturb_batch_with_df(
@@ -232,6 +235,9 @@ def _perturb_batch_with_df(
     # pathologically slow (can appear to hang) for these wide token columns.
     batch["gene_tokens"] = batch["gene_tokens"].numpy()
     batch["gene_expr"] = batch["gene_expr"].numpy()
+    # Drop the large, unmodified neighbor-ID column from the output (perturb_dataset
+    # re-attaches the original); absent unless this batch needed it as input.
+    batch.pop("cell_ids", None)
     return batch
 
 
@@ -364,7 +370,8 @@ def perturb_dataset(dataset: Dataset,
 
     # If all perturbations are on all cells, skip indexing
     perturbed_cell_ids = perturb_df["perturbed_cell_id"].unique().tolist()
-    if len(perturbed_cell_ids) == 1 and perturbed_cell_ids[0] == "all":
+    all_cells = len(perturbed_cell_ids) == 1 and perturbed_cell_ids[0] == "all"
+    if all_cells:
 
         # Use partial so the dataset mapper sees only one argument as expected
         perturb_fn = partial(
@@ -404,18 +411,35 @@ def perturb_dataset(dataset: Dataset,
     keep_idx = (_affected_cell_indices(dataset, perturb_df, seq_len_cell)
                 if return_only_perturbed_cells else None)
 
+    # The neighbor-ID column (`cell_ids`) is large and never modified; re-encoding
+    # it through .map is what makes the map stall. Keep it out of the map and
+    # re-attach the original column afterwards (map preserves row order, so this
+    # is a zero-copy column concat). Only neighborhood-on-specific-cells needs it
+    # as *input*; otherwise drop it before mapping too so it isn't even decoded.
+    has_cell_ids = "cell_ids" in dataset.column_names
+    needs_cell_ids_input = (
+        not all_cells
+        and (perturb_df["perturbation_target"] == "neighborhood").any())
+    cell_ids_col = (dataset.select_columns(["cell_ids"]).with_format(None)
+                    if has_cell_ids else None)
+    map_input = (dataset if (needs_cell_ids_input or not has_cell_ids)
+                 else dataset.remove_columns("cell_ids"))
+
     # Map over the *unformatted* dataset and restore the format afterwards.
     # Applying the dataset's torch format to the large nested token columns
     # inside .map can stall indefinitely; the perturbation fn reads raw data and
-    # converts the edited columns to tensors itself.
+    # converts the edited columns to numpy itself.
     saved_format = dataset.format
-    dataset = dataset.with_format(None).map(
+    dataset = map_input.with_format(None).map(
         perturb_fn,
         batched=True,
         batch_size=batch_size,
         num_proc=nproc,
         keep_in_memory=keep_in_memory,
-        load_from_cache_file=False)
+        load_from_cache_file=False,
+        remove_columns=["cell_ids"] if needs_cell_ids_input else None)
+    if has_cell_ids:
+        dataset = concatenate_datasets([dataset, cell_ids_col], axis=1)
     if saved_format.get("type") is not None:
         dataset.set_format(
             type=saved_format["type"],
