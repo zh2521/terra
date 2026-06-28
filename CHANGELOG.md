@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning][].
 [keep a changelog]: https://keepachangelog.com/en/1.0.0/
 [semantic versioning]: https://semver.org/spec/v2.0.0.html
 
-## [0.1.5] - 2026-06-27
+## [0.1.5] - 2026-06-28
 
 ### Added
 
@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning][].
     (changing the output schema forced `datasets` to re-encode every column,
     including the large nested `cell_ids`); `return_only_perturbed_cells` now
     selects the affected cells computed directly from the perturbation table.
+-   `get_spatial_score` now honors its `compute_cosine_with_list` argument
+    (it was previously overwritten and ignored).
+
+### Documentation
+
+-   Expanded the tutorials (single- and multi-sample zero-shot quickstarts and a
+    downstream-analysis walkthrough covering gene programs, spatial gene-pair
+    scoring, EMD spatial structure, and in-silico perturbation) and user guide,
+    and fixed numerous API-reference rendering issues.
 
 ## [0.1.4] - 2026-06-27
 
