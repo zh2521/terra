@@ -55,7 +55,7 @@ def tokenize_adata(adata: ad.AnnData,
                    ) -> Dataset:
     """
     Harmonize and tokenize an AnnData object based on the parameters in the
-    model config and return the tokenized huggingface dataset and harmonized
+    model config and return the tokenized Hugging Face dataset and harmonized
     AnnData object.
 
     Parameters
@@ -82,7 +82,7 @@ def tokenize_adata(adata: ad.AnnData,
     Returns
     -----------
     dataset:
-        The tokenized data stored in a huggingface dataset.
+        The tokenized data stored in a Hugging Face dataset.
     """
     logger.info('STEP 1: LOADING CONFIG...')
     model_config_file_path = Path(model_folder_path) / 'model_config.yaml'

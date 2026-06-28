@@ -113,7 +113,7 @@ def train(args: dict,
     args:
         Dictionary containing the hyperparams from the config file.
     train_dataset:
-        Train split of the huggingface dataset.
+        Train split of the Hugging Face dataset.
     resume_preempt:
         If `True`, resume a preempted job.
     save_folder_path:

@@ -11,8 +11,16 @@ from sphinx.ext.napoleon import NumpyDocstring
 
 def _process_return(lines: Iterable[str]) -> Generator[str, None, None]:
     for line in lines:
-        if m := re.fullmatch(r"(?P<param>\w+)\s+:\s+(?P<type>[\w.]+)", line):
-            yield f'-{m["param"]} (:class:`~{m["type"]}`)'
+        if m := re.fullmatch(r"(?P<param>\w+)\s*:\s*(?P<type>.+)", line):
+            # Bold the name; render a simple dotted type as a cross-reference and
+            # anything else (dict[...], tuple[...], ...) as an inline literal.
+            type_ = m["type"].strip()
+            rendered = (f":class:`~{type_}`" if re.fullmatch(r"[\w.]+", type_)
+                        else f"``{type_}``")
+            yield f'-**{m["param"]}** ({rendered})'
+        elif re.fullmatch(r"\w+", line):
+            # A bare return name with no type.
+            yield f"-**{line}**"
         else:
             yield line
 

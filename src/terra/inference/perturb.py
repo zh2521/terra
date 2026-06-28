@@ -69,7 +69,7 @@ def _perturb_batch_with_idx(
     Parameters
     -----------
     batch:
-        The dictionary mapping column -> list-of-values returned by huggingface
+        The dictionary mapping column -> list-of-values returned by Hugging Face
         when batched=True.
     """
     # Mapped without the torch format; convert the edited columns to tensors so
@@ -138,7 +138,7 @@ def _perturb_batch_with_df(
     -----------
     batch:
         Batch of token sequences, a dictionary mapping field -> tensor of
-        tokens, returned by huggingface when batched is `True`.
+        tokens, returned by Hugging Face when batched is `True`.
     df:
         Dataframe containing the perturbation config.
     seq_len_cell:
@@ -290,7 +290,55 @@ def perturb_dataset(dataset: Dataset,
                     adjust_positions: bool = False,
                     ) -> Dataset:
     """
-    Perturb a huggingface dataset.
+    Perturb a tokenized Hugging Face dataset according to a perturbation dataframe.
+
+    The perturbations described in `perturb_df` (gene knockouts or fold changes,
+    applied to a cell's own gene tokens or to its neighborhood) are applied to
+    the gene tokens/expression of the dataset. Perturbations on all cells are
+    applied batch-wise; perturbations targeting specific cells are matched by
+    `cell_id` (and, for neighborhood targets, by the stored neighbor IDs).
+
+    Parameters
+    -----------
+    dataset:
+        Tokenized Hugging Face dataset to perturb. Perturbing the neighborhood of
+        specific cells requires the dataset to have been tokenized with
+        `add_neigh_cell_ids=True` (so neighbor IDs are stored).
+    perturb_df:
+        Dataframe describing the perturbations. Expected columns are
+        `perturbed_cell_id` (a cell ID or `"all"`), `perturbed_ensembl_id` (an
+        ensembl ID or `"all"`), `perturbation_target` (`"cell"` or
+        `"neighborhood"`) and `perturbation_type` (`"knockout"` or
+        `"foldchange"`), plus a `foldchange` value for fold-change rows.
+    model_folder_path:
+        Path to the folder containing the model config and token dictionary;
+        used to map ensembl IDs to token IDs.
+    seq_len_cell:
+        Number of cell gene tokens (excluding neighborhood gene tokens).
+    n_segments:
+        Number of segments (the index cell plus its neighbors); used when
+        re-packing positions after perturbation.
+    nproc:
+        Number of processes used to map the perturbation over the dataset.
+    batch_size:
+        Number of rows per batch passed to the mapping function.
+    keep_in_memory:
+        Whether to keep the perturbed dataset in memory during mapping.
+    return_only_perturbed_cells:
+        If `True`, return only the cells whose tokens the perturbations actually
+        edit (computed from the unperturbed dataset).
+    pad_gene_tokens:
+        If `True`, also zero out the gene tokens (not just the expression) of
+        knocked-out genes.
+    adjust_positions:
+        If `True`, re-pack each segment so padded (zeroed) gene positions are
+        moved to the end after perturbation.
+
+    Returns
+    -----------
+    dataset:
+        The perturbed Hugging Face `Dataset`, filtered to the affected cells if
+        `return_only_perturbed_cells` is `True`.
     """
     # Load token dictionary
     with open(Path(model_folder_path) / "token_dictionary.pkl", "rb") as f:

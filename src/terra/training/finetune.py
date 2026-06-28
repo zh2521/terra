@@ -336,15 +336,15 @@ def finetune(
     train_adata:
         AnnData with obs columns 'cell_id' and the integer label column.
     train_dataset:
-        Pre-tokenized HuggingFace Dataset for training.
+        Pre-tokenized Hugging Face Dataset for training.
     val_adata:
         AnnData for the validation split (optional).
     val_dataset:
-        Pre-tokenized HuggingFace Dataset for validation (optional).
+        Pre-tokenized Hugging Face Dataset for validation (optional).
     test_adata:
         AnnData for the held-out test split (optional).
     test_dataset:
-        Pre-tokenized HuggingFace Dataset for the test split (optional).
+        Pre-tokenized Hugging Face Dataset for the test split (optional).
     save_folder_path:
         Directory under which a timestamped run folder is created for
         checkpoints and params.yaml. If None, no artifacts are saved.

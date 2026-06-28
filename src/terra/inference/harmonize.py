@@ -62,7 +62,7 @@ def harmonize_adata(adata: ad.AnnData,
     min_genes_per_cell:
         Minimum amount of genes per cell for a cell not to be filtered.
 
-    Returns:
+    Returns
     -----------
     adata:
         A harmonized AnnData object.

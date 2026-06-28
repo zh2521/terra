@@ -67,10 +67,12 @@ def embed_dataset(dataset: Dataset,
                                     'softmax'] = 'avg',
                   ) -> dict:
     """
+    Embed a tokenized dataset, returning cell-, neighborhood- and gene-level embeddings.
+
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
@@ -93,7 +95,7 @@ def embed_dataset(dataset: Dataset,
         If `True`, also return per-token embeddings for each sequence position
         (cell and neighborhood tokens; special tokens are excluded).
 
-    Returns:
+    Returns
     -----------
     output_embed:
         Dictionary with the cell, cell gene, neighborhood, and neighborhood gene
@@ -409,9 +411,9 @@ def harmonize_tokenize_embed_pipeline(
     harmonized_adata_save_path:
         If specified, harmonized AnnData is written to disk at this path.
     save_dataset_path:
-        If specified, huggingface dataset is written to disk at this path.
+        If specified, Hugging Face dataset is written to disk at this path.
     num_shards:
-        Number of shards with which huggingface dataset is saved.
+        Number of shards with which Hugging Face dataset is saved.
     emb_layer:
         Layer for which to retrieve the embedding.
     agg_excluded_genes:
@@ -430,7 +432,7 @@ def harmonize_tokenize_embed_pipeline(
         Whether neighbor cell IDs should be stored in tokenized data (used for
         perturbations).    
 
-    Returns:
+    Returns
     -----------
     adata:
         A harmonized AnnData object with embeddings stored in `adata.obsm`.
@@ -590,10 +592,12 @@ def gene_embed_dataset(dataset: Dataset,
                        ) -> dict:
     
     """
+    Compute per-gene cell and neighborhood embeddings (and optional cosine-similarity / EMD statistics) over a tokenized dataset.
+
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
@@ -611,23 +615,24 @@ def gene_embed_dataset(dataset: Dataset,
     num_workers:
         Number of workers used.
     return_gene_per_data:
-        If 'True' will return gene_embedding for each gene per dataset.
+        If `True` will return gene_embedding for each gene per dataset.
     compute_cosine_with_list:
        A list that defines the items with which we want to compute cosine similarity.
-       it could have value of 'cell' or/and 'neighborhood'.
+       It could have value of `cell` or/and `neighborhood`.
     return_distance:
-        If 'True' will compute and return distance between cosine sim of cell_neb 
+        If `True` will compute and return distance between cosine sim of cell_neb
         and cell_cell matrix.
-    return_cosine_sim: 
-        If 'True' will compute and return cosine_sim matrix.
+    return_cosine_sim:
+        If `True` will compute and return cosine_sim matrix.
     return_receptor_average:
-        If 'True' will compute and return receptor average embeddings for cell-neighborhood gene pairs.
+        If `True` will compute and return receptor average embeddings for cell-neighborhood gene pairs.
     include_spatial_cell_emb:
         If `True`, also return gene embeddings for spatially contextualized cell embedding that
         attends to the neighborhood.
     description:
-        description for task that is currently using this function.
-    Returns:
+        Description for task that is currently using this function.
+
+    Returns
     -----------
     output_embed:
         Dictionary with the cell, cell gene, neighborhood, and neighborhood gene
@@ -1033,7 +1038,7 @@ def get_gene_embed(
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
@@ -1139,7 +1144,7 @@ def get_average_gene_embed(
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.

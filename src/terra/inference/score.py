@@ -66,7 +66,7 @@ def get_spatial_score(
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.
@@ -146,7 +146,7 @@ def get_emd_distance(
     Parameters
     -----------
     dataset:
-        Tokenized huggingface dataset.
+        Tokenized Hugging Face dataset.
     model_folder_path:
         Path to the folder containing the model config, token dictionary, and
         normalization factors.

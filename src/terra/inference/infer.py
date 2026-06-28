@@ -105,22 +105,22 @@ def infer(args: dict,
         List of tokens to be excluded from the aggregation.
     top_k:
         Include only top_k genes in aggregation.
-    return_gene: 
-        If 'True' will return gene_embedding.
-    return_cosine_sim: 
-        If 'True' will compute and return cosine_sim matrix.
+    return_gene:
+        If `True` will return gene_embedding.
+    return_cosine_sim:
+        If `True` will compute and return cosine_sim matrix.
     compute_cosine_with_list:
        A list that defines the items with which we want to compute cosine similarity.
-       it could have value of 'cell' or/and 'neighborhood'.
+       It could have value of `cell` or/and `neighborhood`.
     return_gene_per_data:
-        If 'True' will return gene_embedding for each gene per dataset.
+        If `True` will return gene_embedding for each gene per dataset.
     return_gene_marker_score:
-        If 'True' will compute and return gene marker scores.
+        If `True` will compute and return gene marker scores.
     return_distance:
-        If 'True' will compute and return distance between cosine sim of cell_neb 
+        If `True` will compute and return distance between cosine sim of cell_neb
         and cell_cell matrix.
     include_spatial_cell_emb:
-        If 'True' also return spatial cell embedding.
+        If `True` also return spatial cell embedding.
 
     Returns
     -----------
