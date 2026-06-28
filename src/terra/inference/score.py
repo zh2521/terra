@@ -104,7 +104,6 @@ def get_spatial_score(
 
     neighborhood_gene_ids = [token_dict[ensg] for ensg in neighborhood_gene_ensembl_id]
     cell_gene_ids         = [token_dict[ensg] for ensg in cell_gene_ensembl_id]
-    compute_cosine_with_list=["cell", "neighborhood"]
 
     cos_sim_dict = gene_embed_dataset(
         dataset=dataset,
