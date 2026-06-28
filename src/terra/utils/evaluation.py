@@ -329,16 +329,24 @@ def get_top_gene_score(
     Compute gene scores from a cosine similarity matrix and add gene names,
     filtering genes by a minimum count threshold.
 
-    Args:
-        gene_pair_score (np.ndarray): Square cosine similarity matrix (n_genes, n_genes).
-        cell_gene_ensembl_id (list or np.ndarray): List/array of gene Ensembl IDs of length n_genes.
-        gene_df (pd.DataFrame): DataFrame with columns ['gene_name', 'ensembl_id'].
-        gene_counts (np.ndarray): Square count matrix (n_genes, n_genes); diagonal contains gene-level counts.
-        min_count (int): Minimum count threshold to filter genes.
+    Parameters
+    ----------
+    gene_pair_score : np.ndarray
+        Square cosine similarity matrix (n_genes, n_genes).
+    cell_gene_ensembl_id : list or np.ndarray
+        List/array of gene Ensembl IDs of length n_genes.
+    gene_df : pd.DataFrame
+        DataFrame with columns ['gene_name', 'ensembl_id'].
+    gene_counts : np.ndarray
+        Square count matrix (n_genes, n_genes); diagonal contains gene-level counts.
+    min_count : int
+        Minimum count threshold to filter genes.
 
-    Returns:
-        pd.DataFrame: DataFrame with columns ['gene_ensembl', 'gene_name', 'gene_score']
-                      for genes with valid diagonal scores and counts >= min_count.
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ['gene_ensembl', 'gene_name', 'gene_score'] for
+        genes with valid diagonal scores and counts >= min_count.
     """
     # 1) Extract diagonals
     diag_scores = np.diag(gene_pair_score)   # similarity values

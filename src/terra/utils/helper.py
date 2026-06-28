@@ -56,7 +56,7 @@ def apply_peft(
     peft_task_type:
         The task type of the PEFT adapter. Default is 'FEATURE_EXTRACTION'.
 
-    Returns:
+    Returns
     -----------
     peft_target_encoder:
         The PEFT target encoder.

@@ -32,8 +32,10 @@ def get_distributed_info():
     """
     Retrieves distributed training environment variables and logs them.
 
-    Returns:
-        tuple: (WORLD_RANK, LOCAL_RANK, WORLD_SIZE)
+    Returns
+    -------
+    tuple
+        (WORLD_RANK, LOCAL_RANK, WORLD_SIZE)
     """
     if "SLURM_PROCID" in os.environ:
         WORLD_RANK = int(os.environ["SLURM_PROCID"])

@@ -474,8 +474,10 @@ def batch_rowwise_distances(
     ----------
         A: First matrix
         B: Second matrix
-    Returns:
-        Tuple of 2 arrays (mmd_distances, emd_distances) each of shape (B,)
+    Returns
+    -------
+    tuple
+        Tuple of 2 arrays (mmd_distances, emd_distances) each of shape ``(B,)``.
     """
     A = A.numpy()
     B = B.numpy()

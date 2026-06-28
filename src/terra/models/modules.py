@@ -365,13 +365,19 @@ class ClassificationModel(nn.Module):
         """
         Forward pass through the classification head.
 
-        Parameters:
-        - udata (dict): The input dictionary containing the batch data.
-        - masks_attention (Tensor): The attention masks.
-        - selection_mask (Tensor): The selection (cell or neighborhood) mask.
+        Parameters
+        ----------
+        udata : dict
+            The input dictionary containing the batch data.
+        masks_attention : Tensor
+            The attention masks.
+        selection_mask : Tensor
+            The selection (cell or neighborhood) mask.
 
-        Returns:
-        - Tensor: The class logits.
+        Returns
+        -------
+        Tensor
+            The class logits.
         """
         # h.shape = (<batch_size>, <seq_len>, <embedding_dim>)
         h, _= self.base_model(batch=udata, masks_attention=masks_attention)

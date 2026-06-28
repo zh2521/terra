@@ -90,7 +90,7 @@ def filter_dataset_by_cell_ids(
     temp_dir : str, optional
         Custom temporary directory path. If None, uses current working directory.
         
-    Returns:
+    Returns
     --------
     Dataset
         Filtered dataset containing only matching items.
