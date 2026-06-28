@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning][].
 -   `perturb_dataset` is substantially faster on larger datasets and no longer
     appears to hang. The perturbation map returns the edited gene columns as
     numpy arrays and keeps the large, unmodified neighbor-ID (`cell_ids`) column
-    out of the re-encode, re-attaching the original column afterwards.
+    out of the re-encode, re-attaching the original column afterwards. Mapping now
+    defaults to a single process (`nproc=1`); `nproc>1` used multiprocessing that
+    could deadlock once torch/CUDA had been initialized in the process.
 
 ## [0.1.5] - 2026-06-28
 

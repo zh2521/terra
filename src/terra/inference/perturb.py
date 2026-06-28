@@ -298,7 +298,7 @@ def perturb_dataset(dataset: Dataset,
                     model_folder_path: str,
                     seq_len_cell: int = 256,
                     n_segments: int = 11,
-                    nproc: int = 4,
+                    nproc: int = 1,
                     batch_size: int = 1000,
                     keep_in_memory: bool = False,
                     return_only_perturbed_cells: bool = False,
@@ -336,6 +336,10 @@ def perturb_dataset(dataset: Dataset,
         re-packing positions after perturbation.
     nproc:
         Number of processes used to map the perturbation over the dataset.
+        Defaults to 1 (single process). Values >1 use multiprocessing, which can
+        deadlock once torch/CUDA has been initialized in the process (the worker
+        fork inherits a broken CUDA state) and adds dataset-serialization
+        overhead; the perturbation itself is fast single-process.
     batch_size:
         Number of rows per batch passed to the mapping function.
     keep_in_memory:
