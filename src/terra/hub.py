@@ -157,7 +157,7 @@ def push_model_to_hub(model_folder: str | Path,
                       commit_message: str | None = None,
                       prune_stale: bool = True,
                       token: str | None = None) -> str:
-    """Create (if needed) a HF model repo and upload a TERRA model bundle.
+    """Create (if needed) a Hugging Face model repo and upload a TERRA model bundle.
 
     Only the standard bundle files present in ``model_folder`` are uploaded
     (training cruft like optimizer state / logs / intermediate epochs is
@@ -264,7 +264,7 @@ def main(argv: list[str] | None = None) -> None:
                     help="Keep stale Hub files instead of deleting bundle-type "
                          "files absent from the local folder (default: prune).")
     up.add_argument("--token", default=None,
-                    help="HF write token (else cached login / HF_TOKEN env).")
+                    help="Hugging Face write token (else cached login / HF_TOKEN env).")
 
     dl = sub.add_parser("download", help="Download a TERRA model bundle.")
     dl.add_argument("--repo-id", required=True)
