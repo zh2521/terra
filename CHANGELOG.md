@@ -12,9 +12,10 @@ and this project adheres to [Semantic Versioning][].
 
 ### Fixed
 
--   `perturb_dataset` no longer runs slowly on datasets that carry a neighborhood
-    `cell_ids` column. The perturbation map returns the edited columns as lists
-    rather than torch tensors, which `datasets` re-encodes far faster.
+-   `perturb_dataset` is substantially faster on larger datasets and no longer
+    appears to hang. The perturbation map returns the edited gene columns as
+    numpy arrays, which `datasets` encodes far faster than torch tensors or
+    python lists.
 
 ## [0.1.5] - 2026-06-28
 

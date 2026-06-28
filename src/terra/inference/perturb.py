@@ -114,10 +114,11 @@ def _perturb_batch_with_idx(
                 for row in index.get(nid, []):
                     if row["perturbation_target"] == "neighborhood":
                         _apply(b, row, is_index_cell=False)
-    # Return the edited columns as lists (their original representation). datasets
-    # re-encodes torch tensors very slowly; lists keep the fast path.
-    batch["gene_tokens"] = batch["gene_tokens"].tolist()
-    batch["gene_expr"] = batch["gene_expr"].tolist()
+    # Return the edited columns as numpy arrays. datasets re-encodes numpy via
+    # fast buffer copies; torch tensors are ~2x slower and python lists are
+    # pathologically slow (can appear to hang) for these wide token columns.
+    batch["gene_tokens"] = batch["gene_tokens"].numpy()
+    batch["gene_expr"] = batch["gene_expr"].numpy()
     return batch
 
 def _perturb_batch_with_df(
@@ -226,10 +227,11 @@ def _perturb_batch_with_df(
         #if len(cell_pert_idx) == 0:
         #else:
 
-    # Return the edited columns as lists (their original representation). datasets
-    # re-encodes torch tensors very slowly; lists keep the fast path.
-    batch["gene_tokens"] = batch["gene_tokens"].tolist()
-    batch["gene_expr"] = batch["gene_expr"].tolist()
+    # Return the edited columns as numpy arrays. datasets re-encodes numpy via
+    # fast buffer copies; torch tensors are ~2x slower and python lists are
+    # pathologically slow (can appear to hang) for these wide token columns.
+    batch["gene_tokens"] = batch["gene_tokens"].numpy()
+    batch["gene_expr"] = batch["gene_expr"].numpy()
     return batch
 
 
