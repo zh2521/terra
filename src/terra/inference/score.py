@@ -138,7 +138,7 @@ def get_emd_distance(
     batch_size: int = 128,
     pin_memory: bool = False,
     num_workers: int = 12,
-) -> np.ndarray:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute and return distance between cosine similarity of cell_neb and cell_cell matrix.
 

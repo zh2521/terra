@@ -1061,7 +1061,7 @@ def get_gene_embed(
 
     Returns
     -------
-    output_gene_embed : dict
+    output_gene_embed : dict[str, numpy.ndarray]
         Dictionary mapping embedding names to numpy arrays.
     """
     # Load token dictionary
@@ -1167,7 +1167,7 @@ def get_average_gene_embed(
 
     Returns
     -------
-    output_average_gene_embed : dict
+    output_average_gene_embed : dict[str, numpy.ndarray]
         Dictionary mapping average embedding/statistics names to numpy arrays.
     """
     # Load token dictionary

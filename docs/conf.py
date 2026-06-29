@@ -112,7 +112,7 @@ default_role = "literal"
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
-napoleon_use_rtype = True  # having a separate entry generally helps readability
+napoleon_use_rtype = False  # returns are rendered by the typed_returns extension
 napoleon_use_param = True
 myst_heading_anchors = 6  # create anchors for h1-h6
 myst_enable_extensions = [
@@ -128,6 +128,9 @@ nb_output_stderr = "remove"
 nb_execution_mode = "off"
 nb_merge_streams = True
 typehints_defaults = "braces"
+# The return type is shown in the Returns bullet (typed_returns extension);
+# don't also emit a separate "Return type:" from the annotation.
+typehints_document_rtype = False
 
 source_suffix = {
     ".rst": "restructuredtext",
@@ -191,6 +194,8 @@ nitpick_ignore = [
     ("py:class", "datasets.Dataset"),
     ("py:class", "datasets.arrow_dataset.Dataset"),
     ("py:class", "np.ndarray"),
+    ("py:class", "anndata.AnnData"),
+    ("py:class", "ad.AnnData"),
     ("py:class", "pandas.core.frame.DataFrame"),
     ("py:class", "pandas.DataFrame"),
     ("py:class", "terra.datasets.cell_datasets.CellBaseDataset"),
