@@ -74,8 +74,8 @@ def _perturb_batch_with_idx(
     """
     # Mapped without the torch format; convert the edited columns to tensors so
     # the in-place per-cell edits below work (no-op if already tensors).
-    batch["gene_tokens"] = torch.as_tensor(batch["gene_tokens"])
-    batch["gene_expr"] = torch.as_tensor(batch["gene_expr"])
+    batch["gene_tokens"] = torch.as_tensor(np.asarray(batch["gene_tokens"]))
+    batch["gene_expr"] = torch.as_tensor(np.asarray(batch["gene_expr"]))
     own_ids = batch["cell_id"]            # each cell's own id (always present)
     neigh_ids = batch.get("cell_ids")     # neighbor ids (add_neigh_cell_ids only)
     B = len(own_ids)
@@ -161,8 +161,8 @@ def _perturb_batch_with_df(
     # nested token columns inside .map can stall), so convert the two columns we
     # edit to tensors here -- datasets writes the modified tensors back out.
     # ``as_tensor`` is a no-op if they are already tensors.
-    batch["gene_tokens"] = torch.as_tensor(batch["gene_tokens"])
-    batch["gene_expr"] = torch.as_tensor(batch["gene_expr"])
+    batch["gene_tokens"] = torch.as_tensor(np.asarray(batch["gene_tokens"]))
+    batch["gene_expr"] = torch.as_tensor(np.asarray(batch["gene_expr"]))
     for idx, row in df.iterrows():
         # Validate perturbation dataframe
         if row["perturbation_target"] not in ['cell', 'neighborhood']:
