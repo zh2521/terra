@@ -57,11 +57,16 @@ uv pip install terra-st
 Plain `pip install terra-st` works too. For a development install from a clone
 of this repository (after step 1): `uv pip install -e ".[dev,test,doc]"`.
 
-Verify the install:
+Verify the install (PyTorch sees your GPU, and TERRA imports):
 
 ```shell
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available())"
+python -c "import terra; print(terra.__version__)"
 ```
+
+The last value from the first command should be `True` — TERRA requires a GPU.
+If it prints `False`, PyTorch can't see your GPU (usually a CUDA build that
+doesn't match your driver — revisit step 1).
 
 ## Quickstart
 

@@ -132,7 +132,7 @@ as `model_folder_path`:
 from terra import download_pretrained
 
 model_dir = download_pretrained("Lotfollahi-lab/TERRA-96M")          # latest
-model_dir = download_pretrained("Lotfollahi-lab/TERRA-96M", revision="v1.0")  # pinned
+model_dir = download_pretrained("Lotfollahi-lab/TERRA-96M", revision="v1.0")  # pin a tag/commit
 ```
 
 Because the gene-reference files are part of the bundle, harmonization at
