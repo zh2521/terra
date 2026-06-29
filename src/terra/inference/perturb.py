@@ -434,14 +434,22 @@ def perturb_dataset(dataset: Dataset,
     # inside .map can stall indefinitely; the perturbation fn reads raw data and
     # converts the edited columns to numpy itself.
     saved_format = dataset.format
-    dataset = map_input.with_format(None).map(
-        perturb_fn,
-        batched=True,
-        batch_size=batch_size,
-        num_proc=nproc,
-        keep_in_memory=keep_in_memory,
-        load_from_cache_file=False,
-        remove_columns=["cell_ids"] if needs_cell_ids_input else None)
+    # On many-core nodes torch over-subscribes CPU threads, and the batch-wide
+    # tensor ops in the perturbation fn (nonzero / elementwise) can stall. Cap
+    # intra-op threads to 1 for the duration of the map and restore afterwards.
+    n_threads = torch.get_num_threads()
+    torch.set_num_threads(1)
+    try:
+        dataset = map_input.with_format(None).map(
+            perturb_fn,
+            batched=True,
+            batch_size=batch_size,
+            num_proc=nproc,
+            keep_in_memory=keep_in_memory,
+            load_from_cache_file=False,
+            remove_columns=["cell_ids"] if needs_cell_ids_input else None)
+    finally:
+        torch.set_num_threads(n_threads)
     if has_cell_ids:
         dataset = concatenate_datasets([dataset, cell_ids_col], axis=1)
     if saved_format.get("type") is not None:

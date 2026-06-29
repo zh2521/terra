@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning][].
     numpy arrays and keeps the large, unmodified neighbor-ID (`cell_ids`) column
     out of the re-encode, re-attaching the original column afterwards. Mapping now
     defaults to a single process (`nproc=1`); `nproc>1` used multiprocessing that
-    could deadlock once torch/CUDA had been initialized in the process.
+    could deadlock once torch/CUDA had been initialized in the process. The map
+    also caps torch to one CPU thread for its duration, avoiding a
+    thread-oversubscription stall in the batch-wide tensor ops on many-core nodes.
 
 ## [0.1.5] - 2026-06-28
 
