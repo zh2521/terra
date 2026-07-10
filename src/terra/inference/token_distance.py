@@ -229,8 +229,23 @@ def infer_token_distance(
 
     Returns
     -----------
-    output_score:
-        Dictionary containing per-cell token-cloud distances and metadata.
+    output_score : dict
+        Dictionary with one entry per token-cloud distance plus run metadata:
+
+        - ``cell_score``: numpy array of shape ``(n_cells,)`` with the distance
+          between the original and perturbed cell-only embeddings restricted to
+          the cell's own tokens. ``NaN`` for cells whose original or perturbed
+          token set is empty.
+        - ``spatial_cell_score``: numpy array of shape ``(n_cells,)`` with the
+          distance between the original and perturbed full-context (spatially
+          contextualized) embeddings restricted to the cell's own tokens.
+        - ``neighborhood_score``: numpy array of shape ``(n_cells,)`` with the
+          distance between the original and perturbed full-context embeddings
+          over all valid (non-padding) tokens.
+        - ``meta``: dictionary recording the distance settings (``loss``,
+          ``p``, ``blur``, ``backend``, ``device``) and
+          ``empty_token_set_counts``, the per-score counts of cells skipped
+          because the original, perturbed, or either token set was empty.
     """
     if len(dataset_original) != len(dataset_perturbed):
         raise ValueError(
